@@ -12,7 +12,7 @@
 
 ### Changed
 
-- **Toolchain modernized** — Gradle 9.6.1, JDK 25 LTS toolchain (auto-provisioned via foojay resolver; emitted bytecode stays Java 17 so the jar keeps running on Java 17+ runtimes), `com.gradleup.shadow` 9.5.1, Kotlin 2.4.10; CI builds/tests/releases on JDK 25
+- **Toolchain modernized** — Gradle 9.6.1, `com.gradleup.shadow` 9.5.1, Kotlin 2.4.10; any JDK 17+ builds the project (Gradle 9's own floor — no pinned toolchain, no forced downloads), while `release=17` + `-Xjdk-release=17` keep the artifact's bytecode *and* API surface Java-17 compatible regardless of build JDK; CI builds/releases on Temurin 25 and runs tests on a JDK 17 + 25 matrix to keep the floor honest
 - **Dependencies updated** — lsp4j 0.24.0, MCP Kotlin SDK 0.14.0, JUnit 6.1.2, coroutines 1.11.0, Gson 2.14.0, SLF4J 2.0.18, Logback 1.5.38, ANTLR 4.13.2 (lsp4j 1.0.0 deliberately deferred: its LSP-3.18 `Either` type changes on `Diagnostic.message`/`TextDocumentEdit.edits` are breaking with no feature benefit here)
 - **Shadow jar 23% smaller (13 MB → 10 MB)** — stopped bundling kotlin-reflect (8.7 MB of classes) and jansi, which only ktor-server-core references; ktor itself was already excluded on the stdio-only path
 - `StringPool.clear()` re-seeds the pre-interned common strings, so MCP re-indexing keeps the hot-path fast lookups

@@ -48,15 +48,19 @@ dependencies {
     jmh(libs.jmh.generator.annprocess)
 }
 
-// Compile and test on a modern LTS JDK (auto-provisioned via foojay resolver in settings)…
-val toolchainJdkVersion = 25
-// …while emitting Java 17 bytecode so the distributed jar keeps running on any Java 17+ runtime
+// Build on whatever JDK launches Gradle — any Java 17+ works (Gradle 9's own floor;
+// no pinned toolchain, no forced downloads). The artifact is kept Java-17 compatible
+// regardless of the build JDK:
+//  - bytecode: jvmTarget/release below emit class-file 61
+//  - API surface: release (javac) and -Xjdk-release (kotlinc) compile against the
+//    Java 17 API, so code using newer JDK APIs fails the build instead of crashing
+//    on a real Java 17 runtime. CI additionally runs the tests on a JDK 17 leg.
 val targetJavaVersion = 17
 
 kotlin {
-    jvmToolchain(toolchainJdkVersion)
     compilerOptions {
         jvmTarget.set(JvmTarget.fromTarget(targetJavaVersion.toString()))
+        freeCompilerArgs.add("-Xjdk-release=$targetJavaVersion")
     }
 }
 
