@@ -193,4 +193,15 @@ tasks.shadowJar {
     // (class loading is lazy; KtorServerKt extension functions are never called).
     exclude("io/ktor/**")
     exclude("com/typesafe/**")  // Typesafe Config, pulled in by Ktor
+    exclude("META-INF/ktor-*.kotlin_module")
+
+    // Ktor-only transitive artifacts — nothing on the stdio path references them:
+    // kotlin-reflect (~8.7MB of classes, ktor-server-core's config machinery) and
+    // jansi (ktor's dev-mode terminal colors). kotlin.reflect base interfaces (KClass
+    // etc.) live in kotlin-stdlib and stay bundled; only the heavyweight
+    // kotlin-reflect implementation artifact is dropped.
+    dependencies {
+        exclude(dependency("org.jetbrains.kotlin:kotlin-reflect:.*"))
+        exclude(dependency("org.fusesource.jansi:jansi:.*"))
+    }
 }
