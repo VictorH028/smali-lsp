@@ -18,7 +18,7 @@ import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
  * 
  * Implementation:
  * - Uses instruction-level AST directly from WorkspaceIndex (NO regex parsing)
- * - Fast: O(1) lookup for indexed symbols, O(n) scan for usages
+ * - Fast: O(1) reverse-index lookups for declarations and usages
  * - Accurate: Uses parsed Range information
  * 
  * Scope:

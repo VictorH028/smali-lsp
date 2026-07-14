@@ -24,6 +24,10 @@ object StringPool {
     private const val MAX_SIZE = 500_000
 
     init {
+        seedCommonStrings()
+    }
+
+    private fun seedCommonStrings() {
         // Pre-intern strings that appear thousands of times across smali files.
         // Avoids hash lookups on the hottest paths during parsing.
         val common = listOf(
@@ -79,9 +83,11 @@ object StringPool {
     )
     
     /**
-     * Clear the pool (for testing).
+     * Clear the pool (tests, MCP re-index).
+     * Re-seeds the common strings so the hot-path pre-interning survives a clear.
      */
     fun clear() {
         pool.clear()
+        seedCommonStrings()
     }
 }
