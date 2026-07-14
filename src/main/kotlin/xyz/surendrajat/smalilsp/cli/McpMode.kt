@@ -74,6 +74,12 @@ class McpMode {
     private var typeHierarchyProvider: TypeHierarchyProvider? = null
 
     fun run() {
+        // kotlin-logging 8.x (transitive via the MCP SDK) prints
+        // "kotlin-logging: initializing..." to STDOUT on first logger use,
+        // which corrupts the MCP stdio protocol stream. Must be set before
+        // any SDK class initializes.
+        System.setProperty("kotlin-logging.logStartupMessage", "false")
+
         val server = Server(
             Implementation(name = "smali-lsp", version = versionInfo.version),
             ServerOptions(

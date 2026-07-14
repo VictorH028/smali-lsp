@@ -29,3 +29,4 @@ docs
 test-*
 *.code-workspace
 *.jar
+!gradle/wrapper/gradle-wrapper.jar

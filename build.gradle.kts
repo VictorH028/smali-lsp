@@ -1,15 +1,5 @@
 import java.time.Instant
-
-buildscript {
-    dependencies {
-        constraints {
-            classpath(libs.commons.io)
-            classpath(libs.plexus.utils)
-            classpath(libs.log4j.api)
-            classpath(libs.log4j.core)
-        }
-    }
-}
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -30,30 +20,48 @@ dependencies {
     // ANTLR for parsing
     antlr(libs.antlr.tool)
     implementation(libs.antlr.runtime)
-    
+
     // LSP4J for language server
     implementation(libs.lsp4j)
-    
+
     // Kotlin coroutines for concurrency
     implementation(libs.kotlinx.coroutines.core)
-    
+
     // JSON for CLI mode
     implementation(libs.gson)
 
     // MCP (Model Context Protocol) server
     implementation(libs.mcp.kotlin.sdk.server)
-    
+
     // Logging
     implementation(libs.slf4j.api)
     implementation(libs.logback.classic)
-    
+
     // Testing
     testImplementation(libs.junit.jupiter)
     testImplementation("org.jetbrains.kotlin:kotlin-test")
-    
+    // Gradle 9 no longer injects the JUnit platform launcher — must be declared explicitly
+    testRuntimeOnly(libs.junit.platform.launcher)
+
     // JMH Benchmarking
     jmh(libs.jmh.core)
     jmh(libs.jmh.generator.annprocess)
+}
+
+// Compile and test on a modern JDK (auto-provisioned via foojay resolver in settings)…
+val toolchainJdkVersion = 24
+// …while emitting Java 17 bytecode so the distributed jar keeps running on any Java 17+ runtime
+val targetJavaVersion = 17
+
+kotlin {
+    jvmToolchain(toolchainJdkVersion)
+    compilerOptions {
+        jvmTarget.set(JvmTarget.fromTarget(targetJavaVersion.toString()))
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(targetJavaVersion)
 }
 
 // Configure ANTLR
@@ -79,20 +87,20 @@ tasks.named("compileJmhKotlin") {
 
 tasks.test {
     useJUnitPlatform()
-    
+
     // Show test output
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = true
     }
-    
+
     // Each test worker needs enough heap for large APK tests (indexing 4K+ files)
     maxHeapSize = "1g"
-    
+
     // Limit parallelism: each worker holds a parsed APK in memory.
     // Too many forks OOM; too few wastes time. 4 is a safe default.
     maxParallelForks = minOf(4, Runtime.getRuntime().availableProcessors())
-    
+
     // Fail on first test failure
     failFast = true
 }
@@ -154,7 +162,7 @@ tasks.shadowJar {
     }
 
     // --- Exclude build-time-only ANTLR4 tool classes ---
-    // antlr("org.antlr:antlr4:4.13.1") leaks into runtimeClasspath via the ANTLR plugin.
+    // antlr(libs.antlr.tool) leaks into runtimeClasspath via the ANTLR plugin.
     // Only antlr4-runtime (org/antlr/v4/runtime/**) is needed at runtime.
     // The tool packages below are used only during grammar code generation at build time.
     exclude("org/antlr/v4/Tool*.class")  // top-level Tool class
@@ -185,8 +193,4 @@ tasks.shadowJar {
     // (class loading is lazy; KtorServerKt extension functions are never called).
     exclude("io/ktor/**")
     exclude("com/typesafe/**")  // Typesafe Config, pulled in by Ktor
-}
-
-kotlin {
-    jvmToolchain(17)
 }
