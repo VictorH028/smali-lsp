@@ -70,6 +70,11 @@ class SmaliWorkspaceService(
                         if (!file.exists() || !file.isFile) continue
                         val smaliFile = parser.parse(uri, file.readText(Charsets.UTF_8))
                         if (smaliFile != null) {
+                            // Evict whatever class this URI previously defined. indexFile()
+                            // only cleans up entries keyed by the NEW class name, so if the
+                            // file's class was renamed in place (apktool regeneration), the
+                            // old class would otherwise linger as a ghost definition.
+                            index.removeFile(uri)
                             index.indexFile(smaliFile)
                             logger.debug("Re-indexed from disk (${change.type}): $uri")
                         } else {
