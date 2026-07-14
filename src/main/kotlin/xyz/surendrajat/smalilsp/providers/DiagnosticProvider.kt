@@ -140,7 +140,7 @@ class DiagnosticProvider(
             method.instructions?.forEach { instruction ->
                 when (instruction) {
                     is xyz.surendrajat.smalilsp.core.InvokeInstruction -> {
-                        if (!index.hasClass(instruction.className) && !ClassUtils.isSDKClass(instruction.className)) {
+                        if (!isKnownClass(instruction.className)) {
                             diagnostics.add(
                                 createDiagnostic(
                                     range = instruction.range,
@@ -152,7 +152,7 @@ class DiagnosticProvider(
                         }
                     }
                     is xyz.surendrajat.smalilsp.core.FieldAccessInstruction -> {
-                        if (!index.hasClass(instruction.className) && !ClassUtils.isSDKClass(instruction.className)) {
+                        if (!isKnownClass(instruction.className)) {
                             diagnostics.add(
                                 createDiagnostic(
                                     range = instruction.range,
@@ -164,7 +164,7 @@ class DiagnosticProvider(
                         }
                     }
                     is xyz.surendrajat.smalilsp.core.TypeInstruction -> {
-                        if (!index.hasClass(instruction.className) && !ClassUtils.isSDKClass(instruction.className)) {
+                        if (!isKnownClass(instruction.className)) {
                             diagnostics.add(
                                 createDiagnostic(
                                     range = instruction.range,
@@ -220,6 +220,16 @@ class DiagnosticProvider(
     /**
      * Create a diagnostic with standard formatting.
      */
+    /**
+     * A class reference resolves if its base type (array brackets stripped) is defined
+     * in the workspace, or it is an SDK/primitive type. check-cast/instance-of/new-array
+     * operands like "[Lcom/app/Foo;" must be checked against the index key "Lcom/app/Foo;"
+     * (isSDKClass already strips brackets itself).
+     */
+    private fun isKnownClass(className: String): Boolean {
+        return ClassUtils.isSDKClass(className) || index.hasClass(className.trimStart('['))
+    }
+
     private fun createDiagnostic(
         range: Range,
         message: String,
