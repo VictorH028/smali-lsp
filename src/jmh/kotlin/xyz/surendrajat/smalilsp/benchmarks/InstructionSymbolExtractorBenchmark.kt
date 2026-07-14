@@ -6,18 +6,17 @@ import xyz.surendrajat.smalilsp.core.FieldAccessInstruction
 import xyz.surendrajat.smalilsp.core.TypeInstruction
 import xyz.surendrajat.smalilsp.core.range
 import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
-import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractorRegex
 import java.util.concurrent.TimeUnit
 
 /**
- * JMH Benchmarks to compare String operations vs Regex implementations
- * 
+ * JMH benchmarks for InstructionSymbolExtractor (position-aware symbol
+ * extraction on instruction lines — the hover/goto-definition hot path).
+ *
  * Run with: ./gradlew jmh
- * 
- * Results will show:
- * - Throughput (ops/sec) - higher is better
- * - Average time (ns/op) - lower is better
- * - Memory allocation - lower is better
+ *
+ * The historical regex-based implementation these benchmarks originally
+ * compared against was removed from main sources after losing; the
+ * stringOps_ prefix is kept so results stay comparable with old runs.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -137,55 +136,6 @@ open class InstructionSymbolExtractorBenchmark {
     @Benchmark
     fun stringOps_worstCase(): Any? {
         return InstructionSymbolExtractor.extractSymbol(
-            worstCaseInstruction,
-            worstCaseLine,
-            worstCaseCursorPos
-        )
-    }
-    
-    //
-    // REGEX BENCHMARKS
-    //
-    
-    @Benchmark
-    fun regex_simpleInvoke(): Any? {
-        return InstructionSymbolExtractorRegex.extractSymbol(
-            simpleInvokeInstruction,
-            simpleInvokeLine,
-            simpleInvokeCursorPos
-        )
-    }
-    
-    @Benchmark
-    fun regex_complexInvoke(): Any? {
-        return InstructionSymbolExtractorRegex.extractSymbol(
-            complexInvokeInstruction,
-            complexInvokeLine,
-            complexInvokeCursorPos
-        )
-    }
-    
-    @Benchmark
-    fun regex_fieldAccess(): Any? {
-        return InstructionSymbolExtractorRegex.extractSymbol(
-            fieldAccessInstruction,
-            fieldAccessLine,
-            fieldAccessCursorPos
-        )
-    }
-    
-    @Benchmark
-    fun regex_typeInstruction(): Any? {
-        return InstructionSymbolExtractorRegex.extractSymbol(
-            typeInstruction,
-            typeLine,
-            typeCursorPos
-        )
-    }
-    
-    @Benchmark
-    fun regex_worstCase(): Any? {
-        return InstructionSymbolExtractorRegex.extractSymbol(
             worstCaseInstruction,
             worstCaseLine,
             worstCaseCursorPos
