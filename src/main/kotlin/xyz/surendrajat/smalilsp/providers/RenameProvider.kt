@@ -166,6 +166,10 @@ class RenameProvider(
         return when (instruction) {
             is InvokeInstruction -> {
                 if (instruction.methodName == "<init>" || instruction.methodName == "<clinit>") return null
+                // Only workspace-defined classes can be renamed. For SDK or unindexed
+                // classes the declaration is unreachable, so renaming would rewrite
+                // every call site while the real method keeps its old name.
+                if (!index.hasClass(instruction.className)) return null
                 // Check if cursor is on the method name (after ->)
                 val arrowIdx = lineContent.indexOf("->")
                 if (arrowIdx < 0) return null
@@ -185,6 +189,8 @@ class RenameProvider(
             }
 
             is FieldAccessInstruction -> {
+                // Same guard as methods: never rewrite access sites of SDK/unindexed fields
+                if (!index.hasClass(instruction.className)) return null
                 val arrowIdx = lineContent.indexOf("->")
                 if (arrowIdx < 0) return null
                 val fieldNameIdx = lineContent.indexOf(instruction.fieldName, arrowIdx + 2)
