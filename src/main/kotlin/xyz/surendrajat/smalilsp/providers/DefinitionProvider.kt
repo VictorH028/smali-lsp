@@ -128,7 +128,7 @@ class DefinitionProvider(
     ): List<Location> {
         // Handle JumpInstruction (goto, if-*) - navigate to label definition
         if (instruction is JumpInstruction) {
-            return findLabelDefinition(instruction.targetLabel, uri)
+            return findLabelDefinition(instruction.targetLabel, uri, position)
         }
         
         val lineContent = workspaceIndex.getLineContent(uri, position.line)
@@ -168,17 +168,26 @@ class DefinitionProvider(
      * Find label definition within the same method.
      * Labels are local to the method they're defined in.
      */
-    private fun findLabelDefinition(labelName: String, uri: String): List<Location> {
+    private fun findLabelDefinition(labelName: String, uri: String, position: Position): List<Location> {
         val file = workspaceIndex.findFileByUri(uri) ?: return emptyList()
-        
-        // Search all methods for the label definition
+
+        // Labels are method-local and names repeat across methods (:cond_0 in nearly
+        // every method) — resolve within the method containing the jump instruction.
+        val containingMethod = file.methods.find { it.range.contains(position) }
+        if (containingMethod != null) {
+            val labelDef = containingMethod.labels[labelName] ?: return emptyList()
+            return listOf(Location(uri, labelDef.range))
+        }
+
+        // Fallback if position-based method resolution failed (stale ranges):
+        // first method defining the label — better than no navigation at all.
         for (method in file.methods) {
             val labelDef = method.labels[labelName]
             if (labelDef != null) {
                 return listOf(Location(uri, labelDef.range))
             }
         }
-        
+
         logger.debug("Label not found: $labelName in $uri")
         return emptyList()
     }

@@ -73,7 +73,7 @@ class HoverProvider(
             }
 
             node.first == NodeType.LABEL -> {
-                hoverForLabel(node.second as LabelDefinition, uri)
+                hoverForLabel(node.second as LabelDefinition, uri, position)
             }
 
             else -> null
@@ -115,18 +115,15 @@ class HoverProvider(
     /**
      * Hover on label definition (:cond_0, :goto_1, etc.)
      */
-    private fun hoverForLabel(labelDef: LabelDefinition, uri: String): Hover {
+    private fun hoverForLabel(labelDef: LabelDefinition, uri: String, position: Position): Hover {
         val file = workspaceIndex.findFileByUri(uri)
-        val referenceCount = if (file != null) {
-            // Count how many times this label is referenced
-            file.methods.sumOf { method ->
-                method.instructions.count { instruction ->
-                    instruction is JumpInstruction && instruction.targetLabel == labelDef.name
-                }
-            }
-        } else {
-            0
-        }
+        // Labels are method-local — count only jumps within the containing method,
+        // otherwise same-named labels in other methods (:cond_0 etc.) inflate the count.
+        val containingMethod = file?.methods?.find { it.range.contains(position) }
+            ?: file?.methods?.find { it.labels[labelDef.name]?.range == labelDef.range }
+        val referenceCount = containingMethod?.instructions?.count { instruction ->
+            instruction is JumpInstruction && instruction.targetLabel == labelDef.name
+        } ?: 0
         
         val md = buildString {
             append("**Label:** `:${labelDef.name}`\n\n")
@@ -314,12 +311,12 @@ class HoverProvider(
         // Handle JumpInstruction - show label hover info
         if (instruction is JumpInstruction) {
             val file = workspaceIndex.findFileByUri(uri)
-            // Find the label definition
-            for (method in file?.methods ?: emptyList()) {
-                val labelDef = method.labels[instruction.targetLabel]
-                if (labelDef != null) {
-                    return hoverForLabel(labelDef, uri)
-                }
+            // Jump targets are method-local — resolve the label in the method
+            // containing the cursor, not the first method with a same-named label
+            val containingMethod = file?.methods?.find { it.range.contains(position) }
+            val labelDef = containingMethod?.labels?.get(instruction.targetLabel)
+            if (labelDef != null) {
+                return hoverForLabel(labelDef, uri, position)
             }
             // Label not found in AST - show basic info
             return Hover(

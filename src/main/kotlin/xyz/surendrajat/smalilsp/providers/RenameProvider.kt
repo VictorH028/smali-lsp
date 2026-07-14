@@ -130,9 +130,12 @@ class RenameProvider(
 
             NodeType.LABEL -> {
                 val label = node.second as LabelDefinition
-                val containingMethod = file.methods.find { m ->
-                    m.labels.values.any { it.name == label.name }
-                } ?: return null
+                // Labels are method-local and names repeat across methods (baksmali emits
+                // :cond_0/:goto_0 in nearly every method) — resolve the method containing
+                // the CURSOR, never the first method that defines this label name.
+                val containingMethod = file.methods.find { it.range.contains(position) }
+                    ?: return null
+                if (!containingMethod.labels.containsKey(label.name)) return null
                 // Label range covers ":labelName" — for rename we want just "labelName" (no colon)
                 val nameRange = Range(
                     Position(label.range.start.line, label.range.start.character + 1),
@@ -197,11 +200,15 @@ class RenameProvider(
             }
 
             is JumpInstruction -> {
-                // Find the label reference range within this instruction line
+                // Find the label reference range within this instruction line.
+                // The label must resolve within the method containing the cursor —
+                // label names repeat across methods, so a name-based scan would
+                // rename the wrong method's label.
                 val labelName = instruction.targetLabel
-                val containingMethod = file.methods.find { m ->
-                    m.labels.containsKey(labelName)
-                } ?: return null
+                val containingMethod = file.methods
+                    .find { it.range.contains(position) }
+                    ?.takeIf { it.labels.containsKey(labelName) }
+                    ?: return null
                 // Use the labelRange which points to just the label reference
                 val colonIdx = lineContent.indexOf(":$labelName")
                 if (colonIdx < 0) return null
