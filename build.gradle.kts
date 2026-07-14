@@ -48,8 +48,8 @@ dependencies {
     jmh(libs.jmh.generator.annprocess)
 }
 
-// Compile and test on a modern JDK (auto-provisioned via foojay resolver in settings)…
-val toolchainJdkVersion = 24
+// Compile and test on a modern LTS JDK (auto-provisioned via foojay resolver in settings)…
+val toolchainJdkVersion = 25
 // …while emitting Java 17 bytecode so the distributed jar keeps running on any Java 17+ runtime
 val targetJavaVersion = 17
 
