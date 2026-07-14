@@ -85,6 +85,16 @@ tasks.named("compileJmhKotlin") {
     dependsOn(tasks.named("generateJmhGrammarSource"))
 }
 
+// me.champeau.jmh 0.7.3 predates shadow 9: it feeds the benchmark runtime
+// classpath to ShadowJar via from(), which shadow 9 copies as nested .jar
+// files instead of merging (shadow 8 unpacked them). The resulting jar had
+// no org.openjdk.jmh.Main. Merge the configuration properly and drop the
+// nested jar copies.
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("jmhJar") {
+    configurations.set(listOf(project.configurations.getByName("jmhRuntimeClasspath")))
+    exclude("*.jar")
+}
+
 tasks.test {
     useJUnitPlatform()
 
