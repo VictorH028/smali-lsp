@@ -5,7 +5,6 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.shadow)
     id("antlr")
-    id("jacoco")
     alias(libs.plugins.jmh)
 }
 
@@ -117,13 +116,6 @@ tasks.test {
 
     // Fail on first test failure
     failFast = true
-}
-
-tasks.jacocoTestReport {
-    reports {
-        xml.required.set(true)
-        html.required.set(true)
-    }
 }
 
 // Generate version metadata resource from project version + git commit
