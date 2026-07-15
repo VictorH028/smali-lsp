@@ -14,13 +14,16 @@
 
 - **Toolchain modernized** — Gradle 9.6.1, `com.gradleup.shadow` 9.5.1, Kotlin 2.4.10; any JDK 17+ builds the project (Gradle 9's own floor — no pinned toolchain, no forced downloads), while `release=17` + `-Xjdk-release=17` keep the artifact's bytecode *and* API surface Java-17 compatible regardless of build JDK; CI builds/releases on Temurin 25 and runs tests on a JDK 17 + 25 matrix to keep the floor honest
 - **Dependencies updated** — lsp4j 0.24.0, MCP Kotlin SDK 0.14.0, JUnit 6.1.2, coroutines 1.11.0, Gson 2.14.0, SLF4J 2.0.18, Logback 1.5.38, ANTLR 4.13.2 (lsp4j 1.0.0 deliberately deferred: its LSP-3.18 `Either` type changes on `Diagnostic.message`/`TextDocumentEdit.edits` are breaking with no feature benefit here)
-- **Shadow jar 23% smaller (13 MB → 10 MB)** — stopped bundling kotlin-reflect (8.7 MB of classes) and jansi, which only ktor-server-core references; ktor itself was already excluded on the stdio-only path
+- **Shadow jar 25% smaller (13 MB → 9.7 MB)** — jar contents are now governed at the dependency level: the ANTLR *tool* (build-time codegen, StringTemplate, ICU) and the MCP SDK's Ktor transports (with their kotlin-reflect and jansi baggage) are excluded from the runtime classpath itself instead of via fragile path lists — this also drops the excluded artifacts' metadata debris the old path excludes missed
 - `StringPool.clear()` re-seeds the pre-interned common strings, so MCP re-indexing keeps the hot-path fast lookups
 
 ### Internal
 
 - Regression tests for label scoping, SDK rename guard, workspace-class arrays, and watched-file class renames
 - Corrected stale docs (opcode DB coverage claim, ReferenceProvider complexity note); removed a dead `unused_` filter
+- Removed the unused jacoco plugin — its agent taxed every test run while no workflow or doc ever consumed a report
+- Enabled Gradle's configuration cache (warm no-op builds ~300 ms); repaired jmh benchmark compilation and jar packaging
+- CI test jobs no longer build the shadow jar first (tests never used it)
 
 ## [1.5.0] - 2026-04-21
 
