@@ -141,21 +141,27 @@ val gitCommitProvider = providers.exec {
 }.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
 
 tasks.register("generateVersionProperties") {
-    inputs.property("projectVersion", project.version.toString())
-    inputs.property("gitCommit", gitCommitProvider)
-    outputs.file(versionPropertiesFile)
+    // Task-local copies: the doLast closure must capture plain values/Providers,
+    // not `project` or top-level script properties (which drag the whole script
+    // object in and break the configuration cache).
+    val projectVersion = project.version.toString()
+    val commitProvider = gitCommitProvider
+    val outputFile = versionPropertiesFile
+    inputs.property("projectVersion", projectVersion)
+    inputs.property("gitCommit", commitProvider)
+    outputs.file(outputFile)
     doLast {
         val commitHash = try {
-            gitCommitProvider.get()
+            commitProvider.get()
         } catch (_: Exception) {
             "unknown"
         }
 
         val buildTime = Instant.now().toString()
-        val file = versionPropertiesFile.get().asFile
+        val file = outputFile.get().asFile
 
         file.parentFile.mkdirs()
-        file.writeText("""version=${project.version}
+        file.writeText("""version=$projectVersion
 commit=$commitHash
 buildTime=$buildTime
 """)
