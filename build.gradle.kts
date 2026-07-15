@@ -47,6 +47,20 @@ dependencies {
     jmh(libs.jmh.generator.annprocess)
 }
 
+// Keep build-time-only and never-loaded artifacts off the runtime classpath, so the
+// shadow jar stays lean without fragile path-based excludes:
+//  - org.antlr:antlr4 is the grammar *tool* (codegen, StringTemplate, ICU, ANTLR3);
+//    the antlr plugin leaks it onto the runtime classpath. Only antlr4-runtime —
+//    declared directly above — is needed at runtime.
+//  - io.ktor:* are the MCP SDK's HTTP/SSE transports (dragging in kotlin-reflect,
+//    jansi, and typesafe-config through ktor-server-core). This server is
+//    stdio-only; the ktor code paths are never loaded.
+// Tests keep the full classpath (this only touches runtimeClasspath).
+configurations.runtimeClasspath {
+    exclude(group = "org.antlr", module = "antlr4")
+    exclude(group = "io.ktor")
+}
+
 // Build on whatever JDK launches Gradle — any Java 17+ works (Gradle 9's own floor;
 // no pinned toolchain, no forced downloads). The artifact is kept Java-17 compatible
 // regardless of the build JDK:
@@ -158,6 +172,7 @@ tasks.jar {
     enabled = false
 }
 
+// Jar contents are governed by the runtimeClasspath excludes above — no path lists needed.
 tasks.shadowJar {
     archiveBaseName.set("smali-lsp")
     archiveClassifier.set("")
@@ -165,49 +180,5 @@ tasks.shadowJar {
 
     manifest {
         attributes["Main-Class"] = "xyz.surendrajat.smalilsp.MainKt"
-    }
-
-    // --- Exclude build-time-only ANTLR4 tool classes ---
-    // antlr(libs.antlr.tool) leaks into runtimeClasspath via the ANTLR plugin.
-    // Only antlr4-runtime (org/antlr/v4/runtime/**) is needed at runtime.
-    // The tool packages below are used only during grammar code generation at build time.
-    exclude("org/antlr/v4/Tool*.class")  // top-level Tool class
-    exclude("org/antlr/v4/tool/**")
-    exclude("org/antlr/v4/codegen/**")
-    exclude("org/antlr/v4/analysis/**")
-    exclude("org/antlr/v4/automata/**")
-    exclude("org/antlr/v4/gui/**")
-    exclude("org/antlr/v4/semantics/**")
-    exclude("org/antlr/v4/parse/**")
-    exclude("org/antlr/v4/misc/**")     // tool misc (runtime misc lives under org/antlr/v4/runtime/misc)
-
-    // ANTLR3 runtime — transitive dep of the full antlr4 tool, not used at runtime
-    exclude("org/antlr/runtime/**")
-
-    // StringTemplate 4 — only used by ANTLR4 code generation, not at runtime
-    exclude("org/stringtemplate/**")
-
-    // Tree layout — only for ANTLR4 GUI visualization
-    exclude("org/abego/**")
-
-    // ICU4J — only used by ANTLR4 tool for unicode property analysis during grammar compilation
-    exclude("com/ibm/**")
-
-    // --- Exclude Ktor HTTP/WebSocket transport ---
-    // The MCP Kotlin SDK includes Ktor for HTTP+SSE transport.
-    // We only use StdioServerTransport. Ktor classes are never loaded on the stdio path
-    // (class loading is lazy; KtorServerKt extension functions are never called).
-    exclude("io/ktor/**")
-    exclude("com/typesafe/**")  // Typesafe Config, pulled in by Ktor
-    exclude("META-INF/ktor-*.kotlin_module")
-
-    // Ktor-only transitive artifacts — nothing on the stdio path references them:
-    // kotlin-reflect (~8.7MB of classes, ktor-server-core's config machinery) and
-    // jansi (ktor's dev-mode terminal colors). kotlin.reflect base interfaces (KClass
-    // etc.) live in kotlin-stdlib and stay bundled; only the heavyweight
-    // kotlin-reflect implementation artifact is dropped.
-    dependencies {
-        exclude(dependency("org.jetbrains.kotlin:kotlin-reflect:.*"))
-        exclude(dependency("org.fusesource.jansi:jansi:.*"))
     }
 }
