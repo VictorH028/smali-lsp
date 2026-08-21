@@ -1,0 +1,38 @@
+name: Build smali-lsp JAR
+
+on:
+  push:
+    branches: [ "main" ]   # Se activa al hacer push a la rama main
+  pull_request:
+    branches: [ "main" ]   # También al abrir un Pull Request contra main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Clonar el repositorio
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. Configurar Java 17 (requisito del proyecto)
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    # 3. Dar permisos de ejecución al script de Gradle
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    # 4. Compilar el JAR usando la tarea shadowJar
+    - name: Build with Gradle
+      run: ./gradlew shadowJar
+
+    # 5. (Opcional) Subir el JAR como un artefacto del workflow
+    - name: Upload JAR as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: smali-lsp-jar
+        path: build/libs/smali-lsp-*.jar
