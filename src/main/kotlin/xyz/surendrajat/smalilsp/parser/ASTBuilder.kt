@@ -116,6 +116,7 @@ class ASTBuilder(
     private var pendingMethod: PendingMethod? = null
     private val currentInstructions = mutableListOf<Instruction>()
     private val currentLabels = mutableMapOf<String, LabelDefinition>()
+    private val currentDuplicateLabels = mutableListOf<LabelDefinition>()
     private val currentLabelRefs = mutableListOf<LabelRef>()
 
     /** > 0 while inside a directive whose class name tokens are recorded as [TypeRef]s. */
@@ -180,6 +181,7 @@ class ASTBuilder(
         pendingMethod = null
         currentInstructions.clear()
         currentLabels.clear()
+        currentDuplicateLabels.clear()
         currentLabelRefs.clear()
 
         val signature = ctx.methodSignature() ?: return
@@ -227,12 +229,14 @@ class ASTBuilder(
                 labels = currentLabels.toMap(),
                 nameSpan = m.nameSpan ?: Span(range.start.line, range.start.character, range.start.character),
                 descriptorSpan = m.descriptorSpan ?: Span(range.start.line, range.start.character, range.start.character),
-                labelRefs = currentLabelRefs.toList()
+                labelRefs = currentLabelRefs.toList(),
+                duplicateLabels = currentDuplicateLabels.toList()
             ))
         }
         pendingMethod = null
         currentInstructions.clear()
         currentLabels.clear()
+        currentDuplicateLabels.clear()
         currentLabelRefs.clear()
     }
 
@@ -661,7 +665,8 @@ class ASTBuilder(
         val labelCtx = ctx.label() ?: return
         val labelName = strings.intern(labelCtx.identifier()?.src() ?: return)
 
-        currentLabels[labelName] = LabelDefinition(labelName, ctx.startLine, ctx.startChar, ctx.endChar)
+        val definition = LabelDefinition(labelName, ctx.startLine, ctx.startChar, ctx.endChar)
+        if (currentLabels.putIfAbsent(labelName, definition) != null) currentDuplicateLabels.add(definition)
     }
 
     override fun exitGotoInstruction(ctx: GeneratedSmaliParser.GotoInstructionContext) {

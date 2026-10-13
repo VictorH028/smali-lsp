@@ -361,4 +361,54 @@ class DiagnosticProviderTest {
         """.trimIndent()
         assertEquals(emptyList(), diagnosticsOf(source))
     }
+
+    @Test
+    fun `a jump to an undefined label and a label defined twice are errors, reported before indexing too`() {
+        val source = """
+            .class public Lcom/example/Labels;
+            .super Ljava/lang/Object;
+            .method public run(I)V
+                .registers 2
+                if-eqz p1, :nowhere
+                :cond_0
+                goto :cond_0
+                :cond_0
+                return-void
+            .end method
+        """.trimIndent()
+        val diagnostics = provider.computeDiagnostics("file:///Labels.smali", source)
+        assertEquals(listOf("undefined-label", "duplicate-label"), diagnostics.map { it.code.left })
+        assertEquals(source.positionOf("if-eqz", ":nowhere"), diagnostics[0].range.start)
+        assertEquals("Label ':nowhere' is not defined in this method", diagnostics[0].text)
+        assertEquals(7, diagnostics[1].range.start.line, "the second definition is the duplicate")
+        assertEquals(diagnostics, provider.computeSyntaxDiagnosticsFromParseResult(parser.parseWithErrors("file:///Labels.smali", source)), "file-local checks need no index")
+    }
+
+    @Test
+    fun `labels used by catch blocks, switch tables and array data are defined labels`() {
+        val source = """
+            .class public Lcom/example/Tables;
+            .super Ljava/lang/Object;
+            .method public run(I)V
+                .registers 2
+                :try_start_0
+                packed-switch p1, :pswitch_data_0
+                fill-array-data p1, :array_0
+                :try_end_0
+                .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
+                :catch_0
+                :pswitch_0
+                return-void
+                :pswitch_data_0
+                .packed-switch 0x0
+                    :pswitch_0
+                .end packed-switch
+                :array_0
+                .array-data 4
+                    0x1
+                .end array-data
+            .end method
+        """.trimIndent()
+        assertEquals(emptyList<String>(), provider.computeDiagnostics("file:///Tables.smali", source).map { it.text })
+    }
 }

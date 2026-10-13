@@ -55,7 +55,9 @@ data class MethodDefinition(
     /** The `(params)return` part of the `.method` line. */
     val descriptorSpan: Span = Span(range.start.line, range.start.character, range.start.character),
     /** Every label reference in the body: jumps, `.catch` blocks, switch tables, `fill-array-data`. */
-    val labelRefs: List<LabelRef> = emptyList()
+    val labelRefs: List<LabelRef> = emptyList(),
+    /** Definitions of a label name that was already defined in the method; [labels] keeps the first. */
+    val duplicateLabels: List<LabelDefinition> = emptyList()
 ) {
     /** `<init>` or `<clinit>`: bound to its own class, never inherited or overridden. */
     val isConstructor: Boolean get() = name == "<init>" || name == "<clinit>"

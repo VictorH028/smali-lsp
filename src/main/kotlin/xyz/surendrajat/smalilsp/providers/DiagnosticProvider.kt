@@ -35,17 +35,33 @@ class DiagnosticProvider(
         val diagnostics = mutableListOf<Diagnostic>()
         diagnostics.addAll(convertSyntaxErrors(parseResult.syntaxErrors))
         parseResult.smaliFile?.let { file ->
+            diagnostics.addAll(localDiagnostics(file))
             diagnostics.addAll(computeSemanticDiagnostics(uri, file))
         }
         return diagnostics
     }
 
     /**
-     * Compute only syntax diagnostics from a parse result.
-     * Used during indexing when semantic checks would produce false positives.
+     * Syntax errors and the file-local checks only: what can be reported while the workspace is
+     * still being indexed, when a check against the index would flag classes not yet seen.
      */
-    fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult): List<Diagnostic> {
-        return convertSyntaxErrors(parseResult.syntaxErrors)
+    fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult): List<Diagnostic> =
+        convertSyntaxErrors(parseResult.syntaxErrors) + (parseResult.smaliFile?.let(::localDiagnostics) ?: emptyList())
+
+    /** Checks that need nothing but the file: a jump to a label the method does not define, a label defined twice. */
+    fun localDiagnostics(file: SmaliFile): List<Diagnostic> {
+        val diagnostics = mutableListOf<Diagnostic>()
+        for (method in file.methods) {
+            for (ref in method.labelRefs) {
+                if (ref.name !in method.labels) {
+                    diagnostics.add(createDiagnostic(ref.span.toRange(), "Label ':${ref.name}' is not defined in this method", DiagnosticSeverity.Error, "undefined-label"))
+                }
+            }
+            for (label in method.duplicateLabels) {
+                diagnostics.add(createDiagnostic(label.range, "Label ':${label.name}' is defined more than once in this method", DiagnosticSeverity.Error, "duplicate-label"))
+            }
+        }
+        return diagnostics
     }
 
     private fun convertSyntaxErrors(errors: List<SmaliParser.SyntaxError>): List<Diagnostic> {

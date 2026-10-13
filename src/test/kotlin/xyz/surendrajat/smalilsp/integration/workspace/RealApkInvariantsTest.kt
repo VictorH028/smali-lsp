@@ -414,6 +414,9 @@ class RealApkInvariantsTest {
         }
         assertTrue(checked > 50)
         assertEquals(emptyList<String>(), bad.take(10), "${fx.dir.name}: ${bad.size} false diagnostics over $checked files")
+        // baksmali output defines every label it jumps to, exactly once: the file-local checks must be silent on every file
+        val labelProblems = files.flatMap { file -> diag.localDiagnostics(file).map { "${file.classDefinition.name}: ${it.text}" } }
+        assertEquals(emptyList<String>(), labelProblems.take(10), "${fx.dir.name}: ${labelProblems.size} label diagnostics on valid files")
     }
 
     // ---------- 12. idempotent re-index ----------
