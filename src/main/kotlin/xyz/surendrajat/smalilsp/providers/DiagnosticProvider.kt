@@ -131,7 +131,7 @@ class DiagnosticProvider(
         
         // Check method invocations
         file.methods.forEach { method ->
-            method.instructions?.forEach { instruction ->
+            method.instructions.forEach { instruction ->
                 when (instruction) {
                     is xyz.surendrajat.smalilsp.core.InvokeInstruction -> {
                         if (!isKnownClass(instruction.className)) {

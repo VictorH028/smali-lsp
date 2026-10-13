@@ -98,7 +98,6 @@ class SmaliWorkspaceService(
                     logger.warn("Failed to parse watched file: $uri")
                 }
             }
-            else -> {}
         }
     }
     

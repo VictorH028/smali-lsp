@@ -42,7 +42,7 @@ class WorkspaceIndexTest {
         
         val found = index.findClass("Lcom/example/Test;")
         assertNotNull(found)
-        assertEquals("Lcom/example/Test;", found.classDefinition?.name)
+        assertEquals("Lcom/example/Test;", found.classDefinition.name)
     }
     
     @Test

@@ -74,6 +74,8 @@ kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.fromTarget(targetJavaVersion.toString()))
         freeCompilerArgs.add("-Xjdk-release=$targetJavaVersion")
+        // The build is warning-free; keep it that way
+        allWarningsAsErrors.set(true)
     }
 }
 

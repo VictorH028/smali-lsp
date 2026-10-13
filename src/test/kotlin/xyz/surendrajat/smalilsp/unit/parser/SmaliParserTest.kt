@@ -54,7 +54,6 @@ class SmaliParserTest {
         val result = parser.parse("file:///PathMotion.smali", smali)
         
         assertNotNull(result, "Parser should successfully parse the file")
-        result
         
         // Verify class
         assertEquals("Landroidx/transition/PathMotion;", result.classDefinition.name)
@@ -104,7 +103,6 @@ class SmaliParserTest {
         val result = parser.parse("file:///Test.smali", smali)
         
         assertNotNull(result)
-        result
         
         assertEquals("Lcom/example/Test;", result.classDefinition.name)
         
@@ -147,7 +145,6 @@ class SmaliParserTest {
         val result = parser.parse("file:///MyRunnable.smali", smali)
         
         assertNotNull(result)
-        result
         
         assertEquals(2, result.classDefinition.interfaces.size)
         assertTrue(result.classDefinition.interfaces.contains("Ljava/lang/Runnable;"))
@@ -186,7 +183,6 @@ class SmaliParserTest {
         val result = parser.parse("file:///Empty.smali", smali)
         
         assertNotNull(result)
-        result
         
         assertEquals("Lcom/example/Empty;", result.classDefinition.name)
         assertEquals("Ljava/lang/Object;", result.classDefinition.superClass)
@@ -218,7 +214,6 @@ class SmaliParserTest {
         val result = parser.parse("file:///PrologueTest.smali", smali)
         
         assertNotNull(result, "Parser should handle .prologue and .epilogue directives")
-        result
         
         assertEquals("Lcom/example/PrologueTest;", result.classDefinition.name)
         assertEquals(1, result.methods.size)
