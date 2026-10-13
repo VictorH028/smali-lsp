@@ -474,35 +474,6 @@ class WorkspaceIndex {
         }
     }
 
-    // ======================================================================
-    // Housekeeping
-    // ======================================================================
-
-    fun clear() {
-        synchronized(fileLock) {
-            filesByUri.clear()
-            uriByClass.clear()
-            simpleNameIndex.clear()
-            fileIds.clear()
-            urisById = arrayOfNulls(1024)
-            generation = AtomicIntegerArray(1024)
-            contributions = AtomicIntegerArray(1024)
-            subclassIndex.clear()
-            implementorsIndex.clear()
-            methodUsages.clear()
-            fieldUsages.clear()
-            classRefs.clear()
-            stringUsages.clear()
-            totalEntries.set(0)
-            staleEntries.set(0)
-            stringValueCounts.clear()
-            methodCount.set(0)
-            fieldCount.set(0)
-            documentContents.clear()
-            documentLines.clear()
-        }
-    }
-
     private fun methodKey(className: String, methodName: String, descriptor: String) = "$className->$methodName$descriptor"
 
     private fun fieldKey(className: String, fieldName: String, fieldType: String) = "$className->$fieldName:$fieldType"
