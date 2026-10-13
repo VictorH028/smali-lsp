@@ -55,14 +55,14 @@ internal fun loadVersionInfo(): VersionInfo {
 }
 
 fun main(args: Array<String>) {
-    val verbose = args.contains("--verbose")
-    val command = args.firstOrNull { it != "--verbose" } ?: "help"
-
-    if (verbose) {
-        enableFileLogging()
+    val options = parseArgs(args) ?: run {
+        printUsage()
+        System.exit(2)
+        return
     }
+    configureLogging(options.verbose, options.logFile)
 
-    when (command) {
+    when (options.command) {
         "lsp" -> startLsp()
         "mcp" -> McpMode().run()
         "--version", "-v" -> {
@@ -71,43 +71,71 @@ fun main(args: Array<String>) {
         }
         "help", "--help", "-h" -> printUsage()
         else -> {
-            System.err.println("Unknown command: $command")
+            System.err.println("Unknown command: ${options.command}")
             printUsage()
             System.exit(1)
         }
     }
 }
 
+internal data class Options(val command: String, val verbose: Boolean, val logFile: String?)
+
+/** `<command> [--verbose] [--log-file <path>]`; null when an option is malformed. */
+internal fun parseArgs(args: Array<String>): Options? {
+    var command: String? = null
+    var verbose = false
+    var logFile: String? = null
+    var i = 0
+    while (i < args.size) {
+        when (val arg = args[i]) {
+            "--verbose" -> verbose = true
+            "--log-file" -> {
+                logFile = args.getOrNull(i + 1)?.takeUnless { it.startsWith("--") } ?: run {
+                    System.err.println("--log-file needs a path")
+                    return null
+                }
+                i++
+            }
+            else -> if (command == null) command = arg else {
+                System.err.println("Unexpected argument: $arg")
+                return null
+            }
+        }
+        i++
+    }
+    return Options(command ?: "help", verbose, logFile)
+}
+
 /**
- * Enable file logging (logback + JUL) when --verbose is passed.
- * By default, logging is OFF to avoid creating log files in CWD.
+ * Warnings and errors go to stderr (logback.xml); stdout is the protocol channel. `--verbose`
+ * lowers the threshold to INFO, `--log-file` additionally writes everything at that level
+ * to the given file. LSP4J logs through java.util.logging, which logging.properties points
+ * at stderr as well.
  */
-private fun enableFileLogging() {
-    // Configure Logback programmatically
+private fun configureLogging(verbose: Boolean, logFile: String?) {
+    SmaliLanguageServer::class.java.getResourceAsStream("/logging.properties")?.use {
+        java.util.logging.LogManager.getLogManager().readConfiguration(it)
+    }
+
     val loggerContext = LoggerFactory.getILoggerFactory() as LoggerContext
-
-    val encoder = PatternLayoutEncoder()
-    encoder.context = loggerContext
-    encoder.pattern = "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-    encoder.start()
-
-    val fileAppender = FileAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
-    fileAppender.context = loggerContext
-    fileAppender.name = "FILE"
-    fileAppender.file = "smali-lsp.log"
-    fileAppender.encoder = encoder
-    fileAppender.start()
-
     val rootLogger = loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME)
-    rootLogger.level = Level.INFO
-    rootLogger.addAppender(fileAppender)
+    if (verbose) rootLogger.level = Level.INFO
 
-    // Configure JUL for LSP4J
-    val julHandler = java.util.logging.FileHandler("smali-lsp-jul.log", 1_000_000, 1, true)
-    julHandler.formatter = java.util.logging.SimpleFormatter()
-    val julRoot = java.util.logging.Logger.getLogger("")
-    julRoot.addHandler(julHandler)
-    julRoot.level = java.util.logging.Level.WARNING
+    if (logFile != null) {
+        val encoder = PatternLayoutEncoder().apply {
+            context = loggerContext
+            pattern = "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+            start()
+        }
+        val fileAppender = FileAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply {
+            context = loggerContext
+            name = "FILE"
+            file = logFile
+            this.encoder = encoder
+            start()
+        }
+        rootLogger.addAppender(fileAppender)
+    }
 }
 
 private fun printUsage() {
@@ -118,23 +146,18 @@ private fun printUsage() {
         Usage: java -jar smali-lsp-<version>.jar <command> [options]
 
         Commands:
-          lsp          Start LSP server over stdio (for IDE integration)
-          mcp          Start MCP server over stdio (for AI agent integration)
+          lsp               Start LSP server over stdio (for IDE integration)
+          mcp               Start MCP server over stdio (for AI agent integration)
 
         Options:
-          --verbose    Enable file logging (smali-lsp.log in current directory)
-          --version    Show version info
-          --help       Show this help message
+          --verbose         Log at INFO instead of WARN (warnings always go to stderr)
+          --log-file <path> Also write the log to this file
+          --version         Show version info
+          --help            Show this help message
     """.trimIndent())
 }
 
 private fun startLsp() {
-    // Load JUL properties to suppress default ConsoleHandler (would corrupt LSP stdio)
-    val julStream = SmaliLanguageServer::class.java.getResourceAsStream("/logging.properties")
-    if (julStream != null) {
-        julStream.use { java.util.logging.LogManager.getLogManager().readConfiguration(it) }
-    }
-
     val server = SmaliLanguageServer()
     val launcher = LSPLauncher.createServerLauncher(server, System.`in`, System.out)
 
