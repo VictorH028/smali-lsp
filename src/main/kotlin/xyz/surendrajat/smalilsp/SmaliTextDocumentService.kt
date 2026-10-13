@@ -23,6 +23,8 @@ import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
+import java.io.File
+import java.net.URI
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -123,8 +125,9 @@ class SmaliTextDocumentService(
         val text = params.textDocument.text
         logger.debug("didOpen: $uri")
         openFiles.add(uri)
-        // The workspace scan may already have indexed this file from disk
-        writes.submit("didOpen $uri") { update(uri, text, reindex = index.findFileByUri(uri) == null) }
+        // The scan may have indexed the file from disk, but the editor's text is what the user
+        // sees (a restored unsaved buffer, a file changed since the scan): index it again.
+        writes.submit("didOpen $uri") { update(uri, text, reindex = true) }
     }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
@@ -161,15 +164,33 @@ class SmaliTextDocumentService(
         }
     }
 
-    /** The file stays indexed: definitions and references from other files must keep resolving into it. */
+    /**
+     * The file stays indexed, as it is on disk: definitions and references from other files must
+     * keep resolving into it, and edits discarded with the buffer must not linger in the index.
+     */
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         openFiles.remove(uri)
-        logger.debug("didClose: $uri (keeping in index)")
+        logger.debug("didClose: $uri")
         writes.submit("didClose $uri") {
+            val buffer = index.getDocumentContent(uri)
             index.removeDocumentContent(uri)
             publishDiagnostics(uri, emptyList())
+            reindexFromDisk(uri, buffer)
         }
+    }
+
+    /** Re-reads the closed file from disk unless the buffer already matched it; a file that was never saved leaves the index. */
+    private fun reindexFromDisk(uri: String, buffer: String?) {
+        val file = try { File(URI(uri)) } catch (_: Exception) { null }
+        if (file == null || !file.isFile) {
+            if (index.removeFile(uri)) logger.debug("Removed from index (closed without a file on disk): $uri")
+            return
+        }
+        val text = file.readText(Charsets.UTF_8)
+        if (text == buffer) return
+        val parsed = parser.parse(uri, text)
+        if (parsed != null) index.indexFile(parsed) else index.removeFile(uri)
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {

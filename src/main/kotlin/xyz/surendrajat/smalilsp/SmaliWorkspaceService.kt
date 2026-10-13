@@ -58,7 +58,8 @@ class SmaliWorkspaceService(
      * created, or edited externally (e.g. by apktool regenerating a project)
      * will not trigger didChange — without handling this, go-to-definition
      * navigates to ghost URIs that no longer exist, and references to new
-     * classes fail to resolve until the user opens them manually.
+     * classes fail to resolve until the user opens them manually. Files that
+     * are open in the editor are left to the editor.
      */
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
         if (params.changes.isEmpty()) return
@@ -80,6 +81,9 @@ class SmaliWorkspaceService(
     }
 
     private fun applyWatchedChange(uri: String, type: FileChangeType) {
+        // An open buffer is the truth for its file: the editor reports its own changes through
+        // didChange, and didClose brings the disk version back.
+        if (index.isOpen(uri)) return
         when (type) {
             FileChangeType.Deleted -> {
                 if (index.removeFile(uri)) logger.debug("Removed from index (deleted): $uri")

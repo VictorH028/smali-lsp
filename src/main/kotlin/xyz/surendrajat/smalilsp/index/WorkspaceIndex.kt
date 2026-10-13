@@ -465,24 +465,30 @@ class WorkspaceIndex {
     // Open documents
     // ======================================================================
 
-    /** Keeps the editor's text for an open file (didOpen/didChange). */
+    /** Keeps the editor's text for an open file (didOpen/didChange). Keyed by canonical URI like the files. */
     fun setDocumentContent(uri: String, content: String) {
-        documentContents[uri] = content
-        documentLines.remove(uri)
+        val key = canonicalUri(uri)
+        documentContents[key] = content
+        documentLines.remove(key)
     }
 
     fun removeDocumentContent(uri: String) {
-        documentContents.remove(uri)
-        documentLines.remove(uri)
+        val key = canonicalUri(uri)
+        documentContents.remove(key)
+        documentLines.remove(key)
     }
 
-    fun getDocumentContent(uri: String): String? = documentContents[uri]
+    fun getDocumentContent(uri: String): String? = documentContents[canonicalUri(uri)]
+
+    /** Whether an editor buffer is open for the file, under any spelling of its URI. */
+    fun isOpen(uri: String): Boolean = documentContents.containsKey(canonicalUri(uri))
 
     /** A line of an open document, or of the file on disk when it is not open. */
     fun getLineContent(uri: String, lineIndex: Int): String? {
-        val content = documentContents[uri]
+        val key = canonicalUri(uri)
+        val content = documentContents[key]
         if (content != null) {
-            val lines = documentLines.getOrPut(uri) { content.lines() }
+            val lines = documentLines.getOrPut(key) { content.lines() }
             return lines.getOrNull(lineIndex)
         }
         return try {
