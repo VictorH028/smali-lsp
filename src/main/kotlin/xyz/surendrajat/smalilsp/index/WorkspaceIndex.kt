@@ -105,13 +105,13 @@ class WorkspaceIndex {
         file.methods.forEach { method ->
             val signature = methodSignature(className, method.name, method.descriptor)
             methodLocations.computeIfAbsent(signature) { ConcurrentHashMap.newKeySet() }
-                .add(Location(file.uri, method.range))
+                .add(Location(file.uri, method.nameSpan.toRange()))
         }
 
         // Index field declarations
         file.fields.forEach { field ->
             val signature = fieldSignature(className, field.name)
-            fieldLocations[signature] = Location(file.uri, field.range)
+            fieldLocations[signature] = Location(file.uri, field.nameSpan.toRange())
         }
 
         // Track superclass usage + subclass hierarchy

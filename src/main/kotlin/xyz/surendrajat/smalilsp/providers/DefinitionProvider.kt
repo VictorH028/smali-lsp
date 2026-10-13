@@ -23,7 +23,7 @@ class DefinitionProvider(
         }
         return when (val symbol = file.symbolAt(position)) {
             null -> emptyList()
-            is Symbol.ClassDecl -> listOf(Location(uri, symbol.classDef.range))
+            is Symbol.ClassDecl -> listOf(Location(uri, symbol.range))
             is Symbol.MethodDecl, is Symbol.FieldDecl -> emptyList()
             is Symbol.ClassRef -> classDefinition(symbol.className)
             is Symbol.MethodRef -> methodDefinition(symbol.instruction)
@@ -53,7 +53,7 @@ class DefinitionProvider(
      */
     private fun classDefinition(className: String): List<Location> {
         val file = workspaceIndex.findClass(Types.elementClass(className)) ?: return emptyList()
-        return listOf(Location(file.uri, file.classDefinition.range))
+        return listOf(Location(file.uri, file.classDefinition.nameSpan.toRange()))
     }
 
     private fun methodDefinition(instruction: InvokeInstruction): List<Location> =

@@ -118,7 +118,7 @@ class TypeHierarchyProvider(
             kind,
             file.uri,
             classDef.range,
-            classDef.range,
+            classDef.nameSpan.toRange(),
             classDef.name
         )
         return item

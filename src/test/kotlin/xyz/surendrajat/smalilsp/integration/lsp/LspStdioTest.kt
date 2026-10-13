@@ -117,6 +117,9 @@ class LspStdioTest {
             assertEquals("run", runSymbol["name"].asString)
             assertEquals("()V", runSymbol["detail"].asString)
             assertEquals(SymbolKind.Method.value, runSymbol["kind"].asInt)
+            val runLine = callerSmali.lines().first { it.startsWith(".method") }
+            assertEquals(runLine.indexOf("run"), runSymbol.getAsJsonObject("selectionRange").getAsJsonObject("start")["character"].asInt, "selectionRange is the name")
+            assertEquals(0, runSymbol.getAsJsonObject("range").getAsJsonObject("start")["character"].asInt, "range is the whole method")
 
             // definition: from the invoke's method name to the declaration in the other file
             val invokeLine = callerSmali.lines().indexOfFirst { it.contains("invoke-static") }
@@ -124,6 +127,11 @@ class LspStdioTest {
             val definition = client.result("textDocument/definition", client.at(callerUri, invokeLine, nameCol)).asJsonArray
             assertEquals(1, definition.size(), "definition: $definition")
             assertEquals(calleeUri, definition[0].asJsonObject["uri"].asString)
+            val declLineText = calleeSmali.lines().first { it.startsWith(".method") }
+            val target = definition[0].asJsonObject.getAsJsonObject("range")
+            assertEquals(calleeSmali.lines().indexOf(declLineText), target.getAsJsonObject("start")["line"].asInt)
+            assertEquals(declLineText.indexOf("greet"), target.getAsJsonObject("start")["character"].asInt, "the definition points at the method name")
+            assertEquals(declLineText.indexOf("greet") + "greet".length, target.getAsJsonObject("end")["character"].asInt)
 
             // hover on the same spot describes the method
             val hover = client.result("textDocument/hover", client.at(callerUri, invokeLine, nameCol)).asJsonObject

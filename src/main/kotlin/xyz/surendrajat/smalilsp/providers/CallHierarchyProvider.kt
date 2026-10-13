@@ -93,7 +93,7 @@ class CallHierarchyProvider(
 
             val toItem = if (targetLocation != null) {
                 val targetFile = index.findFileByUri(targetLocation.uri)
-                val targetMethodDef = targetFile?.methods?.find { it.range == targetLocation.range }
+                val targetMethodDef = targetFile?.methods?.find { it.nameSpan.toRange() == targetLocation.range }
                 if (targetFile != null && targetMethodDef != null) {
                     createItem(targetFile, targetMethodDef)
                 } else {
@@ -106,7 +106,7 @@ class CallHierarchyProvider(
 
             val call = CallHierarchyOutgoingCall()
             call.to = toItem
-            call.fromRanges = callSites.map { it.range }
+            call.fromRanges = callSites.map { it.nameSpan?.toRange() ?: it.range }
             results.add(call)
         }
 
@@ -119,7 +119,7 @@ class CallHierarchyProvider(
         item.kind = SymbolKind.Method
         item.uri = file.uri
         item.range = method.range
-        item.selectionRange = method.range
+        item.selectionRange = method.nameSpan.toRange()
         item.detail = file.classDefinition.name
         return item
     }

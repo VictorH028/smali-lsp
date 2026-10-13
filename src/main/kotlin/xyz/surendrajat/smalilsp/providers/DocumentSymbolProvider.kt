@@ -26,7 +26,7 @@ class DocumentSymbolProvider {
         classSymbol.name = Types.readableName(file.classDefinition.name)
         classSymbol.kind = SymbolKind.Class
         classSymbol.range = file.classDefinition.range
-        classSymbol.selectionRange = file.classDefinition.range
+        classSymbol.selectionRange = file.classDefinition.nameSpan.toRange()
         
         // Add detail (modifiers, superclass)
         val details = mutableListOf<String>()
@@ -53,7 +53,7 @@ class DocumentSymbolProvider {
                 SymbolKind.Method
             }
             methodSymbol.range = method.range
-            methodSymbol.selectionRange = method.range
+            methodSymbol.selectionRange = method.nameSpan.toRange()
             
             // Detail: signature
             methodSymbol.detail = method.descriptor
@@ -67,7 +67,7 @@ class DocumentSymbolProvider {
             fieldSymbol.name = field.name
             fieldSymbol.kind = SymbolKind.Field
             fieldSymbol.range = field.range
-            fieldSymbol.selectionRange = field.range
+            fieldSymbol.selectionRange = field.nameSpan.toRange()
             
             // Detail: type
             val typeClass = Types.className(field.type)
