@@ -225,6 +225,22 @@ data class LabelDefinition(
     val range: Range get() = range(line, start, line, end)
 }
 
+/** The method whose lines contain [line], if any; methods are in file order. */
+fun SmaliFile.methodAt(line: Int): MethodDefinition? {
+    var low = 0
+    var high = methods.size - 1
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        val method = methods[mid]
+        when {
+            line < method.range.start.line -> high = mid - 1
+            line > method.range.end.line -> low = mid + 1
+            else -> return method
+        }
+    }
+    return null
+}
+
 /**
  * Helper to create Range objects
  */

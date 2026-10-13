@@ -4,6 +4,7 @@ import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.InvokeInstruction
 import xyz.surendrajat.smalilsp.core.MethodDefinition
 import xyz.surendrajat.smalilsp.core.SmaliFile
+import xyz.surendrajat.smalilsp.core.methodAt
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
@@ -17,6 +18,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 class CallHierarchyProvider(
     private val index: WorkspaceIndex
 ) {
+    private val references = ReferenceProvider(index)
 
     /**
      * Prepare call hierarchy at the given position.
@@ -33,37 +35,25 @@ class CallHierarchyProvider(
     }
 
     /**
-     * Find all callers of the given method (incoming calls).
-     * Uses reverse usage index — O(1) lookup instead of scanning all files.
+     * The methods that call this one: every call site that binds to it, including calls through
+     * subclasses and calls on the supertype it overrides, grouped by the containing method.
      */
     fun incomingCalls(item: CallHierarchyItem): List<CallHierarchyIncomingCall> {
-        val targetMethod = parseItemName(item.name)
+        val (methodName, descriptor) = parseItemName(item.name)
         val targetClass = item.detail ?: return emptyList()
+        val callSites = references.findMethodReferences(targetClass, methodName, descriptor, includeDeclaration = false)
+        if (callSites.isEmpty()) return emptyList()
 
-        val usages = index.findMethodUsages(targetClass, targetMethod.first, targetMethod.second)
-        if (usages.isEmpty()) return emptyList()
-
-        // Group usage locations by containing method
-        val callsByMethod = mutableMapOf<Pair<String, Range>, MutableList<Range>>()
-
-        for (loc in usages) {
-            val file = index.findFileByUri(loc.uri) ?: continue
-            val containingMethod = file.methods.find {
-                loc.range.start.line >= it.range.start.line &&
-                    loc.range.start.line <= it.range.end.line
-            } ?: continue
-
-            val key = Pair(file.classDefinition.name, containingMethod.range)
-            callsByMethod.getOrPut(key) { mutableListOf() }.add(loc.range)
+        val callers = LinkedHashMap<Pair<String, Int>, Pair<MethodDefinition, MutableList<Range>>>()
+        for (site in callSites) {
+            val file = index.findFileByUri(site.uri) ?: continue
+            val method = file.methodAt(site.range.start.line) ?: continue
+            callers.getOrPut(file.uri to method.range.start.line) { method to mutableListOf() }.second.add(site.range)
         }
-
-        return callsByMethod.mapNotNull { (key, ranges) ->
-            val file = index.findClass(key.first) ?: return@mapNotNull null
-            val method = file.methods.find { it.range == key.second } ?: return@mapNotNull null
-
+        return callers.map { (key, value) ->
             CallHierarchyIncomingCall().apply {
-                from = createItem(file, method)
-                fromRanges = ranges
+                from = createItem(index.findFileByUri(key.first)!!, value.first)
+                fromRanges = value.second
             }
         }
     }
