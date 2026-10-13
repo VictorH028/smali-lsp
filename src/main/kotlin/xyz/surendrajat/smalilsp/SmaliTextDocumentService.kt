@@ -1,10 +1,16 @@
 package xyz.surendrajat.smalilsp
 
 import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
+import org.eclipse.lsp4j.jsonrpc.CompletableFutures
+import org.eclipse.lsp4j.jsonrpc.ResponseErrorException
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.jsonrpc.messages.Either3
+import org.eclipse.lsp4j.jsonrpc.messages.ResponseError
+import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode
 import org.eclipse.lsp4j.services.LanguageClient
 import org.eclipse.lsp4j.services.TextDocumentService
+import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
@@ -16,22 +22,15 @@ import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
-import org.slf4j.LoggerFactory
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Text Document Service for Smali Language Server.
- * 
- * Handles document lifecycle:
- * - didOpen: Parse and index file
- * - didChange: Re-parse and re-index
- * - didClose: Keep indexed (no removal, learned from V1)
- * 
- * Provides LSP features:
- * - textDocument/definition (goto definition)
- * - textDocument/hover (hover information)
- * - textDocument/references (find all references)
- * - textDocument/documentSymbol (document outline)
+ * The textDocument side of the server: keeps open buffers and the index in step
+ * (didOpen/didChange re-parse and re-index, didClose keeps the file indexed so cross-file
+ * navigation into it still works) and answers the language requests by delegating to the
+ * providers.
  */
 class SmaliTextDocumentService(
     private val index: WorkspaceIndex,
@@ -44,53 +43,67 @@ class SmaliTextDocumentService(
     private val completionProvider: CompletionProvider,
     private val renameProvider: RenameProvider
 ) : TextDocumentService {
-    
+
     private val logger = LoggerFactory.getLogger(SmaliTextDocumentService::class.java)
     private val parser = SmaliParser()
     private val diagnosticProvider = DiagnosticProvider(parser, index)
     private var client: LanguageClient? = null
 
-    /** Track open file URIs so we can refresh diagnostics after indexing completes. */
-    private val openFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Open file URIs, so diagnostics can be refreshed once workspace indexing completes. */
+    private val openFiles = ConcurrentHashMap.newKeySet<String>()
 
-    /** Whether workspace indexing has completed. Semantic diagnostics are suppressed until true. */
+    /** Semantic diagnostics are suppressed until workspace indexing has completed. */
     @Volatile
     var indexingComplete: Boolean = false
 
-    /**
-     * Connect to client for sending notifications.
-     */
     fun connect(client: LanguageClient) {
         this.client = client
     }
 
     /**
-     * Re-publish diagnostics for all currently open files.
-     * Called after workspace indexing completes to clear stale false-positive warnings.
+     * Answers a request on the common pool. A failing provider is logged and answered with
+     * [fallback], so one bad request never takes the session down; a [ResponseErrorException]
+     * thrown by [compute] or [fallback] reaches the client as that error.
      */
+    private fun <T> request(name: String, context: String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
+        logger.debug("{}: {}", name, context)
+        return CompletableFutures.computeAsync { checker ->
+            try {
+                compute(checker)
+            } catch (e: ResponseErrorException) {
+                throw e
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.error("Error in $name${context?.let { ": $it" } ?: ""}", e)
+                fallback()
+            }
+        }
+    }
+
+    private val TextDocumentPositionParams.at: String
+        get() = "${textDocument.uri} at ${position.line}:${position.character}"
+
+    private fun responseError(code: ResponseErrorCode, message: String) =
+        ResponseErrorException(ResponseError(code, message, null))
+
+    /** Re-publish diagnostics for every open file, clearing warnings that were only stale during indexing. */
     fun refreshDiagnosticsForOpenFiles() {
         logger.info("Refreshing diagnostics for ${openFiles.size} open file(s)")
         for (uri in openFiles) {
             try {
                 val content = index.getDocumentContent(uri) ?: continue
-                val diagnostics = diagnosticProvider.computeDiagnostics(uri, content)
-                publishDiagnostics(uri, diagnostics)
+                publishDiagnostics(uri, diagnosticProvider.computeDiagnostics(uri, content))
             } catch (e: Exception) {
                 logger.error("Error refreshing diagnostics for $uri", e)
             }
         }
     }
-    
-    /**
-     * Publish diagnostics to client if connected.
-     */
+
     private fun publishDiagnostics(uri: String, diagnostics: List<Diagnostic>) {
         client?.publishDiagnostics(PublishDiagnosticsParams(uri, diagnostics))
     }
-    
-    /**
-     * Document opened - parse and index.
-     */
+
     override fun didOpen(params: DidOpenTextDocumentParams) {
         val uri = params.textDocument.uri
         val content = params.textDocument.text
@@ -100,10 +113,9 @@ class SmaliTextDocumentService(
         index.setDocumentContent(uri, content)
 
         try {
-            // Parse with error collection for diagnostics
             val parseResult = parser.parseWithErrors(uri, content)
-            
-            // Index if not already indexed from workspace scan
+
+            // Index unless the workspace scan already did
             val existing = index.findFileByUri(uri)
             if (existing == null) {
                 parseResult.smaliFile?.let { smaliFile ->
@@ -114,7 +126,6 @@ class SmaliTextDocumentService(
                 logger.debug("Already indexed: $uri")
             }
 
-            // Publish diagnostics - semantic checks only when indexing is complete
             val diagnostics = if (indexingComplete) {
                 diagnosticProvider.computeDiagnosticsFromParseResult(uri, parseResult)
             } else {
@@ -126,9 +137,6 @@ class SmaliTextDocumentService(
         }
     }
 
-    /**
-     * Document changed - re-parse and re-index.
-     */
     override fun didChange(params: DidChangeTextDocumentParams) {
         val uri = params.textDocument.uri
         val changes = params.contentChanges
@@ -142,16 +150,14 @@ class SmaliTextDocumentService(
         index.setDocumentContent(uri, content)
 
         try {
-            // Parse once — reuse for both indexing and diagnostics
             val parseResult = parser.parseWithErrors(uri, content)
             parseResult.smaliFile?.let { smaliFile ->
                 index.indexFile(smaliFile)
                 logger.debug("Re-indexed: $uri")
             } ?: logger.warn("Failed to re-parse: $uri")
 
-            // Suppress semantic diagnostics during indexing for consistency with didOpen.
-            // Without this, typing one character mid-indexing floods the file with
-            // false "undefined-class" warnings that vanish once indexing completes.
+            // Semantic diagnostics stay suppressed during indexing, as in didOpen; otherwise
+            // one keystroke mid-indexing floods the file with undefined-class warnings.
             val diagnostics = if (indexingComplete) {
                 diagnosticProvider.computeDiagnosticsFromParseResult(uri, parseResult)
             } else {
@@ -162,325 +168,111 @@ class SmaliTextDocumentService(
             logger.error("Error processing didChange for $uri", e)
         }
     }
-    
-    /**
-     * Document closed - keep in index (learned from V1).
-     */
+
+    /** The file stays indexed: definitions and references from other files must keep resolving into it. */
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         openFiles.remove(uri)
         index.removeDocumentContent(uri)
         logger.debug("didClose: $uri (keeping in index)")
-        // Do NOT remove from index - learned from V1 bug
-        // Removing breaks cross-file references (go-to-definition, find-references)
-        // See ARCHITECTURE.md Bug #1: "Files removed from index too early"
-        
-        // Clear diagnostics for closed file
         publishDiagnostics(uri, emptyList())
     }
-    
-    /**
-     * Document saved - no action needed (already indexed on change).
-     */
+
     override fun didSave(params: DidSaveTextDocumentParams) {
         logger.debug("didSave: ${params.textDocument.uri}")
-        // Already indexed on change, nothing to do
     }
-    
-    /**
-     * Goto definition.
-     */
-    override fun definition(params: DefinitionParams): CompletableFuture<Either<MutableList<out Location>, MutableList<out LocationLink>>> {
-        val uri = params.textDocument.uri
-        val position = params.position
-        
-        logger.debug("definition: $uri at ${position.line}:${position.character}")
-        
-        return CompletableFuture.supplyAsync {
-            try {
-                val locations = definitionProvider.findDefinition(uri, position)
-                Either.forLeft<MutableList<out Location>, MutableList<out LocationLink>>(locations.toMutableList())
-            } catch (e: Exception) {
-                logger.error("Error in definition for $uri", e)
-                Either.forLeft(mutableListOf())
-            }
+
+    override fun definition(params: DefinitionParams): CompletableFuture<Either<MutableList<out Location>, MutableList<out LocationLink>>> =
+        request("definition", params.at, { Either.forLeft(mutableListOf()) }) {
+            Either.forLeft(definitionProvider.findDefinition(params.textDocument.uri, params.position).toMutableList())
         }
-    }
-    
-    /**
-     * Hover information.
-     */
-    override fun hover(params: HoverParams): CompletableFuture<Hover?> {
-        val uri = params.textDocument.uri
-        val position = params.position
-        
-        logger.debug("hover: $uri at ${position.line}:${position.character}")
-        
-        return CompletableFuture.supplyAsync {
-            try {
-                hoverProvider.provideHover(uri, position)
-            } catch (e: Exception) {
-                logger.error("Error in hover for $uri", e)
-                null
-            }
+
+    override fun hover(params: HoverParams): CompletableFuture<Hover?> =
+        request("hover", params.at, { null }) {
+            hoverProvider.provideHover(params.textDocument.uri, params.position)
         }
-    }
-    
-    /**
-     * Find all references.
-     */
-    override fun references(params: ReferenceParams): CompletableFuture<MutableList<out Location>> {
-        val uri = params.textDocument.uri
-        val position = params.position
-        val includeDeclaration = params.context.isIncludeDeclaration
-        
-        logger.debug("references: $uri at ${position.line}:${position.character}")
-        
-        return CompletableFuture.supplyAsync {
-            try {
-                referenceProvider.findReferences(uri, position, includeDeclaration).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in references for $uri", e)
-                mutableListOf()
-            }
+
+    override fun references(params: ReferenceParams): CompletableFuture<MutableList<out Location>> =
+        request("references", params.at, { mutableListOf() }) {
+            referenceProvider.findReferences(params.textDocument.uri, params.position, params.context.isIncludeDeclaration).toMutableList()
         }
-    }
-    
-    /**
-     * Document symbols (outline).
-     */
-    override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<MutableList<Either<SymbolInformation, DocumentSymbol>>> {
-        val uri = params.textDocument.uri
-        
-        logger.debug("documentSymbol: $uri")
-        
-        return CompletableFuture.supplyAsync {
-            try {
-                val file = index.findFileByUri(uri)
-                if (file == null) {
-                    return@supplyAsync mutableListOf<Either<SymbolInformation, DocumentSymbol>>()
-                }
-                
-                val symbols = mutableListOf<Either<SymbolInformation, DocumentSymbol>>()
-                
-                // Class symbol
-                val classSymbol = DocumentSymbol(
-                    file.classDefinition.name,
-                    SymbolKind.Class,
-                    file.classDefinition.range,
-                    file.classDefinition.range
-                )
-                classSymbol.children = mutableListOf()
-                
-                // Method symbols
-                file.methods.forEach { method ->
-                    val methodSymbol = DocumentSymbol(
-                        "${method.name}${method.descriptor}",
-                        SymbolKind.Method,
-                        method.range,
-                        method.range
-                    )
-                    classSymbol.children.add(methodSymbol)
-                }
-                
-                // Field symbols
-                file.fields.forEach { field ->
-                    val fieldSymbol = DocumentSymbol(
-                        "${field.name}: ${field.type}",
-                        SymbolKind.Field,
-                        field.range,
-                        field.range
-                    )
-                    classSymbol.children.add(fieldSymbol)
-                }
-                
-                symbols.add(Either.forRight(classSymbol))
-                symbols
-            } catch (e: Exception) {
-                logger.error("Error in documentSymbol for $uri", e)
-                mutableListOf()
+
+    override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<MutableList<Either<SymbolInformation, DocumentSymbol>>> =
+        request("documentSymbol", params.textDocument.uri, { mutableListOf() }) {
+            val file = index.findFileByUri(params.textDocument.uri) ?: return@request mutableListOf()
+
+            val classSymbol = DocumentSymbol(
+                file.classDefinition.name,
+                SymbolKind.Class,
+                file.classDefinition.range,
+                file.classDefinition.range
+            )
+            classSymbol.children = mutableListOf()
+            file.methods.forEach { method ->
+                classSymbol.children.add(DocumentSymbol("${method.name}${method.descriptor}", SymbolKind.Method, method.range, method.range))
             }
-        }
-    }
-
-    /**
-     * Prepare call hierarchy at cursor position.
-     */
-    override fun prepareCallHierarchy(params: CallHierarchyPrepareParams): CompletableFuture<MutableList<CallHierarchyItem>> {
-        val uri = params.textDocument.uri
-        val position = params.position
-
-        return CompletableFuture.supplyAsync {
-            try {
-                callHierarchyProvider.prepare(uri, position).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in prepareCallHierarchy for $uri", e)
-                mutableListOf()
+            file.fields.forEach { field ->
+                classSymbol.children.add(DocumentSymbol("${field.name}: ${field.type}", SymbolKind.Field, field.range, field.range))
             }
+            mutableListOf(Either.forRight(classSymbol))
         }
-    }
 
-    /**
-     * Get incoming calls (callers) for a call hierarchy item.
-     */
-    override fun callHierarchyIncomingCalls(params: CallHierarchyIncomingCallsParams): CompletableFuture<MutableList<CallHierarchyIncomingCall>> {
-        return CompletableFuture.supplyAsync {
-            try {
-                callHierarchyProvider.incomingCalls(params.item).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in callHierarchyIncomingCalls", e)
-                mutableListOf()
-            }
+    override fun prepareCallHierarchy(params: CallHierarchyPrepareParams): CompletableFuture<MutableList<CallHierarchyItem>> =
+        request("prepareCallHierarchy", params.at, { mutableListOf() }) {
+            callHierarchyProvider.prepare(params.textDocument.uri, params.position).toMutableList()
         }
-    }
 
-    /**
-     * Get outgoing calls (callees) for a call hierarchy item.
-     */
-    override fun callHierarchyOutgoingCalls(params: CallHierarchyOutgoingCallsParams): CompletableFuture<MutableList<CallHierarchyOutgoingCall>> {
-        return CompletableFuture.supplyAsync {
-            try {
-                callHierarchyProvider.outgoingCalls(params.item).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in callHierarchyOutgoingCalls", e)
-                mutableListOf()
-            }
+    override fun callHierarchyIncomingCalls(params: CallHierarchyIncomingCallsParams): CompletableFuture<MutableList<CallHierarchyIncomingCall>> =
+        request("callHierarchyIncomingCalls", params.item.name, { mutableListOf() }) {
+            callHierarchyProvider.incomingCalls(params.item).toMutableList()
         }
-    }
 
-    override fun prepareTypeHierarchy(params: TypeHierarchyPrepareParams): CompletableFuture<MutableList<TypeHierarchyItem>> {
-        val uri = params.textDocument.uri
-        val position = params.position
-
-        return CompletableFuture.supplyAsync {
-            try {
-                typeHierarchyProvider.prepare(uri, position).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in prepareTypeHierarchy for $uri", e)
-                mutableListOf()
-            }
+    override fun callHierarchyOutgoingCalls(params: CallHierarchyOutgoingCallsParams): CompletableFuture<MutableList<CallHierarchyOutgoingCall>> =
+        request("callHierarchyOutgoingCalls", params.item.name, { mutableListOf() }) {
+            callHierarchyProvider.outgoingCalls(params.item).toMutableList()
         }
-    }
 
-    override fun typeHierarchySupertypes(params: TypeHierarchySupertypesParams): CompletableFuture<MutableList<TypeHierarchyItem>> {
-        return CompletableFuture.supplyAsync {
-            try {
-                typeHierarchyProvider.supertypes(params.item).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in typeHierarchySupertypes", e)
-                mutableListOf()
-            }
+    override fun prepareTypeHierarchy(params: TypeHierarchyPrepareParams): CompletableFuture<MutableList<TypeHierarchyItem>> =
+        request("prepareTypeHierarchy", params.at, { mutableListOf() }) {
+            typeHierarchyProvider.prepare(params.textDocument.uri, params.position).toMutableList()
         }
-    }
 
-    override fun typeHierarchySubtypes(params: TypeHierarchySubtypesParams): CompletableFuture<MutableList<TypeHierarchyItem>> {
-        return CompletableFuture.supplyAsync {
-            try {
-                typeHierarchyProvider.subtypes(params.item).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in typeHierarchySubtypes", e)
-                mutableListOf()
-            }
+    override fun typeHierarchySupertypes(params: TypeHierarchySupertypesParams): CompletableFuture<MutableList<TypeHierarchyItem>> =
+        request("typeHierarchySupertypes", params.item.name, { mutableListOf() }) {
+            typeHierarchyProvider.supertypes(params.item).toMutableList()
         }
-    }
 
-    override fun codeLens(params: CodeLensParams): CompletableFuture<MutableList<out CodeLens>> {
-        val uri = params.textDocument.uri
-
-        return CompletableFuture.supplyAsync {
-            try {
-                codeLensProvider.provideCodeLenses(uri).toMutableList()
-            } catch (e: Exception) {
-                logger.error("Error in codeLens for $uri", e)
-                mutableListOf()
-            }
+    override fun typeHierarchySubtypes(params: TypeHierarchySubtypesParams): CompletableFuture<MutableList<TypeHierarchyItem>> =
+        request("typeHierarchySubtypes", params.item.name, { mutableListOf() }) {
+            typeHierarchyProvider.subtypes(params.item).toMutableList()
         }
-    }
 
-    override fun resolveCodeLens(params: CodeLens): CompletableFuture<CodeLens> {
-        return CompletableFuture.supplyAsync {
-            try {
-                codeLensProvider.resolveCodeLens(params)
-            } catch (e: Exception) {
-                logger.error("Error in resolveCodeLens", e)
-                params
-            }
+    override fun codeLens(params: CodeLensParams): CompletableFuture<MutableList<out CodeLens>> =
+        request("codeLens", params.textDocument.uri, { mutableListOf() }) {
+            codeLensProvider.provideCodeLenses(params.textDocument.uri).toMutableList()
         }
-    }
 
-    override fun completion(params: CompletionParams): CompletableFuture<Either<MutableList<CompletionItem>, CompletionList>> {
-        val uri = params.textDocument.uri
-        val position = params.position
-
-        return CompletableFuture.supplyAsync {
-            try {
-                val lineText = getLineFromBuffer(uri, position.line)
-
-                val result = completionProvider.provideCompletions(uri, position, lineText)
-                Either.forRight<MutableList<CompletionItem>, CompletionList>(result)
-            } catch (e: Exception) {
-                logger.error("Error in completion for $uri", e)
-                Either.forRight(CompletionList(false, emptyList()))
-            }
+    override fun resolveCodeLens(params: CodeLens): CompletableFuture<CodeLens> =
+        request("resolveCodeLens", null, { params }) {
+            codeLensProvider.resolveCodeLens(params)
         }
-    }
 
-    override fun prepareRename(params: PrepareRenameParams): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> {
-        val uri = params.textDocument.uri
-        val position = params.position
-
-        return CompletableFuture.supplyAsync {
-            try {
-                val result = renameProvider.prepareRename(uri, position)
-                    ?: throw org.eclipse.lsp4j.jsonrpc.ResponseErrorException(
-                        org.eclipse.lsp4j.jsonrpc.messages.ResponseError(
-                            org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode.InvalidRequest,
-                            "Cannot rename this symbol",
-                            null
-                        )
-                    )
-                // Convert Either<Range, PrepareRenameResult> to Either3
-                if (result.isLeft) {
-                    Either3.forFirst(result.left)
-                } else {
-                    Either3.forSecond(result.right)
-                }
-            } catch (e: org.eclipse.lsp4j.jsonrpc.ResponseErrorException) {
-                throw e
-            } catch (e: Exception) {
-                logger.error("Error in prepareRename for $uri", e)
-                throw org.eclipse.lsp4j.jsonrpc.ResponseErrorException(
-                    org.eclipse.lsp4j.jsonrpc.messages.ResponseError(
-                        org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode.InternalError,
-                        "Rename preparation failed",
-                        null
-                    )
-                )
-            }
+    override fun completion(params: CompletionParams): CompletableFuture<Either<MutableList<CompletionItem>, CompletionList>> =
+        request("completion", params.at, { Either.forRight(CompletionList(false, emptyList())) }) {
+            val uri = params.textDocument.uri
+            val lineText = index.getLineContent(uri, params.position.line) ?: ""
+            Either.forRight(completionProvider.provideCompletions(uri, params.position, lineText))
         }
-    }
 
-    override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> {
-        val uri = params.textDocument.uri
-        val position = params.position
-        val newName = params.newName
-
-        logger.debug("rename: $uri at ${position.line}:${position.character} -> $newName")
-
-        return CompletableFuture.supplyAsync {
-            try {
-                renameProvider.rename(uri, position, newName)
-            } catch (e: Exception) {
-                logger.error("Error in rename for $uri", e)
-                null
-            }
+    override fun prepareRename(params: PrepareRenameParams): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> =
+        request("prepareRename", params.at, { throw responseError(ResponseErrorCode.InternalError, "Rename preparation failed") }) {
+            val result = renameProvider.prepareRename(params.textDocument.uri, params.position)
+                ?: throw responseError(ResponseErrorCode.InvalidRequest, "Cannot rename this symbol")
+            if (result.isLeft) Either3.forFirst(result.left) else Either3.forSecond(result.right)
         }
-    }
 
-    /**
-     * Get line content from in-memory buffer (preferred) or disk (fallback).
-     */
-    internal fun getLineFromBuffer(uri: String, line: Int): String {
-        return index.getLineContent(uri, line) ?: ""
-    }
+    override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> =
+        request("rename", "${params.at} -> ${params.newName}", { null }) {
+            renameProvider.rename(params.textDocument.uri, params.position, params.newName)
+        }
 }
