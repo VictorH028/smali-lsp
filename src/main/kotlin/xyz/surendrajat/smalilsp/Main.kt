@@ -178,6 +178,7 @@ class SmaliLanguageServer : LanguageServer {
     
     // Core components
     private val index = WorkspaceIndex()
+    private val writes = WriteQueue()
     private val scanner = WorkspaceScanner(index)
     private val definitionProvider = DefinitionProvider(index)
     private val hoverProvider = HoverProvider(index)
@@ -198,11 +199,12 @@ class SmaliLanguageServer : LanguageServer {
         typeHierarchyProvider,
         codeLensProvider,
         completionProvider,
-        renameProvider
+        renameProvider,
+        writes
     )
     
     // Workspace service
-    private val workspaceService = SmaliWorkspaceService(index)
+    private val workspaceService = SmaliWorkspaceService(index, writes)
     
     /**
      * Connect to client.
@@ -211,6 +213,9 @@ class SmaliLanguageServer : LanguageServer {
         this.client = client
         textDocumentService.connect(client)
     }
+
+    /** Blocks until every notification received so far has been applied. For tests. */
+    fun awaitWrites() = textDocumentService.awaitWrites()
     
     private var pendingWorkspaceFolders: List<WorkspaceFolder> = emptyList()
     private var clientSupportsProgress = false
@@ -424,6 +429,7 @@ class SmaliLanguageServer : LanguageServer {
     override fun shutdown(): CompletableFuture<Any> {
         logger.info("Shutting down server")
         shutdownRequested = true
+        writes.close()
         return CompletableFuture.completedFuture(null)
     }
     

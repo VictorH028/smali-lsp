@@ -32,6 +32,7 @@ class WatchedFileClassRenameRegressionTest {
         service.didChangeWatchedFiles(
             DidChangeWatchedFilesParams(listOf(FileEvent(uri, FileChangeType.Created)))
         )
+        service.awaitWrites()
         assertTrue(index.hasClass("Lcom/example/Foo;"))
 
         // apktool regenerated the file with a different class in it
@@ -39,6 +40,8 @@ class WatchedFileClassRenameRegressionTest {
         service.didChangeWatchedFiles(
             DidChangeWatchedFilesParams(listOf(FileEvent(uri, FileChangeType.Changed)))
         )
+
+        service.awaitWrites()
 
         assertTrue(index.hasClass("Lcom/example/Bar;"), "new class must be indexed")
         assertFalse(index.hasClass("Lcom/example/Foo;"),

@@ -26,6 +26,7 @@ import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * The textDocument side of the server: keeps open buffers and the index in step
@@ -42,7 +43,8 @@ class SmaliTextDocumentService(
     private val typeHierarchyProvider: TypeHierarchyProvider,
     private val codeLensProvider: CodeLensProvider,
     private val completionProvider: CompletionProvider,
-    private val renameProvider: RenameProvider
+    private val renameProvider: RenameProvider,
+    private val writes: WriteQueue = WriteQueue()
 ) : TextDocumentService {
 
     private val logger = LoggerFactory.getLogger(SmaliTextDocumentService::class.java)
@@ -62,15 +64,23 @@ class SmaliTextDocumentService(
         this.client = client
     }
 
+    /** Blocks until every notification received so far has been applied. For tests. */
+    fun awaitWrites(timeoutSeconds: Long = 30) {
+        writes.barrier().get(timeoutSeconds, TimeUnit.SECONDS)
+    }
+
     /**
-     * Answers a request on the common pool. A failing provider is logged and answered with
-     * [fallback], so one bad request never takes the session down; a [ResponseErrorException]
-     * thrown by [compute] or [fallback] reaches the client as that error.
+     * Answers a request on the common pool once the writes queued before it have been applied.
+     * A failing provider is logged and answered with [fallback], so one bad request never takes
+     * the session down; a [ResponseErrorException] thrown by [compute] or [fallback] reaches
+     * the client as that error.
      */
     private fun <T> request(name: String, context: String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
         logger.debug("{}: {}", name, context)
+        val barrier = writes.barrier()
         return CompletableFutures.computeAsync { checker ->
             try {
+                barrier.join()
                 compute(checker)
             } catch (e: ResponseErrorException) {
                 throw e
@@ -92,12 +102,14 @@ class SmaliTextDocumentService(
     /** Re-publish diagnostics for every open file, clearing warnings that were only stale during indexing. */
     fun refreshDiagnosticsForOpenFiles() {
         logger.info("Refreshing diagnostics for ${openFiles.size} open file(s)")
-        for (uri in openFiles) {
-            try {
-                val content = index.getDocumentContent(uri) ?: continue
-                publishDiagnostics(uri, diagnosticProvider.computeDiagnostics(uri, content))
-            } catch (e: Exception) {
-                logger.error("Error refreshing diagnostics for $uri", e)
+        writes.submit("refreshDiagnostics") {
+            for (uri in openFiles) {
+                try {
+                    val content = index.getDocumentContent(uri) ?: continue
+                    publishDiagnostics(uri, diagnosticProvider.computeDiagnostics(uri, content))
+                } catch (e: Exception) {
+                    logger.error("Error refreshing diagnostics for $uri", e)
+                }
             }
         }
     }
@@ -108,10 +120,11 @@ class SmaliTextDocumentService(
 
     override fun didOpen(params: DidOpenTextDocumentParams) {
         val uri = params.textDocument.uri
+        val text = params.textDocument.text
         logger.debug("didOpen: $uri")
         openFiles.add(uri)
         // The workspace scan may already have indexed this file from disk
-        update(uri, params.textDocument.text, reindex = index.findFileByUri(uri) == null)
+        writes.submit("didOpen $uri") { update(uri, text, reindex = index.findFileByUri(uri) == null) }
     }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
@@ -119,7 +132,7 @@ class SmaliTextDocumentService(
         val content = params.contentChanges.firstOrNull()?.text ?: return
         val uri = params.textDocument.uri
         logger.debug("didChange: $uri")
-        update(uri, content, reindex = true)
+        writes.submit("didChange $uri") { update(uri, content, reindex = true) }
     }
 
     /**
@@ -152,9 +165,11 @@ class SmaliTextDocumentService(
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         openFiles.remove(uri)
-        index.removeDocumentContent(uri)
         logger.debug("didClose: $uri (keeping in index)")
-        publishDiagnostics(uri, emptyList())
+        writes.submit("didClose $uri") {
+            index.removeDocumentContent(uri)
+            publishDiagnostics(uri, emptyList())
+        }
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {

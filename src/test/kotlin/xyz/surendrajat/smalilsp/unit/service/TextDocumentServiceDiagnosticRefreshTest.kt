@@ -58,6 +58,7 @@ class TextDocumentServiceDiagnosticRefreshTest {
         ))
 
         // During indexing, only syntax errors should appear - no semantic "class not found"
+        service.awaitWrites()
         val diagnostics = client.getDiagnostics("file:///Test.smali")
         val undefinedClassDiags = diagnostics.filter { it.code?.left == "undefined-class" }
         assertEquals(0, undefinedClassDiags.size,
@@ -80,6 +81,8 @@ class TextDocumentServiceDiagnosticRefreshTest {
         service.didOpen(DidOpenTextDocumentParams(
             TextDocumentItem("file:///Test.smali", "smali", 1, content)
         ))
+
+        service.awaitWrites()
 
         val diagnostics = client.getDiagnostics("file:///Test.smali")
         val undefinedClassDiags = diagnostics.filter { it.code?.left == "undefined-class" }
@@ -107,6 +110,7 @@ class TextDocumentServiceDiagnosticRefreshTest {
         ))
 
         // At this point, no semantic diagnostics (indexing not complete)
+        service.awaitWrites()
         val duringIndexing = client.getDiagnostics(testUri)
         assertEquals(0, duringIndexing.filter { it.code?.left == "undefined-class" }.size)
 
@@ -123,6 +127,7 @@ class TextDocumentServiceDiagnosticRefreshTest {
         service.refreshDiagnosticsForOpenFiles()
 
         // After refresh, the dependency IS in the index — no warnings expected
+        service.awaitWrites()
         val afterRefresh = client.getDiagnostics(testUri)
         val undefinedAfterRefresh = afterRefresh.filter { it.code?.left == "undefined-class" }
         assertEquals(0, undefinedAfterRefresh.size,
@@ -151,6 +156,8 @@ class TextDocumentServiceDiagnosticRefreshTest {
         service.indexingComplete = true
         service.refreshDiagnosticsForOpenFiles()
 
+        service.awaitWrites()
+
         val afterRefresh = client.getDiagnostics(testUri)
         val undefinedDiags = afterRefresh.filter { it.code?.left == "undefined-class" }
         assertTrue(undefinedDiags.isNotEmpty(),
@@ -172,6 +179,7 @@ class TextDocumentServiceDiagnosticRefreshTest {
             TextDocumentItem(uri, "smali", 1, initial)
         ))
         // Baseline: open during indexing → no undefined-class warnings
+        service.awaitWrites()
         assertEquals(0, client.getDiagnostics(uri)
             .filter { it.code?.left == "undefined-class" }.size)
 
@@ -187,6 +195,7 @@ class TextDocumentServiceDiagnosticRefreshTest {
         })
 
         // With fix: edits during indexing also suppress semantic warnings
+        service.awaitWrites()
         val afterEdit = client.getDiagnostics(uri)
         val undefinedAfterEdit = afterEdit.filter { it.code?.left == "undefined-class" }
         assertEquals(0, undefinedAfterEdit.size,
@@ -213,12 +222,14 @@ class TextDocumentServiceDiagnosticRefreshTest {
         ))
 
         // Diagnostics should be cleared
+        service.awaitWrites()
         val afterClose = client.getDiagnostics(testUri)
         assertEquals(0, afterClose.size, "Diagnostics should be cleared on close")
 
         // refresh should not re-publish for closed file
         client.clearAll()
         service.refreshDiagnosticsForOpenFiles()
+        service.awaitWrites()
         val afterRefresh = client.getDiagnostics(testUri)
         assertEquals(0, afterRefresh.size, "Closed files should not get refreshed diagnostics")
     }

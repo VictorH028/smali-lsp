@@ -83,10 +83,10 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         val uri = workspace.getFileUri(relativePath)
         val content = workspace.readFile(relativePath)
         
-        // didOpen parses, indexes and publishes diagnostics synchronously.
         server.textDocumentService.didOpen(DidOpenTextDocumentParams(
             TextDocumentItem(uri, languageId, version, content)
         ))
+        server.awaitWrites()
 
         return uri
     }
@@ -95,11 +95,11 @@ class E2ETestHarness(val workspace: TestWorkspace) {
      * Change file content
      */
     fun changeFile(uri: String, newContent: String, version: Int) {
-        // didChange re-indexes and publishes diagnostics synchronously.
         server.textDocumentService.didChange(DidChangeTextDocumentParams(
             VersionedTextDocumentIdentifier(uri, version),
             listOf(TextDocumentContentChangeEvent(newContent))
         ))
+        server.awaitWrites()
     }
     
     

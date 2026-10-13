@@ -6,6 +6,7 @@ import org.eclipse.lsp4j.FileChangeType
 import org.eclipse.lsp4j.SymbolInformation
 import org.eclipse.lsp4j.WorkspaceSymbol
 import org.eclipse.lsp4j.WorkspaceSymbolParams
+import org.eclipse.lsp4j.jsonrpc.CompletableFutures
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.WorkspaceService
 import org.slf4j.LoggerFactory
@@ -15,6 +16,7 @@ import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
 import java.io.File
 import java.net.URI
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Workspace Service for Smali Language Server.
@@ -29,11 +31,17 @@ import java.util.concurrent.CompletableFuture
  */
 class SmaliWorkspaceService(
     private val index: WorkspaceIndex,
+    private val writes: WriteQueue = WriteQueue(),
     private val parser: SmaliParser = SmaliParser(index.strings)
 ) : WorkspaceService {
 
     private val logger = LoggerFactory.getLogger(SmaliWorkspaceService::class.java)
     private val symbolProvider = WorkspaceSymbolProvider(index)
+
+    /** Blocks until every notification received so far has been applied. For tests. */
+    fun awaitWrites(timeoutSeconds: Long = 30) {
+        writes.barrier().get(timeoutSeconds, TimeUnit.SECONDS)
+    }
     
     /**
      * Configuration changed.
@@ -56,36 +64,38 @@ class SmaliWorkspaceService(
         if (params.changes.isEmpty()) return
         logger.debug("didChangeWatchedFiles: ${params.changes.size} change(s)")
 
-        for (change in params.changes) {
-            val uri = change.uri
-            try {
-                when (change.type) {
-                    FileChangeType.Deleted -> {
-                        if (index.removeFile(uri)) {
-                            logger.debug("Removed from index (deleted): $uri")
-                        }
-                    }
-                    FileChangeType.Created, FileChangeType.Changed -> {
-                        val file = File(URI(uri))
-                        if (!file.exists() || !file.isFile) continue
-                        val smaliFile = parser.parse(uri, file.readText(Charsets.UTF_8))
-                        if (smaliFile != null) {
-                            // Evict whatever class this URI previously defined. indexFile()
-                            // only cleans up entries keyed by the NEW class name, so if the
-                            // file's class was renamed in place (apktool regeneration), the
-                            // old class would otherwise linger as a ghost definition.
-                            index.removeFile(uri)
-                            index.indexFile(smaliFile)
-                            logger.debug("Re-indexed from disk (${change.type}): $uri")
-                        } else {
-                            logger.warn("Failed to parse watched file: $uri")
-                        }
-                    }
-                    else -> {}
+        // Only the last event per file matters; a regenerated project can send thousands at once
+        val latest = LinkedHashMap<String, FileChangeType>()
+        for (change in params.changes) latest[change.uri] = change.type
+
+        writes.submit("didChangeWatchedFiles") {
+            for ((uri, type) in latest) {
+                try {
+                    applyWatchedChange(uri, type)
+                } catch (e: Exception) {
+                    logger.warn("Error handling watched file change for $uri: ${e.message}")
                 }
-            } catch (e: Exception) {
-                logger.warn("Error handling watched file change for $uri: ${e.message}")
             }
+        }
+    }
+
+    private fun applyWatchedChange(uri: String, type: FileChangeType) {
+        when (type) {
+            FileChangeType.Deleted -> {
+                if (index.removeFile(uri)) logger.debug("Removed from index (deleted): $uri")
+            }
+            FileChangeType.Created, FileChangeType.Changed -> {
+                val file = File(URI(uri))
+                if (!file.exists() || !file.isFile) return
+                val smaliFile = parser.parse(uri, file.readText(Charsets.UTF_8))
+                if (smaliFile != null) {
+                    index.indexFile(smaliFile)
+                    logger.debug("Re-indexed from disk ($type): $uri")
+                } else {
+                    logger.warn("Failed to parse watched file: $uri")
+                }
+            }
+            else -> {}
         }
     }
     
@@ -102,11 +112,11 @@ class SmaliWorkspaceService(
      * @return List of matching symbols (up to 100 results)
      */
     override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> {
-        return CompletableFuture.supplyAsync {
-            logger.debug("workspace/symbol: query='${params.query}'")
-            val symbols = symbolProvider.search(params.query)
-            logger.debug("workspace/symbol: found ${symbols.size} matches")
-            Either.forLeft<List<SymbolInformation>, List<WorkspaceSymbol>>(symbols)
+        logger.debug("workspace/symbol: query='${params.query}'")
+        val barrier = writes.barrier()
+        return CompletableFutures.computeAsync {
+            barrier.join()
+            Either.forLeft<List<SymbolInformation>, List<WorkspaceSymbol>>(symbolProvider.search(params.query))
         }
     }
 }
