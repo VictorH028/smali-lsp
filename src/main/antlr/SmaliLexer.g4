@@ -419,7 +419,9 @@ LINE_COMMENT
     ;
 
 // Fragment rules
-fragment SimpleName:        LetterNoHyphen (LetterOrDigit)*;  // Start with non-hyphen to allow SUB token before literals
+// Start with a non-hyphen so a leading SUB token stays separate, and never END with a hyphen so that
+// `[I->clone()` lexes as INT_TYPE ARROW instead of IDENTIFIER("I-") GT (DEX names may still contain "-").
+fragment SimpleName:        LetterNoHyphen (LetterOrDigit* LetterOrDigitNoHyphen)?;
 
 // Fragment rules
 
@@ -447,6 +449,10 @@ fragment Digits
     ;
 fragment LetterOrDigit
     : Letter
+    | [0-9]
+    ;
+fragment LetterOrDigitNoHyphen
+    : LetterNoHyphen
     | [0-9]
     ;
 fragment LetterNoHyphen
