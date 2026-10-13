@@ -1,6 +1,7 @@
 package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.Location
+import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.SymbolInformation
 import org.eclipse.lsp4j.SymbolKind
 import org.eclipse.lsp4j.jsonrpc.CancelChecker
@@ -70,19 +71,21 @@ class WorkspaceSymbolProvider(
     private fun matchFile(file: SmaliFile, normalizedQuery: String, matches: TopSymbolMatches) {
         // Class symbol: match on the simple name, or on the package path at a lower score
         // (query "billingclient" should find "Lcom/android/billingclient/BillingClient;")
+        // Nothing is allocated for a candidate until the top set accepts its score: a short query
+        // matches most of the workspace's names
         val className = file.classDefinition.name
         val classMatch = matchSymbol(Types.simpleName(className), normalizedQuery)
             ?: if (pathContains(className, normalizedQuery)) 50 else null
         if (classMatch != null) {
-            matches.offer(ScoredSymbol(className, SymbolKind.Class, Location(file.uri, file.classDefinition.range), null, classMatch))
+            matches.offer(ScoredSymbol(file, SymbolKind.Class, null, file.classDefinition.range, classMatch))
         }
         for (method in file.methods) {
             val score = matchSymbol(method.name, normalizedQuery) ?: continue
-            matches.offer(ScoredSymbol("$className.${method.name}", SymbolKind.Method, Location(file.uri, method.range), className, score))
+            matches.offer(ScoredSymbol(file, SymbolKind.Method, method.name, method.range, score))
         }
         for (field in file.fields) {
             val score = matchSymbol(field.name, normalizedQuery) ?: continue
-            matches.offer(ScoredSymbol("$className.${field.name}", SymbolKind.Field, Location(file.uri, field.range), className, score))
+            matches.offer(ScoredSymbol(file, SymbolKind.Field, field.name, field.range, score))
         }
     }
 
@@ -182,22 +185,24 @@ class WorkspaceSymbolProvider(
         )
     }
 
-    private data class ScoredSymbol(
-        val name: String,
-        val kind: SymbolKind,
-        val location: Location,
-        val containerName: String?,
-        val score: Int
-    )
+    /** A candidate: the file, the member (null for the class itself) and the score; the symbol is built only for the winners. */
+    private class ScoredSymbol(val file: SmaliFile, val kind: SymbolKind, val memberName: String?, val range: Range, val score: Int) {
+        val className: String get() = file.classDefinition.name
+        fun toSymbolInformation(): SymbolInformation =
+            if (memberName == null) SymbolInformation(className, kind, Location(file.uri, range))
+            else SymbolInformation("$className.$memberName", kind, Location(file.uri, range), className)
+    }
 
-    private class TopSymbolMatches(limit: Int) {
+    /** Ties broken by class name then member name, which orders like the full `class.member` name without building it. */
+    private val byName = Comparator<ScoredSymbol> { left, right ->
+        val byClass = left.className.compareTo(right.className)
+        if (byClass != 0) byClass else (left.memberName ?: "").compareTo(right.memberName ?: "")
+    }
+
+    private inner class TopSymbolMatches(limit: Int) {
         private val worstFirst = Comparator<ScoredSymbol> { left, right ->
             val scoreCompare = left.score.compareTo(right.score)
-            if (scoreCompare != 0) {
-                scoreCompare
-            } else {
-                right.name.compareTo(left.name)
-            }
+            if (scoreCompare != 0) scoreCompare else byName.compare(right, left)
         }
 
         private val maxSize = limit
@@ -227,15 +232,8 @@ class WorkspaceSymbolProvider(
         fun toSortedSymbolInformation(): List<SymbolInformation> {
             val source = heap?.toList() ?: buffered
             return source
-                .sortedWith(compareByDescending<ScoredSymbol> { it.score }.thenBy { it.name })
-                .map { symbol ->
-                    SymbolInformation(
-                        symbol.name,
-                        symbol.kind,
-                        symbol.location,
-                        symbol.containerName
-                    )
-                }
+                .sortedWith(compareByDescending<ScoredSymbol> { it.score }.then(byName))
+                .map { it.toSymbolInformation() }
         }
 
         private fun offerIntoHeap(target: PriorityQueue<ScoredSymbol>, symbol: ScoredSymbol) {
