@@ -26,7 +26,8 @@ import xyz.surendrajat.smalilsp.util.Types
 class ASTBuilder(
     private val uri: String,
     private val tokens: CommonTokenStream,
-    private val source: String
+    private val source: String,
+    private val strings: StringPool
 ) : SmaliParserBaseListener() {
 
     /**
@@ -116,22 +117,22 @@ class ASTBuilder(
     private var typeRefDepth = 0
 
     override fun exitClassDirective(ctx: GeneratedSmaliParser.ClassDirectiveContext) {
-        className = ctx.className()?.src()?.let { StringPool.intern(it) }
+        className = ctx.className()?.src()?.let { strings.intern(it) }
         classNameSpan = ctx.className()?.toSpan()
         ctx.classModifier().forEach { mod ->
-            classModifiers.add(StringPool.intern(mod.src()))
+            classModifiers.add(strings.intern(mod.src()))
         }
         classRange = ctx.toRange()
     }
 
     override fun exitSuperDirective(ctx: GeneratedSmaliParser.SuperDirectiveContext) {
-        superClass = ctx.superName()?.src()?.let { StringPool.intern(it) }
+        superClass = ctx.superName()?.src()?.let { strings.intern(it) }
         superClassRange = ctx.superName()?.toRange() ?: ctx.toRange()
     }
 
     override fun exitImplementsDirective(ctx: GeneratedSmaliParser.ImplementsDirectiveContext) {
         ctx.referenceType()?.let { type ->
-            val internedName = StringPool.intern(type.src())
+            val internedName = strings.intern(type.src())
             interfaces.add(internedName)
             interfaceRanges[internedName] = type.toRange()
         }
@@ -145,9 +146,9 @@ class ASTBuilder(
         val parts = text.split(":", limit = 2)
         if (parts.size != 2) return
 
-        val fieldName = StringPool.intern(parts[0])
-        val fieldType = StringPool.intern(parts[1])  // Many duplicates: I, Z, V, Ljava/lang/String;
-        val fieldModifiers = ctx.fieldModifier().map { StringPool.intern(it.src()) }.toSet()
+        val fieldName = strings.intern(parts[0])
+        val fieldType = strings.intern(parts[1])  // Many duplicates: I, Z, V, Ljava/lang/String;
+        val fieldModifiers = ctx.fieldModifier().map { strings.intern(it.src()) }.toSet()
         val range = ctx.toRange()
 
         val nameStart = nameAndType.start.toSpan()
@@ -185,10 +186,10 @@ class ASTBuilder(
         val closeParen = sigText.indexOf(')', openParen)
         if (closeParen < 0) return
 
-        val methodName = StringPool.intern(sigText.substring(0, openParen))
+        val methodName = strings.intern(sigText.substring(0, openParen))
         val params = sigText.substring(openParen + 1, closeParen)
-        val returnType = StringPool.intern(sigText.substring(closeParen + 1))  // Many duplicates: V, I, Z
-        val modifiers = ctx.methodModifier().map { StringPool.intern(it.src()) }.toSet()
+        val returnType = strings.intern(sigText.substring(closeParen + 1))  // Many duplicates: V, I, Z
+        val modifiers = ctx.methodModifier().map { strings.intern(it.src()) }.toSet()
 
         val lparen = signature.LPAREN()?.symbol
         val first = signature.start
@@ -198,7 +199,7 @@ class ASTBuilder(
 
         pendingMethod = PendingMethod(
             name = methodName,
-            descriptor = StringPool.intern("($params)$returnType"),
+            descriptor = strings.intern("($params)$returnType"),
             modifiers = modifiers,
             parameters = parseParameters(params),
             returnType = returnType,
@@ -238,7 +239,7 @@ class ASTBuilder(
     private fun parseParameters(paramStr: String): List<Parameter> {
         if (paramStr.isEmpty()) return emptyList()
         return Types.parseTypeStrings(paramStr).map { type ->
-            Parameter(StringPool.intern(type), null)
+            Parameter(strings.intern(type), null)
         }
     }
 
@@ -279,12 +280,12 @@ class ASTBuilder(
     /** Inside an annotation, `.local` or method prototype every class name token is a reference. */
     override fun visitTerminal(node: TerminalNode) {
         if (typeRefDepth > 0 && node.symbol.type == GeneratedSmaliLexer.QUALIFIED_TYPE_NAME) {
-            typeRefs.add(TypeRef(StringPool.intern(node.text), node.symbol.toSpan()))
+            typeRefs.add(TypeRef(strings.intern(node.text), node.symbol.toSpan()))
         }
     }
 
     override fun exitCatchDirective(ctx: GeneratedSmaliParser.CatchDirectiveContext) {
-        ctx.catchExceptionType()?.let { typeRefs.add(TypeRef(StringPool.intern(it.src()), it.toSpan())) }
+        ctx.catchExceptionType()?.let { typeRefs.add(TypeRef(strings.intern(it.src()), it.toSpan())) }
         addLabelRef(ctx.catchFromLabel()?.label())
         addLabelRef(ctx.catchToLabel()?.label())
         addLabelRef(ctx.catchGotoLabel()?.label())
@@ -319,7 +320,7 @@ class ASTBuilder(
     private fun addLabelRef(labelCtx: GeneratedSmaliParser.LabelContext?) {
         if (pendingMethod == null || labelCtx == null) return
         val name = labelCtx.identifier()?.src() ?: return
-        currentLabelRefs.add(LabelRef(StringPool.intern(name), labelCtx.toSpan()))
+        currentLabelRefs.add(LabelRef(strings.intern(name), labelCtx.toSpan()))
     }
 
     // ========== Instruction Parsing ==========
@@ -415,9 +416,9 @@ class ASTBuilder(
         // Owners, names and descriptors repeat across the workspace; interning them is most of the AST's memory
         currentInstructions.add(InvokeInstruction(
             opcode = opcode,
-            className = StringPool.intern(className),
-            methodName = StringPool.intern(methodSig.substring(0, openParen)),
-            descriptor = StringPool.intern(methodSig.substring(openParen)),
+            className = strings.intern(className),
+            methodName = strings.intern(methodSig.substring(0, openParen)),
+            descriptor = strings.intern(methodSig.substring(openParen)),
             range = range,
             targetLine = target.start.line - 1,
             targetStart = target.contiguousStart(targetText)
@@ -559,9 +560,9 @@ class ASTBuilder(
 
         currentInstructions.add(FieldAccessInstruction(
             opcode = opcode,
-            className = StringPool.intern(className),
-            fieldName = StringPool.intern(fieldPart.substring(0, colonIndex)),
-            fieldType = StringPool.intern(fieldPart.substring(colonIndex + 1)),
+            className = strings.intern(className),
+            fieldName = strings.intern(fieldPart.substring(0, colonIndex)),
+            fieldType = strings.intern(fieldPart.substring(colonIndex + 1)),
             range = range,
             targetLine = fieldCtx.start.line - 1,
             targetStart = fieldCtx.contiguousStart(fieldText)
@@ -604,7 +605,7 @@ class ASTBuilder(
         val className = typeCtx.src()
         currentInstructions.add(TypeInstruction(
             opcode = opcode,
-            className = StringPool.intern(className),
+            className = strings.intern(className),
             range = range,
             typeLine = typeCtx.start.line - 1,
             typeStart = typeCtx.contiguousStart(className)
@@ -646,7 +647,7 @@ class ASTBuilder(
         if (pendingMethod == null) return
 
         val labelCtx = ctx.label() ?: return
-        val labelName = StringPool.intern(labelCtx.identifier()?.src() ?: return)
+        val labelName = strings.intern(labelCtx.identifier()?.src() ?: return)
 
         currentLabels[labelName] = LabelDefinition(
             name = labelName,
@@ -724,7 +725,7 @@ class ASTBuilder(
     ) {
         if (pendingMethod == null || labelCtx == null) return
 
-        val labelName = StringPool.intern(labelCtx.identifier()?.src() ?: return)
+        val labelName = strings.intern(labelCtx.identifier()?.src() ?: return)
 
         currentInstructions.add(JumpInstruction(
             opcode = opcode,

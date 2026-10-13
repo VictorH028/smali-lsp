@@ -4,6 +4,7 @@ import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.*
+import xyz.surendrajat.smalilsp.util.StringPool
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
 import java.net.URI
@@ -30,6 +31,9 @@ import java.util.concurrent.atomic.AtomicLong
  * Thread-safe: the scanner indexes files concurrently while requests are answered.
  */
 class WorkspaceIndex {
+
+    /** The pool every parser feeding this index should intern through (`SmaliParser(index.strings)`). */
+    val strings = StringPool()
 
     // ---- files ----
     private val filesByUri = ConcurrentHashMap<String, SmaliFile>()

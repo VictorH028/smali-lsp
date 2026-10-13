@@ -46,7 +46,7 @@ class SmaliTextDocumentService(
 ) : TextDocumentService {
 
     private val logger = LoggerFactory.getLogger(SmaliTextDocumentService::class.java)
-    private val parser = SmaliParser()
+    private val parser = SmaliParser(index.strings)
     private val diagnosticProvider = DiagnosticProvider(parser, index)
     private val documentSymbolProvider = DocumentSymbolProvider()
     private var client: LanguageClient? = null

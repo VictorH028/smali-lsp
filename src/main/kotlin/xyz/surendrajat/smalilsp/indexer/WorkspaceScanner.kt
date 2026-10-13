@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class WorkspaceScanner(
     private val index: WorkspaceIndex,
-    private val parser: SmaliParser = SmaliParser()
+    private val parser: SmaliParser = SmaliParser(index.strings)
 ) {
     private val logger = LoggerFactory.getLogger(WorkspaceScanner::class.java)
     

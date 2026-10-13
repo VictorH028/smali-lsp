@@ -29,7 +29,7 @@ import java.util.concurrent.CompletableFuture
  */
 class SmaliWorkspaceService(
     private val index: WorkspaceIndex,
-    private val parser: SmaliParser = SmaliParser()
+    private val parser: SmaliParser = SmaliParser(index.strings)
 ) : WorkspaceService {
 
     private val logger = LoggerFactory.getLogger(SmaliWorkspaceService::class.java)

@@ -62,7 +62,6 @@ class McpMode {
     // In-memory index (persists across queries)
     private var index: WorkspaceIndex? = null
     private var indexedDirectory: String? = null
-    private val parser = SmaliParser()
 
     // LSP providers (initialized after indexing)
     private var definitionProvider: DefinitionProvider? = null
@@ -143,7 +142,6 @@ class McpMode {
             workspaceSymbolProvider = null
             callHierarchyProvider = null
             typeHierarchyProvider = null
-            xyz.surendrajat.smalilsp.util.StringPool.clear()
 
             val newIndex = WorkspaceIndex()
             val scanner = WorkspaceScanner(newIndex)
@@ -153,7 +151,7 @@ class McpMode {
             definitionProvider = DefinitionProvider(newIndex)
             hoverProvider = HoverProvider(newIndex)
             referenceProvider = ReferenceProvider(newIndex)
-            diagnosticProvider = DiagnosticProvider(parser, newIndex)
+            diagnosticProvider = DiagnosticProvider(SmaliParser(newIndex.strings), newIndex)
             workspaceSymbolProvider = WorkspaceSymbolProvider(newIndex)
             callHierarchyProvider = CallHierarchyProvider(newIndex)
             typeHierarchyProvider = TypeHierarchyProvider(newIndex)

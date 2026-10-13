@@ -4,6 +4,7 @@ import org.antlr.v4.runtime.*
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.parser.generated.SmaliLexer
 import xyz.surendrajat.smalilsp.parser.generated.SmaliParser as GeneratedSmaliParser
+import xyz.surendrajat.smalilsp.util.StringPool
 import org.slf4j.LoggerFactory
 
 /**
@@ -14,7 +15,7 @@ import org.slf4j.LoggerFactory
  * - Handle errors gracefully
  * - Convert parse tree to our clean data structures
  */
-class SmaliParser {
+class SmaliParser(private val strings: StringPool = StringPool()) {
     private val logger = LoggerFactory.getLogger(SmaliParser::class.java)
     
     /**
@@ -134,7 +135,7 @@ class SmaliParser {
             })
             
             // The builder listens to the parse itself — no second traversal of the tree.
-            val builder = ASTBuilder(uri, tokens, cleanContent)
+            val builder = ASTBuilder(uri, tokens, cleanContent, strings)
             parser.addParseListener(builder)
             parser.parse()
 
