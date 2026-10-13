@@ -18,7 +18,7 @@ class DefinitionProvider(
 
     fun findDefinition(uri: String, position: Position): List<Location> {
         val file = workspaceIndex.findFileByUri(uri) ?: run {
-            logger.warn("File not found in index: $uri")
+            logger.debug("Not indexed: {}", uri)
             return emptyList()
         }
         return when (val symbol = file.symbolAt(position)) {
