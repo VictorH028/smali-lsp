@@ -179,21 +179,23 @@ class HoverProvider(
 
     private fun hoverForPrimitiveType(type: String): Hover {
         val arrayDim = type.takeWhile { it == '[' }.length
-        val (typeName, description) = when (type.trimStart('[').firstOrNull()) {
-            'I' -> "int" to "32-bit signed integer"
-            'J' -> "long" to "64-bit signed integer"
-            'Z' -> "boolean" to "true or false"
-            'B' -> "byte" to "8-bit signed integer"
-            'C' -> "char" to "16-bit Unicode character"
-            'S' -> "short" to "16-bit signed integer"
-            'F' -> "float" to "32-bit floating point"
-            'D' -> "double" to "64-bit floating point"
-            'V' -> "void" to "no return value"
-            else -> "unknown" to "unknown primitive type"
+        val base = type.trimStart('[')
+        val typeName = Types.readableName(base)
+        val description = when (base.firstOrNull()) {
+            'I' -> "32-bit signed integer"
+            'J' -> "64-bit signed integer"
+            'Z' -> "true or false"
+            'B' -> "8-bit signed integer"
+            'C' -> "16-bit Unicode character"
+            'S' -> "16-bit signed integer"
+            'F' -> "32-bit floating point"
+            'D' -> "64-bit floating point"
+            'V' -> "no return value"
+            else -> "unknown primitive type"
         }
         val md = buildString {
             if (arrayDim > 0) {
-                append("**Primitive Array:** `${typeName}${"[]".repeat(arrayDim)}`\n\n")
+                append("**Primitive Array:** `${Types.readableName(type)}`\n\n")
                 append("**Base Type:** `${typeName}` ($description)\n\n")
                 append("**Dimensions:** $arrayDim\n\n")
             } else {
