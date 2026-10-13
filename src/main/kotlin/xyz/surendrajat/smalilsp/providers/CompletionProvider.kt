@@ -112,21 +112,18 @@ class CompletionProvider(
         )
 
         for (className in index.getClassNames()) {
-            // Match: partial against full class name or simple name
-            val classNameLower = className.lowercase()
-            val simpleName = Types.simpleName(className)
-            val simpleNameLower = simpleName.lowercase()
-
+            // Match: partial against full class name or simple name (no per-class lowercasing)
             val matches = if (hasLPrefix) {
                 // L-prefix: match against full class name (e.g., "Lcom/" matches "Lcom/example/Foo;")
-                classNameLower.startsWith(normalizedPartial)
+                className.startsWith(normalizedPartial, ignoreCase = true)
             } else {
                 // Directive context (.super etc): match partial against simple name or path
-                simpleNameLower.startsWith(normalizedPartial) ||
-                    classNameLower.contains(normalizedPartial)
+                Types.simpleName(className).startsWith(normalizedPartial, ignoreCase = true) ||
+                    className.contains(normalizedPartial, ignoreCase = true)
             }
 
             if (matches) {
+                val simpleName = Types.simpleName(className)
                 // Strip L prefix and ; suffix for display: "com/example/MyClass"
                 val readablePath = className.removePrefix("L").removeSuffix(";")
                 val item = CompletionItem(readablePath)

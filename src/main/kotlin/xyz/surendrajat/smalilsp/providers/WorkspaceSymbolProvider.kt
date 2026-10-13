@@ -52,10 +52,9 @@ class WorkspaceSymbolProvider(
         index.getFilesView().forEach { file ->
             // Add class symbol - match on simple name OR full package path.
             // e.g. query "billingclient" should match "Lcom/android/billingclient/BillingClient;"
-            val simpleName = Types.simpleName(file.classDefinition.name)
-            val fullPath = file.classDefinition.name.removePrefix("L").removeSuffix(";").lowercase()
-            val classMatch = matchSymbol(simpleName, normalizedQuery)
-                ?: if (fullPath.contains(normalizedQuery)) 50 else null
+            val className = file.classDefinition.name
+            val classMatch = matchSymbol(Types.simpleName(className), normalizedQuery)
+                ?: if (pathContains(className, normalizedQuery)) 50 else null
             if (classMatch != null) {
                 matches.offer(
                     ScoredSymbol(
@@ -158,27 +157,21 @@ class WorkspaceSymbolProvider(
      */
     private fun matchSymbol(symbolName: String, query: String): Int? {
         if (query.isEmpty()) return 10 // Everything matches empty query
-        
-        val normalizedSymbol = symbolName.lowercase()
-        
-        // Calculate length bonus: shorter names get higher scores
-        // Max bonus of 100, decreases with length
-        val lengthBonus = maxOf(0, 100 - normalizedSymbol.length * 5)
-        
-        // Exact match - highest priority
-        if (normalizedSymbol == query) return 1000 + lengthBonus
-        
-        // Prefix match - second priority
-        if (normalizedSymbol.startsWith(query)) return 500 + lengthBonus
-        
-        // Contains match - third priority
-        if (normalizedSymbol.contains(query)) return 100 + lengthBonus
-        
-        // Fuzzy match: only for longer queries to avoid noise
-        // Single-letter queries like "q" should NOT fuzzy match "request"
-        if (query.length >= 3 && fuzzyMatch(normalizedSymbol, query)) return 10
-        
+
+        // Case-insensitive comparisons without lowercasing every symbol: a query runs over
+        // every method and field name in the workspace, so one allocation per name counted.
+        val lengthBonus = maxOf(0, 100 - symbolName.length * 5)
+        if (symbolName.equals(query, ignoreCase = true)) return 1000 + lengthBonus
+        if (symbolName.startsWith(query, ignoreCase = true)) return 500 + lengthBonus
+        if (symbolName.contains(query, ignoreCase = true)) return 100 + lengthBonus
+        if (query.length >= 3 && fuzzyMatch(symbolName, query)) return 10
         return null
+    }
+
+    /** Does the package path of `Lcom/pkg/Name;` (without `L` and `;`) contain [query]? */
+    private fun pathContains(className: String, query: String): Boolean {
+        val at = className.indexOf(query, startIndex = 1, ignoreCase = true)
+        return at >= 0 && at + query.length <= className.length - 1
     }
     
     /**
@@ -192,14 +185,10 @@ class WorkspaceSymbolProvider(
     private fun fuzzyMatch(symbol: String, query: String): Boolean {
         var symbolIdx = 0
         var queryIdx = 0
-        
         while (symbolIdx < symbol.length && queryIdx < query.length) {
-            if (symbol[symbolIdx] == query[queryIdx]) {
-                queryIdx++
-            }
+            if (symbol[symbolIdx].lowercaseChar() == query[queryIdx]) queryIdx++
             symbolIdx++
         }
-        
         return queryIdx == query.length
     }
     
