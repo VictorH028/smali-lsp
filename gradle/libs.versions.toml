@@ -1,7 +1,6 @@
 [versions]
 kotlin = "2.4.21"
 shadow = "9.6.1"
-jmh-plugin = "0.7.3"
 antlr = "4.13.2"
 lsp4j = "1.0.0"
 coroutines = "1.11.0"
@@ -10,7 +9,6 @@ mcp = "0.15.0"
 slf4j = "2.0.20"
 logback = "1.6.5"
 junit = "6.1.3"
-jmh = "1.37"
 
 [libraries]
 antlr-tool = { module = "org.antlr:antlr4", version.ref = "antlr" }
@@ -23,10 +21,7 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit" }
-jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
-jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
-jmh = { id = "me.champeau.jmh", version.ref = "jmh-plugin" }

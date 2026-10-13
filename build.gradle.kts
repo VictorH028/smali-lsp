@@ -5,7 +5,6 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.shadow)
     id("antlr")
-    alias(libs.plugins.jmh)
 }
 
 group = "xyz.surendrajat"
@@ -41,10 +40,6 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     // Gradle 9 no longer injects the JUnit platform launcher — must be declared explicitly
     testRuntimeOnly(libs.junit.platform.launcher)
-
-    // JMH Benchmarking
-    jmh(libs.jmh.core)
-    jmh(libs.jmh.generator.annprocess)
 }
 
 // Keep build-time-only and never-loaded artifacts off the runtime classpath, so the
@@ -99,21 +94,6 @@ tasks.compileTestKotlin {
     dependsOn(tasks.generateTestGrammarSource)
 }
 
-// Fix JMH task dependencies
-tasks.named("compileJmhKotlin") {
-    dependsOn(tasks.named("generateJmhGrammarSource"))
-}
-
-// me.champeau.jmh 0.7.3 predates shadow 9: it feeds the benchmark runtime
-// classpath to ShadowJar via from(), which shadow 9 copies as nested .jar
-// files instead of merging (shadow 8 unpacked them). The resulting jar had
-// no org.openjdk.jmh.Main. Merge the configuration properly and drop the
-// nested jar copies.
-tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("jmhJar") {
-    configurations.set(listOf(project.configurations.getByName("jmhRuntimeClasspath")))
-    exclude("*.jar")
-}
-
 tasks.test {
     useJUnitPlatform()
 
@@ -130,8 +110,6 @@ tasks.test {
     // Too many forks OOM; too few wastes time. 4 is a safe default.
     maxParallelForks = minOf(4, Runtime.getRuntime().availableProcessors())
 
-    // Fail on first test failure
-    failFast = true
 }
 
 // Generate version metadata resource from project version + git commit
