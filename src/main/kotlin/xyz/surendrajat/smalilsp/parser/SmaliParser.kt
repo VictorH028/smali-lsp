@@ -1,7 +1,6 @@
 package xyz.surendrajat.smalilsp.parser
 
 import org.antlr.v4.runtime.*
-import org.antlr.v4.runtime.tree.ParseTreeWalker
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.parser.generated.SmaliLexer
 import xyz.surendrajat.smalilsp.parser.generated.SmaliParser as GeneratedSmaliParser
@@ -134,18 +133,12 @@ class SmaliParser {
                 }
             })
             
-            val parseTree = parser.parse()
-            
-            if (parseTree == null) {
-                logger.warn("Failed to parse $uri")
-                null
-            } else {
-                // Convert parse tree to our data structures
-                val builder = ASTBuilder(uri, tokens, cleanContent)
-                ParseTreeWalker.DEFAULT.walk(builder, parseTree)
-                
-                builder.build()
-            }
+            // The builder listens to the parse itself — no second traversal of the tree.
+            val builder = ASTBuilder(uri, tokens, cleanContent)
+            parser.addParseListener(builder)
+            parser.parse()
+
+            builder.build()
             
         } catch (e: Exception) {
             logger.error("Failed to parse $uri", e)

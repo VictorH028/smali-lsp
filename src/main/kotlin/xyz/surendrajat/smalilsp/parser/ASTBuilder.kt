@@ -16,6 +16,10 @@ import xyz.surendrajat.smalilsp.util.StringPool
  * Design: Keep it simple. Extract the raw text and parse the Smali-specific
  * formats ourselves. This is more reliable than trying to navigate the complex
  * ANTLR tree structure.
+ *
+ * Attached as a *parse* listener (`parser.addParseListener`), so the model is built
+ * while the parser runs instead of by a second walk over the finished tree; every
+ * callback is therefore an `exit` hook, where a node's children and stop token exist.
  */
 class ASTBuilder(
     private val uri: String,
@@ -56,12 +60,19 @@ class ASTBuilder(
     private val methods = mutableListOf<MethodDefinition>()
     private val fields = mutableListOf<FieldDefinition>()
     
-    // Track current method for instruction parsing
-    private var currentMethod: MethodDefinition? = null
+    // Declaration of the method whose body is being parsed (instructions attach to it)
+    private class PendingMethod(
+        val name: String,
+        val descriptor: String,
+        val modifiers: Set<String>,
+        val parameters: List<Parameter>,
+        val returnType: String
+    )
+    private var pendingMethod: PendingMethod? = null
     private val currentInstructions = mutableListOf<Instruction>()
     private val currentLabels = mutableMapOf<String, LabelDefinition>()
     
-    override fun enterClassDirective(ctx: GeneratedSmaliParser.ClassDirectiveContext) {
+    override fun exitClassDirective(ctx: GeneratedSmaliParser.ClassDirectiveContext) {
         // Extract class name (intern for memory efficiency)
         className = ctx.className()?.src()?.let { StringPool.intern(it) }
         
@@ -74,12 +85,12 @@ class ASTBuilder(
         classRange = ctx.toRange()
     }
     
-    override fun enterSuperDirective(ctx: GeneratedSmaliParser.SuperDirectiveContext) {
+    override fun exitSuperDirective(ctx: GeneratedSmaliParser.SuperDirectiveContext) {
         superClass = ctx.superName()?.src()?.let { StringPool.intern(it) }
         superClassRange = ctx.toRange()  // Capture .super directive range
     }
     
-    override fun enterImplementsDirective(ctx: GeneratedSmaliParser.ImplementsDirectiveContext) {
+    override fun exitImplementsDirective(ctx: GeneratedSmaliParser.ImplementsDirectiveContext) {
         ctx.referenceType()?.src()?.let { interfaceName ->
             val internedName = StringPool.intern(interfaceName)
             interfaces.add(internedName)
@@ -87,7 +98,7 @@ class ASTBuilder(
         }
     }
     
-    override fun enterFieldDirective(ctx: GeneratedSmaliParser.FieldDirectiveContext) {
+    override fun exitFieldDirective(ctx: GeneratedSmaliParser.FieldDirectiveContext) {
         // Parse field name and type from fieldNameAndType
         val fieldNameAndType = ctx.fieldNameAndType()?.src() ?: return
         
@@ -110,61 +121,56 @@ class ASTBuilder(
         ))
     }
     
-    override fun enterMethodDirective(ctx: GeneratedSmaliParser.MethodDirectiveContext) {
-        val methodDecl = ctx.methodDeclaration() ?: return
-        
-        // Get the entire method signature text
-        val methodSig = methodDecl.methodSignature()
-        val sigText = methodSig?.src() ?: return
-        
-        // Parse method name and descriptor from signature text
-        // Format: methodName(params)returnType
-        // e.g., <init>()V or getPath(FFFF)Landroid/graphics/Path;
-        
-        val openParen = sigText.indexOf('(')
-        if (openParen <= 0) return
-        
-        val methodName = StringPool.intern(sigText.substring(0, openParen))
-        val closeParen = sigText.indexOf(')', openParen)
-        if (closeParen < 0) return
-        
-        val params = sigText.substring(openParen + 1, closeParen)
-        val returnType = StringPool.intern(sigText.substring(closeParen + 1))  // Many duplicates: V, I, Z
-        
-        // Parse parameters - simplified: just split on type descriptors
-        val parameters = parseParameters(params)
-        
-        // Extract modifiers (intern common ones)
-        val modifiers = methodDecl.methodModifier().map { StringPool.intern(it.src()) }.toSet()
-        
-        // Create method definition (instructions will be added in exitMethodDirective)
-        currentMethod = MethodDefinition(
-            name = methodName,
-            descriptor = StringPool.intern("($params)$returnType"),
-            range = ctx.toRange(),
-            modifiers = modifiers,
-            parameters = parameters,
-            returnType = returnType,
-            instructions = emptyList(),  // Will be populated when we exit
-            labels = emptyMap()  // Will be populated when we exit
-        )
+    /**
+     * The declaration is complete before the body is parsed; capture it here and reset
+     * the per-method accumulators. The definition itself is created in [exitMethodDirective]
+     * once the full `.method` .. `.end method` range is known.
+     */
+    override fun exitMethodDeclaration(ctx: GeneratedSmaliParser.MethodDeclarationContext) {
+        pendingMethod = null
         currentInstructions.clear()
         currentLabels.clear()
+
+        val sigText = ctx.methodSignature()?.src() ?: return
+
+        // Format: methodName(params)returnType, e.g. <init>()V or getPath(FFFF)Landroid/graphics/Path;
+        val openParen = sigText.indexOf('(')
+        if (openParen <= 0) return
+        val closeParen = sigText.indexOf(')', openParen)
+        if (closeParen < 0) return
+
+        val methodName = StringPool.intern(sigText.substring(0, openParen))
+        val params = sigText.substring(openParen + 1, closeParen)
+        val returnType = StringPool.intern(sigText.substring(closeParen + 1))  // Many duplicates: V, I, Z
+        val modifiers = ctx.methodModifier().map { StringPool.intern(it.src()) }.toSet()
+
+        pendingMethod = PendingMethod(
+            name = methodName,
+            descriptor = StringPool.intern("($params)$returnType"),
+            modifiers = modifiers,
+            parameters = parseParameters(params),
+            returnType = returnType
+        )
     }
-    
+
     override fun exitMethodDirective(ctx: GeneratedSmaliParser.MethodDirectiveContext) {
-        // Finalize the method with collected instructions and labels
-        currentMethod?.let { method ->
-            methods.add(method.copy(
+        pendingMethod?.let { m ->
+            methods.add(MethodDefinition(
+                name = m.name,
+                descriptor = m.descriptor,
+                range = ctx.toRange(),
+                modifiers = m.modifiers,
+                parameters = m.parameters,
+                returnType = m.returnType,
                 instructions = currentInstructions.toList(),
                 labels = currentLabels.toMap()
             ))
         }
-        currentMethod = null
+        pendingMethod = null
         currentInstructions.clear()
         currentLabels.clear()
     }
-    
+
     /**
      * Parse parameter types from descriptor string.
      * Delegates to DescriptorParser for the core parsing logic,
@@ -221,84 +227,84 @@ class ASTBuilder(
     /**
      * Parse invoke-virtual instruction
      */
-    override fun enterInvokeVirtualInstruction(ctx: GeneratedSmaliParser.InvokeVirtualInstructionContext) {
+    override fun exitInvokeVirtualInstruction(ctx: GeneratedSmaliParser.InvokeVirtualInstructionContext) {
         parseInvokeInstruction("invoke-virtual", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterInvokeVirtualRangeInstruction(ctx: GeneratedSmaliParser.InvokeVirtualRangeInstructionContext) {
+    override fun exitInvokeVirtualRangeInstruction(ctx: GeneratedSmaliParser.InvokeVirtualRangeInstructionContext) {
         parseInvokeInstruction("invoke-virtual/range", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
     /**
      * Parse invoke-super instruction
      */
-    override fun enterInvokeSuperInstruction(ctx: GeneratedSmaliParser.InvokeSuperInstructionContext) {
+    override fun exitInvokeSuperInstruction(ctx: GeneratedSmaliParser.InvokeSuperInstructionContext) {
         parseInvokeInstruction("invoke-super", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterInvokeSuperRangeInstruction(ctx: GeneratedSmaliParser.InvokeSuperRangeInstructionContext) {
+    override fun exitInvokeSuperRangeInstruction(ctx: GeneratedSmaliParser.InvokeSuperRangeInstructionContext) {
         parseInvokeInstruction("invoke-super/range", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
     /**
      * Parse invoke-direct instruction
      */
-    override fun enterInvokeDirectInstruction(ctx: GeneratedSmaliParser.InvokeDirectInstructionContext) {
+    override fun exitInvokeDirectInstruction(ctx: GeneratedSmaliParser.InvokeDirectInstructionContext) {
         parseInvokeInstruction("invoke-direct", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterInvokeDirectRangeInstruction(ctx: GeneratedSmaliParser.InvokeDirectRangeInstructionContext) {
+    override fun exitInvokeDirectRangeInstruction(ctx: GeneratedSmaliParser.InvokeDirectRangeInstructionContext) {
         parseInvokeInstruction("invoke-direct/range", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
     /**
      * Parse invoke-static instruction
      */
-    override fun enterInvokeStaticInstruction(ctx: GeneratedSmaliParser.InvokeStaticInstructionContext) {
+    override fun exitInvokeStaticInstruction(ctx: GeneratedSmaliParser.InvokeStaticInstructionContext) {
         parseInvokeInstruction("invoke-static", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterInvokeStaticRangeInstruction(ctx: GeneratedSmaliParser.InvokeStaticRangeInstructionContext) {
+    override fun exitInvokeStaticRangeInstruction(ctx: GeneratedSmaliParser.InvokeStaticRangeInstructionContext) {
         parseInvokeInstruction("invoke-static/range", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
     /**
      * Parse invoke-interface instruction
      */
-    override fun enterInvokeInterfaceInstruction(ctx: GeneratedSmaliParser.InvokeInterfaceInstructionContext) {
+    override fun exitInvokeInterfaceInstruction(ctx: GeneratedSmaliParser.InvokeInterfaceInstructionContext) {
         parseInvokeInstruction("invoke-interface", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterInvokeInterfaceRangeInstruction(ctx: GeneratedSmaliParser.InvokeInterfaceRangeInstructionContext) {
+    override fun exitInvokeInterfaceRangeInstruction(ctx: GeneratedSmaliParser.InvokeInterfaceRangeInstructionContext) {
         parseInvokeInstruction("invoke-interface/range", ctx.methodInvocationTarget(), ctx.toRange())
     }
     
     /**
      * invoke-polymorphic targets a regular method reference followed by a call-site prototype.
      */
-    override fun enterInvokePolymorphicInstruction(ctx: GeneratedSmaliParser.InvokePolymorphicInstructionContext) {
+    override fun exitInvokePolymorphicInstruction(ctx: GeneratedSmaliParser.InvokePolymorphicInstructionContext) {
         parseInvokeInstruction("invoke-polymorphic", ctx.methodInvocationTarget(), ctx.toRange())
     }
 
-    override fun enterInvokePolymorphicRangeInstruction(ctx: GeneratedSmaliParser.InvokePolymorphicRangeInstructionContext) {
+    override fun exitInvokePolymorphicRangeInstruction(ctx: GeneratedSmaliParser.InvokePolymorphicRangeInstructionContext) {
         parseInvokeInstruction("invoke-polymorphic/range", ctx.methodInvocationTarget(), ctx.toRange())
     }
 
     /**
      * invoke-custom: the navigable symbol is the bootstrap method after `@`.
      */
-    override fun enterInvokeCustomInstruction(ctx: GeneratedSmaliParser.InvokeCustomInstructionContext) {
+    override fun exitInvokeCustomInstruction(ctx: GeneratedSmaliParser.InvokeCustomInstructionContext) {
         parseInvokeInstruction("invoke-custom", ctx.callSiteReference()?.methodReference(), ctx.toRange())
     }
 
-    override fun enterInvokeCustomRangeInstruction(ctx: GeneratedSmaliParser.InvokeCustomRangeInstructionContext) {
+    override fun exitInvokeCustomRangeInstruction(ctx: GeneratedSmaliParser.InvokeCustomRangeInstructionContext) {
         parseInvokeInstruction("invoke-custom/range", ctx.callSiteReference()?.methodReference(), ctx.toRange())
     }
 
     /**
      * const-method-handle references either a method (`invoke-static@...`) or a field (`instance-get@...`).
      */
-    override fun enterInvokeConstMethodHandleInstruction(ctx: GeneratedSmaliParser.InvokeConstMethodHandleInstructionContext) {
+    override fun exitInvokeConstMethodHandleInstruction(ctx: GeneratedSmaliParser.InvokeConstMethodHandleInstructionContext) {
         val handle = ctx.methodHandleReference() ?: return
         handle.methodReference()?.let { parseInvokeInstruction("const-method-handle", it, ctx.toRange()) }
         handle.fieldInvocationTarget()?.let { parseFieldAccessInstruction("const-method-handle", it, ctx.toRange()) }
@@ -314,7 +320,7 @@ class ASTBuilder(
         target: ParserRuleContext?,
         range: Range
     ) {
-        if (currentMethod == null || target == null) return
+        if (pendingMethod == null || target == null) return
         
         // Format: Lcom/example/MyClass;->myMethod(I)V
         val targetText = target.src()
@@ -343,124 +349,124 @@ class ASTBuilder(
     /**
      * Parse iget instructions
      */
-    override fun enterIgetInstruction(ctx: GeneratedSmaliParser.IgetInstructionContext) {
+    override fun exitIgetInstruction(ctx: GeneratedSmaliParser.IgetInstructionContext) {
         parseFieldAccessInstruction("iget", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIgetWideInstruction(ctx: GeneratedSmaliParser.IgetWideInstructionContext) {
+    override fun exitIgetWideInstruction(ctx: GeneratedSmaliParser.IgetWideInstructionContext) {
         parseFieldAccessInstruction("iget-wide", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIgetObjectInstruction(ctx: GeneratedSmaliParser.IgetObjectInstructionContext) {
+    override fun exitIgetObjectInstruction(ctx: GeneratedSmaliParser.IgetObjectInstructionContext) {
         parseFieldAccessInstruction("iget-object", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIgetBooleanInstruction(ctx: GeneratedSmaliParser.IgetBooleanInstructionContext) {
+    override fun exitIgetBooleanInstruction(ctx: GeneratedSmaliParser.IgetBooleanInstructionContext) {
         parseFieldAccessInstruction("iget-boolean", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIgetByteInstruction(ctx: GeneratedSmaliParser.IgetByteInstructionContext) {
+    override fun exitIgetByteInstruction(ctx: GeneratedSmaliParser.IgetByteInstructionContext) {
         parseFieldAccessInstruction("iget-byte", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIgetCharInstruction(ctx: GeneratedSmaliParser.IgetCharInstructionContext) {
+    override fun exitIgetCharInstruction(ctx: GeneratedSmaliParser.IgetCharInstructionContext) {
         parseFieldAccessInstruction("iget-char", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIgetShortInstruction(ctx: GeneratedSmaliParser.IgetShortInstructionContext) {
+    override fun exitIgetShortInstruction(ctx: GeneratedSmaliParser.IgetShortInstructionContext) {
         parseFieldAccessInstruction("iget-short", ctx.instanceField(), ctx.toRange())
     }
     
     /**
      * Parse iput instructions
      */
-    override fun enterIputInstruction(ctx: GeneratedSmaliParser.IputInstructionContext) {
+    override fun exitIputInstruction(ctx: GeneratedSmaliParser.IputInstructionContext) {
         parseFieldAccessInstruction("iput", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIputWideInstruction(ctx: GeneratedSmaliParser.IputWideInstructionContext) {
+    override fun exitIputWideInstruction(ctx: GeneratedSmaliParser.IputWideInstructionContext) {
         parseFieldAccessInstruction("iput-wide", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIputObjectInstruction(ctx: GeneratedSmaliParser.IputObjectInstructionContext) {
+    override fun exitIputObjectInstruction(ctx: GeneratedSmaliParser.IputObjectInstructionContext) {
         parseFieldAccessInstruction("iput-object", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIputBooleanInstruction(ctx: GeneratedSmaliParser.IputBooleanInstructionContext) {
+    override fun exitIputBooleanInstruction(ctx: GeneratedSmaliParser.IputBooleanInstructionContext) {
         parseFieldAccessInstruction("iput-boolean", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIputByteInstruction(ctx: GeneratedSmaliParser.IputByteInstructionContext) {
+    override fun exitIputByteInstruction(ctx: GeneratedSmaliParser.IputByteInstructionContext) {
         parseFieldAccessInstruction("iput-byte", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIputCharInstruction(ctx: GeneratedSmaliParser.IputCharInstructionContext) {
+    override fun exitIputCharInstruction(ctx: GeneratedSmaliParser.IputCharInstructionContext) {
         parseFieldAccessInstruction("iput-char", ctx.instanceField(), ctx.toRange())
     }
     
-    override fun enterIputShortInstruction(ctx: GeneratedSmaliParser.IputShortInstructionContext) {
+    override fun exitIputShortInstruction(ctx: GeneratedSmaliParser.IputShortInstructionContext) {
         parseFieldAccessInstruction("iput-short", ctx.instanceField(), ctx.toRange())
     }
     
     /**
      * Parse sget instructions
      */
-    override fun enterSGetInstruction(ctx: GeneratedSmaliParser.SGetInstructionContext) {
+    override fun exitSGetInstruction(ctx: GeneratedSmaliParser.SGetInstructionContext) {
         parseFieldAccessInstruction("sget", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSGetWideInstruction(ctx: GeneratedSmaliParser.SGetWideInstructionContext) {
+    override fun exitSGetWideInstruction(ctx: GeneratedSmaliParser.SGetWideInstructionContext) {
         parseFieldAccessInstruction("sget-wide", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSGetObjectInstruction(ctx: GeneratedSmaliParser.SGetObjectInstructionContext) {
+    override fun exitSGetObjectInstruction(ctx: GeneratedSmaliParser.SGetObjectInstructionContext) {
         parseFieldAccessInstruction("sget-object", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSGetBooleanInstruction(ctx: GeneratedSmaliParser.SGetBooleanInstructionContext) {
+    override fun exitSGetBooleanInstruction(ctx: GeneratedSmaliParser.SGetBooleanInstructionContext) {
         parseFieldAccessInstruction("sget-boolean", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSGetByteInstruction(ctx: GeneratedSmaliParser.SGetByteInstructionContext) {
+    override fun exitSGetByteInstruction(ctx: GeneratedSmaliParser.SGetByteInstructionContext) {
         parseFieldAccessInstruction("sget-byte", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSGetCharInstruction(ctx: GeneratedSmaliParser.SGetCharInstructionContext) {
+    override fun exitSGetCharInstruction(ctx: GeneratedSmaliParser.SGetCharInstructionContext) {
         parseFieldAccessInstruction("sget-char", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSGetShortInstruction(ctx: GeneratedSmaliParser.SGetShortInstructionContext) {
+    override fun exitSGetShortInstruction(ctx: GeneratedSmaliParser.SGetShortInstructionContext) {
         parseFieldAccessInstruction("sget-short", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
     /**
      * Parse sput instructions
      */
-    override fun enterSPutInstruction(ctx: GeneratedSmaliParser.SPutInstructionContext) {
+    override fun exitSPutInstruction(ctx: GeneratedSmaliParser.SPutInstructionContext) {
         parseFieldAccessInstruction("sput", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSPutWideInstruction(ctx: GeneratedSmaliParser.SPutWideInstructionContext) {
+    override fun exitSPutWideInstruction(ctx: GeneratedSmaliParser.SPutWideInstructionContext) {
         parseFieldAccessInstruction("sput-wide", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSPutObjectInstruction(ctx: GeneratedSmaliParser.SPutObjectInstructionContext) {
+    override fun exitSPutObjectInstruction(ctx: GeneratedSmaliParser.SPutObjectInstructionContext) {
         parseFieldAccessInstruction("sput-object", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSPutBooleanInstruction(ctx: GeneratedSmaliParser.SPutBooleanInstructionContext) {
+    override fun exitSPutBooleanInstruction(ctx: GeneratedSmaliParser.SPutBooleanInstructionContext) {
         parseFieldAccessInstruction("sput-boolean", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSPutByteInstruction(ctx: GeneratedSmaliParser.SPutByteInstructionContext) {
+    override fun exitSPutByteInstruction(ctx: GeneratedSmaliParser.SPutByteInstructionContext) {
         parseFieldAccessInstruction("sput-byte", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSPutCharInstruction(ctx: GeneratedSmaliParser.SPutCharInstructionContext) {
+    override fun exitSPutCharInstruction(ctx: GeneratedSmaliParser.SPutCharInstructionContext) {
         parseFieldAccessInstruction("sput-char", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
-    override fun enterSPutShortInstruction(ctx: GeneratedSmaliParser.SPutShortInstructionContext) {
+    override fun exitSPutShortInstruction(ctx: GeneratedSmaliParser.SPutShortInstructionContext) {
         parseFieldAccessInstruction("sput-short", ctx.fieldInvocationTarget(), ctx.toRange())
     }
     
@@ -472,7 +478,7 @@ class ASTBuilder(
         fieldCtx: ParserRuleContext?,
         range: Range
     ) {
-        if (currentMethod == null || fieldCtx == null) return
+        if (pendingMethod == null || fieldCtx == null) return
         
         // Format: Lcom/example/MyClass;->myField:I
         val fieldText = fieldCtx.src()
@@ -501,8 +507,8 @@ class ASTBuilder(
     /**
      * Parse new-instance instruction
      */
-    override fun enterNewInstanceInstruction(ctx: GeneratedSmaliParser.NewInstanceInstructionContext) {
-        if (currentMethod == null) return
+    override fun exitNewInstanceInstruction(ctx: GeneratedSmaliParser.NewInstanceInstructionContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.newInstanceType()?.src() ?: return
         
@@ -516,8 +522,8 @@ class ASTBuilder(
     /**
      * Parse check-cast instruction
      */
-    override fun enterCheckCastInstruction(ctx: GeneratedSmaliParser.CheckCastInstructionContext) {
-        if (currentMethod == null) return
+    override fun exitCheckCastInstruction(ctx: GeneratedSmaliParser.CheckCastInstructionContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.checkCastType()?.src() ?: return
         
@@ -531,8 +537,8 @@ class ASTBuilder(
     /**
      * Parse instance-of instruction
      */
-    override fun enterInstanceOfInstruction(ctx: GeneratedSmaliParser.InstanceOfInstructionContext) {
-        if (currentMethod == null) return
+    override fun exitInstanceOfInstruction(ctx: GeneratedSmaliParser.InstanceOfInstructionContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.checkInstanceType()?.src() ?: return
         
@@ -546,8 +552,8 @@ class ASTBuilder(
     /**
      * Parse const-class instruction
      */
-    override fun enterConstClass(ctx: GeneratedSmaliParser.ConstClassContext) {
-        if (currentMethod == null) return
+    override fun exitConstClass(ctx: GeneratedSmaliParser.ConstClassContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.referenceOrArrayType()?.src() ?: return
         
@@ -562,8 +568,8 @@ class ASTBuilder(
      * Parse filled-new-array instruction
      * Format: filled-new-array {v0, v1, v2}, [Lcom/example/MyClass;
      */
-    override fun enterFilledNewArrayInstruction(ctx: GeneratedSmaliParser.FilledNewArrayInstructionContext) {
-        if (currentMethod == null) return
+    override fun exitFilledNewArrayInstruction(ctx: GeneratedSmaliParser.FilledNewArrayInstructionContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.arrayElementType()?.src() ?: return
         
@@ -578,8 +584,8 @@ class ASTBuilder(
      * Parse filled-new-array/range instruction
      * Format: filled-new-array/range {v0 .. v9}, [[Lt5/d;
      */
-    override fun enterFilledNewArrayRangeInstruction(ctx: GeneratedSmaliParser.FilledNewArrayRangeInstructionContext) {
-        if (currentMethod == null) return
+    override fun exitFilledNewArrayRangeInstruction(ctx: GeneratedSmaliParser.FilledNewArrayRangeInstructionContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.arrayElementType()?.src() ?: return
         
@@ -594,8 +600,8 @@ class ASTBuilder(
      * Parse new-array instruction
      * Format: new-array v1, v0, [I
      */
-    override fun enterNewArrayInstruction(ctx: GeneratedSmaliParser.NewArrayInstructionContext) {
-        if (currentMethod == null) return
+    override fun exitNewArrayInstruction(ctx: GeneratedSmaliParser.NewArrayInstructionContext) {
+        if (pendingMethod == null) return
         
         val className = ctx.arrayElementType()?.src() ?: return
         
@@ -614,8 +620,8 @@ class ASTBuilder(
      * Parse const-string instruction
      * Format: const-string v0, "string value"
      */
-    override fun enterConstString(ctx: GeneratedSmaliParser.ConstStringContext) {
-        if (currentMethod == null) return
+    override fun exitConstString(ctx: GeneratedSmaliParser.ConstStringContext) {
+        if (pendingMethod == null) return
 
         ctx.registerIdentifier() ?: return
         val rawLiteral = ctx.stringLiteral()?.src() ?: return
@@ -631,8 +637,8 @@ class ASTBuilder(
      * Parse const-string/jumbo instruction
      * Format: const-string/jumbo v0, "string value"
      */
-    override fun enterConstStringJumbo(ctx: GeneratedSmaliParser.ConstStringJumboContext) {
-        if (currentMethod == null) return
+    override fun exitConstStringJumbo(ctx: GeneratedSmaliParser.ConstStringJumboContext) {
+        if (pendingMethod == null) return
 
         ctx.registerIdentifier() ?: return
         val rawLiteral = ctx.stringLiteral()?.src() ?: return
@@ -650,8 +656,8 @@ class ASTBuilder(
      * Parse label definition (e.g., :cond_0)
      * lineLabel is the rule for labels in method body statements
      */
-    override fun enterLineLabel(ctx: GeneratedSmaliParser.LineLabelContext) {
-        if (currentMethod == null) return
+    override fun exitLineLabel(ctx: GeneratedSmaliParser.LineLabelContext) {
+        if (pendingMethod == null) return
         
         val labelCtx = ctx.label() ?: return
         val labelName = labelCtx.labelName()?.src() ?: return
@@ -665,69 +671,69 @@ class ASTBuilder(
     /**
      * Parse goto instruction
      */
-    override fun enterGotoInstruction(ctx: GeneratedSmaliParser.GotoInstructionContext) {
+    override fun exitGotoInstruction(ctx: GeneratedSmaliParser.GotoInstructionContext) {
         parseJumpInstruction("goto", ctx.label(), ctx.toRange())
     }
     
-    override fun enterGoto16Instruction(ctx: GeneratedSmaliParser.Goto16InstructionContext) {
+    override fun exitGoto16Instruction(ctx: GeneratedSmaliParser.Goto16InstructionContext) {
         parseJumpInstruction("goto/16", ctx.label(), ctx.toRange())
     }
     
-    override fun enterGoto32Instruction(ctx: GeneratedSmaliParser.Goto32InstructionContext) {
+    override fun exitGoto32Instruction(ctx: GeneratedSmaliParser.Goto32InstructionContext) {
         parseJumpInstruction("goto/32", ctx.label(), ctx.toRange())
     }
     
     /**
      * Parse if-*z instructions (single register tests)
      */
-    override fun enterIfEqzInstruction(ctx: GeneratedSmaliParser.IfEqzInstructionContext) {
+    override fun exitIfEqzInstruction(ctx: GeneratedSmaliParser.IfEqzInstructionContext) {
         parseJumpInstruction("if-eqz", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfNezInstruction(ctx: GeneratedSmaliParser.IfNezInstructionContext) {
+    override fun exitIfNezInstruction(ctx: GeneratedSmaliParser.IfNezInstructionContext) {
         parseJumpInstruction("if-nez", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfLtzInstruction(ctx: GeneratedSmaliParser.IfLtzInstructionContext) {
+    override fun exitIfLtzInstruction(ctx: GeneratedSmaliParser.IfLtzInstructionContext) {
         parseJumpInstruction("if-ltz", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfGezInstruction(ctx: GeneratedSmaliParser.IfGezInstructionContext) {
+    override fun exitIfGezInstruction(ctx: GeneratedSmaliParser.IfGezInstructionContext) {
         parseJumpInstruction("if-gez", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfGtzInstruction(ctx: GeneratedSmaliParser.IfGtzInstructionContext) {
+    override fun exitIfGtzInstruction(ctx: GeneratedSmaliParser.IfGtzInstructionContext) {
         parseJumpInstruction("if-gtz", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfLezInstruction(ctx: GeneratedSmaliParser.IfLezInstructionContext) {
+    override fun exitIfLezInstruction(ctx: GeneratedSmaliParser.IfLezInstructionContext) {
         parseJumpInstruction("if-lez", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
     /**
      * Parse if-* instructions (two register comparisons)
      */
-    override fun enterIfEqInstruction(ctx: GeneratedSmaliParser.IfEqInstructionContext) {
+    override fun exitIfEqInstruction(ctx: GeneratedSmaliParser.IfEqInstructionContext) {
         parseJumpInstruction("if-eq", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfNeInstruction(ctx: GeneratedSmaliParser.IfNeInstructionContext) {
+    override fun exitIfNeInstruction(ctx: GeneratedSmaliParser.IfNeInstructionContext) {
         parseJumpInstruction("if-ne", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfLtInstruction(ctx: GeneratedSmaliParser.IfLtInstructionContext) {
+    override fun exitIfLtInstruction(ctx: GeneratedSmaliParser.IfLtInstructionContext) {
         parseJumpInstruction("if-lt", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfGeInstruction(ctx: GeneratedSmaliParser.IfGeInstructionContext) {
+    override fun exitIfGeInstruction(ctx: GeneratedSmaliParser.IfGeInstructionContext) {
         parseJumpInstruction("if-ge", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfGtInstruction(ctx: GeneratedSmaliParser.IfGtInstructionContext) {
+    override fun exitIfGtInstruction(ctx: GeneratedSmaliParser.IfGtInstructionContext) {
         parseJumpInstruction("if-gt", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
-    override fun enterIfLeInstruction(ctx: GeneratedSmaliParser.IfLeInstructionContext) {
+    override fun exitIfLeInstruction(ctx: GeneratedSmaliParser.IfLeInstructionContext) {
         parseJumpInstruction("if-le", ctx.ifLabel()?.label(), ctx.toRange())
     }
     
@@ -739,7 +745,7 @@ class ASTBuilder(
         labelCtx: GeneratedSmaliParser.LabelContext?,
         fullRange: Range
     ) {
-        if (currentMethod == null || labelCtx == null) return
+        if (pendingMethod == null || labelCtx == null) return
         
         val labelName = labelCtx.labelName()?.src() ?: return
         val labelRange = labelCtx.toRange()
