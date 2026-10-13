@@ -375,10 +375,12 @@ OP_SPARSE_SWITCH:               'sparse-switch';
 
 // Literals
 
-DECIMAL_LITERAL:    ('0' | [1-9] (Digits? | '_'+ Digits)) [lL]?;
-HEX_LITERAL:        '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? [lL]?;
-OCT_LITERAL:        '0' '_'* [0-7] ([0-7_]* [0-7])? [lL]?;
-BINARY_LITERAL:     '0' [bB] [01] ([01_]* [01])? [lL]?;
+// Integer literals carry an optional type suffix: l/L long, s/S short, t/T byte
+// (baksmali emits e.g. `0x1t` / `0x2s` for byte/short constants and array-data entries).
+DECIMAL_LITERAL:    ('0' | [1-9] (Digits? | '_'+ Digits)) IntegerSuffix?;
+HEX_LITERAL:        '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? IntegerSuffix?;
+OCT_LITERAL:        '0' '_'* [0-7] ([0-7_]* [0-7])? IntegerSuffix?;
+BINARY_LITERAL:     '0' [bB] [01] ([01_]* [01])? IntegerSuffix?;
 
 FLOAT_LITERAL:      (Digits '.' Digits? | '.' Digits) ExponentPart? [fFdD]?
              |       Digits (ExponentPart [fFdD]? | [fFdD])
@@ -420,6 +422,10 @@ LINE_COMMENT
 fragment SimpleName:        LetterNoHyphen (LetterOrDigit)*;  // Start with non-hyphen to allow SUB token before literals
 
 // Fragment rules
+
+fragment IntegerSuffix
+    : [lLsStT]
+    ;
 
 fragment ExponentPart
     : [eE] [+-]? Digits

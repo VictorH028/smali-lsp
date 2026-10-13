@@ -1114,7 +1114,7 @@ catchAllDirective:          CATCHALL_DIRECTIVE LBRACE catchFromLabel DOT DOT cat
 
 arrayDataDirective:         ARRAY_DATA_DIRECTIVE numericLiteral arrayDataEntry* ARRAY_DATA_END_DIRECTIVE;
 
-arrayDataEntry:             numericLiteral IDENTIFIER?;
+arrayDataEntry:             numericLiteral;
 
 sparseSwitchDirectiveValue: numericLiteral ARROW label;
 
