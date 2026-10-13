@@ -114,6 +114,7 @@ INTERFACE:                      'interface';
 TRANSIENT:                      'transient';
 BRIDGE:                         'bridge';
 DECLARED_SYNCHRONIZED:          'declared-synchronized';
+SYNCHRONIZED:                   'synchronized';
 VOLATILE:                       'volatile';
 STRICTFP:                       'strictfp';
 VARARGS:                        'varargs';

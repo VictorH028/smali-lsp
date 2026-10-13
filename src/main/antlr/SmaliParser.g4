@@ -152,6 +152,7 @@ methodModifier:
     | CONSTRUCTOR
     | BRIDGE
     | DECLARED_SYNCHRONIZED
+    | SYNCHRONIZED
     | STRICTFP
     | VARARGS
     | NATIVE
