@@ -623,7 +623,6 @@ class ASTBuilder(
     override fun exitConstString(ctx: GeneratedSmaliParser.ConstStringContext) {
         if (pendingMethod == null) return
 
-        ctx.registerIdentifier() ?: return
         val rawLiteral = ctx.stringLiteral()?.src() ?: return
         val value = rawLiteral.removeSurrounding("\"")
 
@@ -640,7 +639,6 @@ class ASTBuilder(
     override fun exitConstStringJumbo(ctx: GeneratedSmaliParser.ConstStringJumboContext) {
         if (pendingMethod == null) return
 
-        ctx.registerIdentifier() ?: return
         val rawLiteral = ctx.stringLiteral()?.src() ?: return
         val value = rawLiteral.removeSurrounding("\"")
 

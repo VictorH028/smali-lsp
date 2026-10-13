@@ -28,7 +28,6 @@ options {
 
 // Helpers
 
-registerIdentifier:             IDENTIFIER;
 stringLiteral:                  STRING_LITERAL;
 negativeNumericLiteral:         SUB positiveNumericLiteral;
 
@@ -231,15 +230,9 @@ label:                          COLON labelName;
 
 // Instructions
 
-leftRegister:                   registerIdentifier;
+registerRange:                  LBRACE IDENTIFIER DOT DOT IDENTIFIER RBRACE;
 
-rightRegister:                  registerIdentifier;
-
-registerListRegisters:          registerIdentifier (COMMA registerIdentifier)*;
-
-registerRange:                  LBRACE leftRegister DOT DOT rightRegister RBRACE;
-
-registerList:                   LBRACE RBRACE | LBRACE registerListRegisters RBRACE;
+registerList:                   LBRACE (IDENTIFIER (COMMA IDENTIFIER)*)? RBRACE;
 
 gotoInstruction:                OP_GOTO label;
 
@@ -247,97 +240,97 @@ goto16Instruction:              OP_GOTO_16 label;
 
 goto32Instruction:              OP_GOTO_32 label;
 
-moveResultInstruction:          OP_MOVE_RESULT registerIdentifier;
+moveResultInstruction:          OP_MOVE_RESULT IDENTIFIER;
 
-moveResultWideInstruction:      OP_MOVE_RESULT_WIDE registerIdentifier;
+moveResultWideInstruction:      OP_MOVE_RESULT_WIDE IDENTIFIER;
 
-moveResultObjectInstruction:    OP_MOVE_RESULT_OBJECT registerIdentifier;
+moveResultObjectInstruction:    OP_MOVE_RESULT_OBJECT IDENTIFIER;
 
-moveExceptionInstruction:       OP_MOVE_EXCEPTION registerIdentifier;
+moveExceptionInstruction:       OP_MOVE_EXCEPTION IDENTIFIER;
 
-returnInstruction:              OP_RETURN registerIdentifier;
+returnInstruction:              OP_RETURN IDENTIFIER;
 
-returnWideInstruction:          OP_RETURN_WIDE registerIdentifier;
+returnWideInstruction:          OP_RETURN_WIDE IDENTIFIER;
 
-returnObjectInstruction:        OP_RETURN_OBJECT registerIdentifier;
+returnObjectInstruction:        OP_RETURN_OBJECT IDENTIFIER;
 
-monitorEnterInstruction:        OP_MONITOR_ENTER registerIdentifier;
+monitorEnterInstruction:        OP_MONITOR_ENTER IDENTIFIER;
 
-monitorExitInstruction:         OP_MONITOR_EXIT registerIdentifier;
+monitorExitInstruction:         OP_MONITOR_EXIT IDENTIFIER;
 
-throwInstruction:               OP_THROW registerIdentifier;
+throwInstruction:               OP_THROW IDENTIFIER;
 
 returnVoidInstruction:          OP_RETURN_VOID;
 
 nopInstruction:                 OP_NOP;
 
-moveInstruction:                OP_MOVE leftRegister COMMA rightRegister;
+moveInstruction:                OP_MOVE IDENTIFIER COMMA IDENTIFIER;
 
-moveFrom16Instruction:          OP_MOVE_FROM16 leftRegister COMMA rightRegister;
+moveFrom16Instruction:          OP_MOVE_FROM16 IDENTIFIER COMMA IDENTIFIER;
 
-move16Instruction:              OP_MOVE_16 leftRegister COMMA rightRegister;
+move16Instruction:              OP_MOVE_16 IDENTIFIER COMMA IDENTIFIER;
 
-moveWideInstruction:            OP_MOVE_WIDE leftRegister COMMA rightRegister;
+moveWideInstruction:            OP_MOVE_WIDE IDENTIFIER COMMA IDENTIFIER;
 
-moveWideFrom16Instruction:      OP_MOVE_WIDE_FROM16 leftRegister COMMA rightRegister;
+moveWideFrom16Instruction:      OP_MOVE_WIDE_FROM16 IDENTIFIER COMMA IDENTIFIER;
 
-moveWide16Instruction:          OP_MOVE_WIDE_16 leftRegister COMMA rightRegister;
+moveWide16Instruction:          OP_MOVE_WIDE_16 IDENTIFIER COMMA IDENTIFIER;
 
-moveObjectInstruction:          OP_MOVE_OBJECT leftRegister COMMA rightRegister;
+moveObjectInstruction:          OP_MOVE_OBJECT IDENTIFIER COMMA IDENTIFIER;
 
-moveObjectFrom16Instruction:    OP_MOVE_OBJECT_FROM16 leftRegister COMMA rightRegister;
+moveObjectFrom16Instruction:    OP_MOVE_OBJECT_FROM16 IDENTIFIER COMMA IDENTIFIER;
 
-moveObject16Instruction:        OP_MOVE_OBJECT_16 leftRegister COMMA rightRegister;
+moveObject16Instruction:        OP_MOVE_OBJECT_16 IDENTIFIER COMMA IDENTIFIER;
 
-constInstruction:               OP_CONST registerIdentifier COMMA numericLiteral;
+constInstruction:               OP_CONST IDENTIFIER COMMA numericLiteral;
 
-const4Instruction:              OP_CONST_4 registerIdentifier COMMA numericLiteral;
+const4Instruction:              OP_CONST_4 IDENTIFIER COMMA numericLiteral;
 
-const16Instruction:             OP_CONST_16 registerIdentifier COMMA numericLiteral;
+const16Instruction:             OP_CONST_16 IDENTIFIER COMMA numericLiteral;
 
-constHigh16Instruction:         OP_CONST_HIGH16 registerIdentifier COMMA numericLiteral;
+constHigh16Instruction:         OP_CONST_HIGH16 IDENTIFIER COMMA numericLiteral;
 
-constWide16Instruction:         OP_CONST_WIDE_16 registerIdentifier COMMA numericLiteral;
+constWide16Instruction:         OP_CONST_WIDE_16 IDENTIFIER COMMA numericLiteral;
 
-constWide32Instruction:         OP_CONST_WIDE_32 registerIdentifier COMMA numericLiteral;
+constWide32Instruction:         OP_CONST_WIDE_32 IDENTIFIER COMMA numericLiteral;
 
-constWideInstruction:           OP_CONST_WIDE registerIdentifier COMMA numericLiteral;
+constWideInstruction:           OP_CONST_WIDE IDENTIFIER COMMA numericLiteral;
 
-constWideHigh16Instruction:     OP_CONST_WIDE_HIGH16 registerIdentifier COMMA numericLiteral;
+constWideHigh16Instruction:     OP_CONST_WIDE_HIGH16 IDENTIFIER COMMA numericLiteral;
 
-constString:                    OP_CONST_STRING registerIdentifier COMMA stringLiteral;
+constString:                    OP_CONST_STRING IDENTIFIER COMMA stringLiteral;
 
-constStringJumbo:               OP_CONST_STRING_JUMBO registerIdentifier COMMA stringLiteral;
+constStringJumbo:               OP_CONST_STRING_JUMBO IDENTIFIER COMMA stringLiteral;
 
-constClass:                     OP_CONST_CLASS registerIdentifier COMMA referenceOrArrayType;
+constClass:                     OP_CONST_CLASS IDENTIFIER COMMA referenceOrArrayType;
 
-sGetInstruction:                OP_SGET registerIdentifier COMMA fieldInvocationTarget;
+sGetInstruction:                OP_SGET IDENTIFIER COMMA fieldInvocationTarget;
 
-sGetWideInstruction:            OP_SGET_WIDE registerIdentifier COMMA fieldInvocationTarget;
+sGetWideInstruction:            OP_SGET_WIDE IDENTIFIER COMMA fieldInvocationTarget;
 
-sGetObjectInstruction:          OP_SGET_OBJECT registerIdentifier COMMA fieldInvocationTarget;
+sGetObjectInstruction:          OP_SGET_OBJECT IDENTIFIER COMMA fieldInvocationTarget;
 
-sGetBooleanInstruction:         OP_SGET_BOOLEAN registerIdentifier COMMA fieldInvocationTarget;
+sGetBooleanInstruction:         OP_SGET_BOOLEAN IDENTIFIER COMMA fieldInvocationTarget;
 
-sGetByteInstruction:            OP_SGET_BYTE registerIdentifier COMMA fieldInvocationTarget;
+sGetByteInstruction:            OP_SGET_BYTE IDENTIFIER COMMA fieldInvocationTarget;
 
-sGetCharInstruction:            OP_SGET_CHAR registerIdentifier COMMA fieldInvocationTarget;
+sGetCharInstruction:            OP_SGET_CHAR IDENTIFIER COMMA fieldInvocationTarget;
 
-sGetShortInstruction:           OP_SGET_SHORT registerIdentifier COMMA fieldInvocationTarget;
+sGetShortInstruction:           OP_SGET_SHORT IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutInstruction:                OP_SPUT registerIdentifier COMMA fieldInvocationTarget;
+sPutInstruction:                OP_SPUT IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutWideInstruction:            OP_SPUT_WIDE registerIdentifier COMMA fieldInvocationTarget;
+sPutWideInstruction:            OP_SPUT_WIDE IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutObjectInstruction:          OP_SPUT_OBJECT registerIdentifier COMMA fieldInvocationTarget;
+sPutObjectInstruction:          OP_SPUT_OBJECT IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutBooleanInstruction:         OP_SPUT_BOOLEAN registerIdentifier COMMA fieldInvocationTarget;
+sPutBooleanInstruction:         OP_SPUT_BOOLEAN IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutByteInstruction:            OP_SPUT_BYTE registerIdentifier COMMA fieldInvocationTarget;
+sPutByteInstruction:            OP_SPUT_BYTE IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutCharInstruction:            OP_SPUT_CHAR registerIdentifier COMMA fieldInvocationTarget;
+sPutCharInstruction:            OP_SPUT_CHAR IDENTIFIER COMMA fieldInvocationTarget;
 
-sPutShortInstruction:           OP_SPUT_SHORT registerIdentifier COMMA fieldInvocationTarget;
+sPutShortInstruction:           OP_SPUT_SHORT IDENTIFIER COMMA fieldInvocationTarget;
 
 invokeVirtualInstruction:       OP_INVOKE_VIRTUAL registerList COMMA methodInvocationTarget;
 
@@ -359,337 +352,324 @@ invokeStaticRangeInstruction:   OP_INVOKE_STATIC_RANGE registerRange COMMA metho
 
 invokeInterfaceRangeInstruction:OP_INVOKE_INTERFACE_RANGE registerRange COMMA methodInvocationTarget;
 
-intToLongInstruction:           OP_INT_TO_LONG leftRegister COMMA rightRegister;
+intToLongInstruction:           OP_INT_TO_LONG IDENTIFIER COMMA IDENTIFIER;
 
-intToFloatInstruction:          OP_INT_TO_FLOAT leftRegister COMMA rightRegister;
+intToFloatInstruction:          OP_INT_TO_FLOAT IDENTIFIER COMMA IDENTIFIER;
 
-intToDoubleInstruction:         OP_INT_TO_DOUBLE leftRegister COMMA rightRegister;
+intToDoubleInstruction:         OP_INT_TO_DOUBLE IDENTIFIER COMMA IDENTIFIER;
 
-longToIntInstruction:           OP_LONG_TO_INT leftRegister COMMA rightRegister;
+longToIntInstruction:           OP_LONG_TO_INT IDENTIFIER COMMA IDENTIFIER;
 
-longToFloatInstruction:         OP_LONG_TO_FLOAT leftRegister COMMA rightRegister;
+longToFloatInstruction:         OP_LONG_TO_FLOAT IDENTIFIER COMMA IDENTIFIER;
 
-longToDoubleInstruction:        OP_LONG_TO_DOUBLE leftRegister COMMA rightRegister;
+longToDoubleInstruction:        OP_LONG_TO_DOUBLE IDENTIFIER COMMA IDENTIFIER;
 
-floatToIntInstruction:          OP_FLOAT_TO_INT leftRegister COMMA rightRegister;
+floatToIntInstruction:          OP_FLOAT_TO_INT IDENTIFIER COMMA IDENTIFIER;
 
-floatToLongInstruction:         OP_FLOAT_TO_LONG leftRegister COMMA rightRegister;
+floatToLongInstruction:         OP_FLOAT_TO_LONG IDENTIFIER COMMA IDENTIFIER;
 
-floatToDoubleInstruction:       OP_FLOAT_TO_DOUBLE leftRegister COMMA rightRegister;
+floatToDoubleInstruction:       OP_FLOAT_TO_DOUBLE IDENTIFIER COMMA IDENTIFIER;
 
-doubleToIntInstruction:         OP_DOUBLE_TO_INT leftRegister COMMA rightRegister;
+doubleToIntInstruction:         OP_DOUBLE_TO_INT IDENTIFIER COMMA IDENTIFIER;
 
-doubleToLongInstruction:        OP_DOUBLE_TO_LONG leftRegister COMMA rightRegister;
+doubleToLongInstruction:        OP_DOUBLE_TO_LONG IDENTIFIER COMMA IDENTIFIER;
 
-doubleToFloatInstruction:       OP_DOUBLE_TO_FLOAT leftRegister COMMA rightRegister;
+doubleToFloatInstruction:       OP_DOUBLE_TO_FLOAT IDENTIFIER COMMA IDENTIFIER;
 
-intToByteInstruction:           OP_INT_TO_BYTE leftRegister COMMA rightRegister;
+intToByteInstruction:           OP_INT_TO_BYTE IDENTIFIER COMMA IDENTIFIER;
 
-intToCharInstruction:           OP_INT_TO_CHAR leftRegister COMMA rightRegister;
+intToCharInstruction:           OP_INT_TO_CHAR IDENTIFIER COMMA IDENTIFIER;
 
-intToShortInstruction:          OP_INT_TO_SHORT leftRegister COMMA rightRegister;
+intToShortInstruction:          OP_INT_TO_SHORT IDENTIFIER COMMA IDENTIFIER;
 
 ifLabel:                        label;
 
-ifEqzInstruction:               OP_IF_EQZ registerIdentifier COMMA ifLabel;
+ifEqzInstruction:               OP_IF_EQZ IDENTIFIER COMMA ifLabel;
 
-ifNezInstruction:               OP_IF_NEZ registerIdentifier COMMA ifLabel;
+ifNezInstruction:               OP_IF_NEZ IDENTIFIER COMMA ifLabel;
 
-ifLtzInstruction:               OP_IF_LTZ registerIdentifier COMMA ifLabel;
+ifLtzInstruction:               OP_IF_LTZ IDENTIFIER COMMA ifLabel;
 
-ifGezInstruction:               OP_IF_GEZ registerIdentifier COMMA ifLabel;
+ifGezInstruction:               OP_IF_GEZ IDENTIFIER COMMA ifLabel;
 
-ifGtzInstruction:               OP_IF_GTZ registerIdentifier COMMA ifLabel;
+ifGtzInstruction:               OP_IF_GTZ IDENTIFIER COMMA ifLabel;
 
-ifLezInstruction:               OP_IF_LEZ registerIdentifier COMMA ifLabel;
+ifLezInstruction:               OP_IF_LEZ IDENTIFIER COMMA ifLabel;
 
-negIntInstruction:              OP_NEG_INT leftRegister COMMA rightRegister;
+negIntInstruction:              OP_NEG_INT IDENTIFIER COMMA IDENTIFIER;
 
-notIntInstruction:              OP_NOT_INT leftRegister COMMA rightRegister;
+notIntInstruction:              OP_NOT_INT IDENTIFIER COMMA IDENTIFIER;
 
-negLongInstruction:             OP_NEG_LONG leftRegister COMMA rightRegister;
+negLongInstruction:             OP_NEG_LONG IDENTIFIER COMMA IDENTIFIER;
 
-notLongInstruction:             OP_NOT_LONG leftRegister COMMA rightRegister;
+notLongInstruction:             OP_NOT_LONG IDENTIFIER COMMA IDENTIFIER;
 
-negFloatInstruction:            OP_NEG_FLOAT leftRegister COMMA rightRegister;
+negFloatInstruction:            OP_NEG_FLOAT IDENTIFIER COMMA IDENTIFIER;
 
-negDoubleInstruction:           OP_NEG_DOUBLE leftRegister COMMA rightRegister;
+negDoubleInstruction:           OP_NEG_DOUBLE IDENTIFIER COMMA IDENTIFIER;
 
-ifEqInstruction:                OP_IF_EQ leftRegister COMMA rightRegister COMMA ifLabel;
+ifEqInstruction:                OP_IF_EQ IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
 
-ifNeInstruction:                OP_IF_NE leftRegister COMMA rightRegister COMMA ifLabel;
+ifNeInstruction:                OP_IF_NE IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
 
-ifLtInstruction:                OP_IF_LT leftRegister COMMA rightRegister COMMA ifLabel;
+ifLtInstruction:                OP_IF_LT IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
 
-ifGeInstruction:                OP_IF_GE leftRegister COMMA rightRegister COMMA ifLabel;
+ifGeInstruction:                OP_IF_GE IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
 
-ifGtInstruction:                OP_IF_GT leftRegister COMMA rightRegister COMMA ifLabel;
+ifGtInstruction:                OP_IF_GT IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
 
-ifLeInstruction:                OP_IF_LE leftRegister COMMA rightRegister COMMA ifLabel;
+ifLeInstruction:                OP_IF_LE IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
 
-addInt2addrInstruction:         OP_ADD_INT_2ADDR leftRegister COMMA rightRegister;
+addInt2addrInstruction:         OP_ADD_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-subInt2addrInstruction:         OP_SUB_INT_2ADDR leftRegister COMMA rightRegister;
+subInt2addrInstruction:         OP_SUB_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-mulInt2addrInstruction:         OP_MUL_INT_2ADDR leftRegister COMMA rightRegister;
+mulInt2addrInstruction:         OP_MUL_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-divInt2addrInstruction:         OP_DIV_INT_2ADDR leftRegister COMMA rightRegister;
+divInt2addrInstruction:         OP_DIV_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-remInt2addrInstruction:         OP_REM_INT_2ADDR leftRegister COMMA rightRegister;
+remInt2addrInstruction:         OP_REM_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-andInt2addrInstruction:         OP_AND_INT_2ADDR leftRegister COMMA rightRegister;
+andInt2addrInstruction:         OP_AND_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-orInt2addrInstruction:          OP_OR_INT_2ADDR leftRegister COMMA rightRegister;
+orInt2addrInstruction:          OP_OR_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-xorInt2addrInstruction:         OP_XOR_INT_2ADDR leftRegister COMMA rightRegister;
+xorInt2addrInstruction:         OP_XOR_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-shlInt2addrInstruction:         OP_SHL_INT_2ADDR leftRegister COMMA rightRegister;
+shlInt2addrInstruction:         OP_SHL_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-shrInt2addrInstruction:         OP_SHR_INT_2ADDR leftRegister COMMA rightRegister;
+shrInt2addrInstruction:         OP_SHR_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-ushrInt2addrInstruction:        OP_USHR_INT_2ADDR leftRegister COMMA rightRegister;
+ushrInt2addrInstruction:        OP_USHR_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-addLong2addrInstruction:        OP_ADD_LONG_2ADDR leftRegister COMMA rightRegister;
+addLong2addrInstruction:        OP_ADD_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-subLong2addrInstruction:        OP_SUB_LONG_2ADDR leftRegister COMMA rightRegister;
+subLong2addrInstruction:        OP_SUB_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-mulLong2addrInstruction:        OP_MUL_LONG_2ADDR leftRegister COMMA rightRegister;
+mulLong2addrInstruction:        OP_MUL_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-divLong2addrInstruction:        OP_DIV_LONG_2ADDR leftRegister COMMA rightRegister;
+divLong2addrInstruction:        OP_DIV_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-remLong2addrInstruction:        OP_REM_LONG_2ADDR leftRegister COMMA rightRegister;
+remLong2addrInstruction:        OP_REM_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-andLong2addrInstruction:        OP_AND_LONG_2ADDR leftRegister COMMA rightRegister;
+andLong2addrInstruction:        OP_AND_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-orLong2addrInstruction:         OP_OR_LONG_2ADDR leftRegister COMMA rightRegister;
+orLong2addrInstruction:         OP_OR_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-xorLong2addrInstruction:        OP_XOR_LONG_2ADDR leftRegister COMMA rightRegister;
+xorLong2addrInstruction:        OP_XOR_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-shlLong2addrInstruction:        OP_SHL_LONG_2ADDR leftRegister COMMA rightRegister;
+shlLong2addrInstruction:        OP_SHL_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-shrLong2addrInstruction:        OP_SHR_LONG_2ADDR leftRegister COMMA rightRegister;
+shrLong2addrInstruction:        OP_SHR_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-ushrLong2addrInstruction:       OP_USHR_LONG_2ADDR leftRegister COMMA rightRegister;
+ushrLong2addrInstruction:       OP_USHR_LONG_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-addFloat2addrInstruction:       OP_ADD_FLOAT_2ADDR leftRegister COMMA rightRegister;
+addFloat2addrInstruction:       OP_ADD_FLOAT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-subFloat2addrInstruction:       OP_SUB_FLOAT_2ADDR leftRegister COMMA rightRegister;
+subFloat2addrInstruction:       OP_SUB_FLOAT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-mulFloat2addrInstruction:       OP_MUL_FLOAT_2ADDR leftRegister COMMA rightRegister;
+mulFloat2addrInstruction:       OP_MUL_FLOAT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-divFloat2addrInstruction:       OP_DIV_FLOAT_2ADDR leftRegister COMMA rightRegister;
+divFloat2addrInstruction:       OP_DIV_FLOAT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-remFloat2addrInstruction:       OP_REM_FLOAT_2ADDR leftRegister COMMA rightRegister;
+remFloat2addrInstruction:       OP_REM_FLOAT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-addDouble2addrInstruction:      OP_ADD_DOUBLE_2ADDR leftRegister COMMA rightRegister;
+addDouble2addrInstruction:      OP_ADD_DOUBLE_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-subDouble2addrInstruction:      OP_SUB_DOUBLE_2ADDR leftRegister COMMA rightRegister;
+subDouble2addrInstruction:      OP_SUB_DOUBLE_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-mulDouble2addrInstruction:      OP_MUL_DOUBLE_2ADDR leftRegister COMMA rightRegister;
+mulDouble2addrInstruction:      OP_MUL_DOUBLE_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-divDouble2addrInstruction:      OP_DIV_DOUBLE_2ADDR leftRegister COMMA rightRegister;
+divDouble2addrInstruction:      OP_DIV_DOUBLE_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-remDouble2addrInstruction:      OP_REM_DOUBLE_2ADDR leftRegister COMMA rightRegister;
+remDouble2addrInstruction:      OP_REM_DOUBLE_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
-cmplFloatInstruction:           OP_CMPL_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+cmplFloatInstruction:           OP_CMPL_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-cmpgFloatInstruction:           OP_CMPG_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+cmpgFloatInstruction:           OP_CMPG_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-cmplDoubleInstruction:          OP_CMPL_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+cmplDoubleInstruction:          OP_CMPL_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-cmpgDoubleInstruction:          OP_CMPG_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+cmpgDoubleInstruction:          OP_CMPG_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-cmpLongInstruction:             OP_CMP_LONG targetRegister COMMA leftRegister COMMA rightRegister;
-
-field:                          registerIdentifier;
-
-arrayRegister:                  registerIdentifier;
-
-// Allow hex literals as array indices (Fix for BUG-003)
-indexRegister:                  registerIdentifier | numericLiteral;
-
-instanceRegister:               registerIdentifier;
-
-sourceRegister:                 registerIdentifier;
-
-targetRegister:                 registerIdentifier;
+cmpLongInstruction:             OP_CMP_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
 instanceField:                  fieldInvocationTarget;
 
 
-agetInstruction:                OP_AGET targetRegister COMMA arrayRegister COMMA indexRegister;
+agetInstruction:                OP_AGET IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-agetWideInstruction:            OP_AGET_WIDE targetRegister COMMA arrayRegister COMMA indexRegister;
+agetWideInstruction:            OP_AGET_WIDE IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-agetObjectInstruction:          OP_AGET_OBJECT targetRegister COMMA arrayRegister COMMA indexRegister;
+agetObjectInstruction:          OP_AGET_OBJECT IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-agetBooleanInstruction:         OP_AGET_BOOLEAN targetRegister COMMA arrayRegister COMMA indexRegister;
+agetBooleanInstruction:         OP_AGET_BOOLEAN IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-agetByteInstruction:            OP_AGET_BYTE targetRegister COMMA arrayRegister COMMA indexRegister;
+agetByteInstruction:            OP_AGET_BYTE IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-agetCharInstruction:            OP_AGET_CHAR targetRegister COMMA arrayRegister COMMA indexRegister;
+agetCharInstruction:            OP_AGET_CHAR IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-agetShortInstruction:           OP_AGET_SHORT targetRegister COMMA arrayRegister COMMA indexRegister;
-
-
-aputInstruction:                OP_APUT sourceRegister COMMA arrayRegister COMMA indexRegister;
-
-aputWideInstruction:            OP_APUT_WIDE sourceRegister COMMA arrayRegister COMMA indexRegister;
-
-aputObjectInstruction:          OP_APUT_OBJECT sourceRegister COMMA arrayRegister COMMA indexRegister;
-
-aputBooleanInstruction:         OP_APUT_BOOLEAN sourceRegister COMMA arrayRegister COMMA indexRegister;
-
-aputByteInstruction:            OP_APUT_BYTE sourceRegister COMMA arrayRegister COMMA indexRegister;
-
-aputCharInstruction:            OP_APUT_CHAR sourceRegister COMMA arrayRegister COMMA indexRegister;
-
-aputShortInstruction:           OP_APUT_SHORT sourceRegister COMMA arrayRegister COMMA indexRegister;
+agetShortInstruction:           OP_AGET_SHORT IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
 
-igetInstruction:                OP_IGET targetRegister COMMA instanceRegister COMMA instanceField;
+aputInstruction:                OP_APUT IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-igetWideInstruction:            OP_IGET_WIDE targetRegister COMMA instanceRegister COMMA instanceField;
+aputWideInstruction:            OP_APUT_WIDE IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-igetObjectInstruction:          OP_IGET_OBJECT targetRegister COMMA instanceRegister COMMA instanceField;
+aputObjectInstruction:          OP_APUT_OBJECT IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-igetBooleanInstruction:         OP_IGET_BOOLEAN targetRegister COMMA instanceRegister COMMA instanceField;
+aputBooleanInstruction:         OP_APUT_BOOLEAN IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-igetByteInstruction:            OP_IGET_BYTE targetRegister COMMA instanceRegister COMMA instanceField;
+aputByteInstruction:            OP_APUT_BYTE IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-igetCharInstruction:            OP_IGET_CHAR targetRegister COMMA instanceRegister COMMA instanceField;
+aputCharInstruction:            OP_APUT_CHAR IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-igetShortInstruction:           OP_IGET_SHORT targetRegister COMMA instanceRegister COMMA instanceField;
-
-
-iputInstruction:                OP_IPUT sourceRegister COMMA instanceRegister COMMA instanceField;
-
-iputWideInstruction:            OP_IPUT_WIDE sourceRegister COMMA instanceRegister COMMA instanceField;
-
-iputObjectInstruction:          OP_IPUT_OBJECT sourceRegister COMMA instanceRegister COMMA instanceField;
-
-iputBooleanInstruction:         OP_IPUT_BOOLEAN sourceRegister COMMA instanceRegister COMMA instanceField;
-
-iputByteInstruction:            OP_IPUT_BYTE sourceRegister COMMA instanceRegister COMMA instanceField;
-
-iputCharInstruction:            OP_IPUT_CHAR sourceRegister COMMA instanceRegister COMMA instanceField;
-
-iputShortInstruction:           OP_IPUT_SHORT sourceRegister COMMA instanceRegister COMMA instanceField;
+aputShortInstruction:           OP_APUT_SHORT IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
 
-addIntInstruction:              OP_ADD_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetInstruction:                OP_IGET IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-subIntInstruction:              OP_SUB_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetWideInstruction:            OP_IGET_WIDE IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-mulIntInstruction:              OP_MUL_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetObjectInstruction:          OP_IGET_OBJECT IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-divIntInstruction:              OP_DIV_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetBooleanInstruction:         OP_IGET_BOOLEAN IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-remIntInstruction:              OP_REM_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetByteInstruction:            OP_IGET_BYTE IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-andIntInstruction:              OP_AND_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetCharInstruction:            OP_IGET_CHAR IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-orIntInstruction:               OP_OR_INT targetRegister COMMA leftRegister COMMA rightRegister;
+igetShortInstruction:           OP_IGET_SHORT IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-xorIntInstruction:              OP_XOR_INT targetRegister COMMA leftRegister COMMA rightRegister;
 
-shlIntInstruction:              OP_SHL_INT targetRegister COMMA leftRegister COMMA rightRegister;
+iputInstruction:                OP_IPUT IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-shrIntInstruction:              OP_SHR_INT targetRegister COMMA leftRegister COMMA rightRegister;
+iputWideInstruction:            OP_IPUT_WIDE IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
 
-ushrIntInstruction:             OP_USHR_INT targetRegister COMMA leftRegister COMMA rightRegister;
+iputObjectInstruction:          OP_IPUT_OBJECT IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
+
+iputBooleanInstruction:         OP_IPUT_BOOLEAN IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
+
+iputByteInstruction:            OP_IPUT_BYTE IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
+
+iputCharInstruction:            OP_IPUT_CHAR IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
+
+iputShortInstruction:           OP_IPUT_SHORT IDENTIFIER COMMA IDENTIFIER COMMA instanceField;
+
+
+addIntInstruction:              OP_ADD_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+subIntInstruction:              OP_SUB_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+mulIntInstruction:              OP_MUL_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+divIntInstruction:              OP_DIV_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+remIntInstruction:              OP_REM_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+andIntInstruction:              OP_AND_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+orIntInstruction:               OP_OR_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+xorIntInstruction:              OP_XOR_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+shlIntInstruction:              OP_SHL_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+shrIntInstruction:              OP_SHR_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
+
+ushrIntInstruction:             OP_USHR_INT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
 // rsub-int can take either a register or a literal (Fix for BUG-003)
-rsubIntInstruction:             OP_RSUB_INT targetRegister COMMA leftRegister COMMA (rightRegister | numericLiteral);
+rsubIntInstruction:             OP_RSUB_INT IDENTIFIER COMMA IDENTIFIER COMMA (IDENTIFIER | numericLiteral);
 
-addLongInstruction:             OP_ADD_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+addLongInstruction:             OP_ADD_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-subLongInstruction:             OP_SUB_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+subLongInstruction:             OP_SUB_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-mulLongInstruction:             OP_MUL_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+mulLongInstruction:             OP_MUL_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-divLongInstruction:             OP_DIV_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+divLongInstruction:             OP_DIV_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-remLongInstruction:             OP_REM_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+remLongInstruction:             OP_REM_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-andLongInstruction:             OP_AND_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+andLongInstruction:             OP_AND_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-orLongInstruction:              OP_OR_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+orLongInstruction:              OP_OR_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-xorLongInstruction:             OP_XOR_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+xorLongInstruction:             OP_XOR_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-shlLongInstruction:             OP_SHL_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+shlLongInstruction:             OP_SHL_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-shrLongInstruction:             OP_SHR_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+shrLongInstruction:             OP_SHR_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-ushrLongInstruction:            OP_USHR_LONG targetRegister COMMA leftRegister COMMA rightRegister;
+ushrLongInstruction:            OP_USHR_LONG IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-addFloatInstruction:            OP_ADD_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+addFloatInstruction:            OP_ADD_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-subFloatInstruction:            OP_SUB_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+subFloatInstruction:            OP_SUB_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-mulFloatInstruction:            OP_MUL_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+mulFloatInstruction:            OP_MUL_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-divFloatInstruction:            OP_DIV_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+divFloatInstruction:            OP_DIV_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-remFloatInstruction:            OP_REM_FLOAT targetRegister COMMA leftRegister COMMA rightRegister;
+remFloatInstruction:            OP_REM_FLOAT IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-addDoubleInstruction:           OP_ADD_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+addDoubleInstruction:           OP_ADD_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-subDoubleInstruction:           OP_SUB_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+subDoubleInstruction:           OP_SUB_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-mulDoubleInstruction:           OP_MUL_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+mulDoubleInstruction:           OP_MUL_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-divDoubleInstruction:           OP_DIV_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+divDoubleInstruction:           OP_DIV_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-remDoubleInstruction:           OP_REM_DOUBLE targetRegister COMMA leftRegister COMMA rightRegister;
+remDoubleInstruction:           OP_REM_DOUBLE IDENTIFIER COMMA IDENTIFIER COMMA IDENTIFIER;
 
-addIntLit16Instruction:         OP_ADD_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+addIntLit16Instruction:         OP_ADD_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-mulIntLit16Instruction:         OP_MUL_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+mulIntLit16Instruction:         OP_MUL_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-divIntLit16Instruction:         OP_DIV_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+divIntLit16Instruction:         OP_DIV_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-remIntLit16Instruction:         OP_REM_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+remIntLit16Instruction:         OP_REM_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-andIntLit16Instruction:         OP_AND_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+andIntLit16Instruction:         OP_AND_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-orIntLit16Instruction:          OP_OR_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+orIntLit16Instruction:          OP_OR_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-xorIntLit16Instruction:         OP_XOR_INT_LIT16 targetRegister COMMA leftRegister COMMA numericLiteral;
+xorIntLit16Instruction:         OP_XOR_INT_LIT16 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
 
-addIntLit8Instruction:          OP_ADD_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+addIntLit8Instruction:          OP_ADD_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-rsubIntLit8Instruction:         OP_RSUB_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+rsubIntLit8Instruction:         OP_RSUB_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-mulIntLit8Instruction:          OP_MUL_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+mulIntLit8Instruction:          OP_MUL_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-divIntLit8Instruction:          OP_DIV_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+divIntLit8Instruction:          OP_DIV_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-remIntLit8Instruction:          OP_REM_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+remIntLit8Instruction:          OP_REM_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-andIntLit8Instruction:          OP_AND_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+andIntLit8Instruction:          OP_AND_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-orIntLit8Instruction:           OP_OR_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+orIntLit8Instruction:           OP_OR_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-xorIntLit8Instruction:          OP_XOR_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+xorIntLit8Instruction:          OP_XOR_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-shlIntLit8Instruction:          OP_SHL_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+shlIntLit8Instruction:          OP_SHL_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-shrIntLit8Instruction:          OP_SHR_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+shrIntLit8Instruction:          OP_SHR_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
-ushrIntLit8Instruction:         OP_USHR_INT_LIT8 targetRegister COMMA leftRegister COMMA numericLiteral;
+ushrIntLit8Instruction:         OP_USHR_INT_LIT8 IDENTIFIER COMMA IDENTIFIER COMMA numericLiteral;
 
 newInstanceType:                referenceType;
 
-newInstanceInstruction:         OP_NEW_INSTANCE targetRegister COMMA newInstanceType;
+newInstanceInstruction:         OP_NEW_INSTANCE IDENTIFIER COMMA newInstanceType;
 
 checkCastType:                  referenceOrArrayType;
 
-checkCastInstruction:           OP_CHECK_CAST targetRegister COMMA checkCastType;
+checkCastInstruction:           OP_CHECK_CAST IDENTIFIER COMMA checkCastType;
 
-arrayLengthInstruction:         OP_ARRAY_LENGTH targetRegister COMMA arrayRegister;
+arrayLengthInstruction:         OP_ARRAY_LENGTH IDENTIFIER COMMA IDENTIFIER;
 
 arrayElementType:               nonVoidType;
 
@@ -703,32 +683,26 @@ filledNewArrayInstruction:                 OP_FILLED_NEW_ARRAY arrayElementRegis
 
 filledArrayDataLabel:           label;
 
-fillArrayDataInstruction:                  OP_FILL_ARRAY_DATA targetRegister COMMA filledArrayDataLabel;
+fillArrayDataInstruction:                  OP_FILL_ARRAY_DATA IDENTIFIER COMMA filledArrayDataLabel;
 
 checkInstanceType:              nonVoidType;
 
-instanceOfInstruction:          OP_INSTANCE_OF targetRegister COMMA instanceRegister COMMA checkInstanceType;
+instanceOfInstruction:          OP_INSTANCE_OF IDENTIFIER COMMA IDENTIFIER COMMA checkInstanceType;
 
-arraySizeRegister:              registerIdentifier;
-
-newArrayInstruction:            OP_NEW_ARRAY targetRegister COMMA arraySizeRegister COMMA arrayElementType;
-
-packedSwitchRegister:           registerIdentifier;
+newArrayInstruction:            OP_NEW_ARRAY IDENTIFIER COMMA IDENTIFIER COMMA arrayElementType;
 
 packedSwitchLabel:              label;
 
-sparseSwitchRegister:           registerIdentifier;
-
 sparseSwitchLabel:              label;
 
-packedSwitchInstruction:        OP_PACKED_SWITCH packedSwitchRegister COMMA packedSwitchLabel;
+packedSwitchInstruction:        OP_PACKED_SWITCH IDENTIFIER COMMA packedSwitchLabel;
 
-sparseSwitchInstruction:        OP_SPARSE_SWITCH sparseSwitchRegister COMMA sparseSwitchLabel;
+sparseSwitchInstruction:        OP_SPARSE_SWITCH IDENTIFIER COMMA sparseSwitchLabel;
 
 // Method prototype without a name, e.g. `(ILjava/lang/String;)V` (invoke-polymorphic, const-method-type, call sites).
 methodProto:                LPAREN methodArguments? RPAREN methodReturnType;
 
-// `invoke-static@Lcom/Foo;->bar()V`, `instance-get@Lcom/Foo;->field:I`. The kind is one of
+// `invoke-static@Lcom/Foo;->bar()V`, `instance-get@Lcom/Foo;->IDENTIFIER:I`. The kind is one of
 // invoke-static/instance/constructor/direct/interface or static/instance-get/put; all lex as
 // identifiers or opcode tokens, so `identifier` covers them.
 methodHandleKind:           identifier;
@@ -762,275 +736,9 @@ invokeCustomInstruction:        OP_INVOKE_CUSTOM registerList COMMA callSiteRefe
 
 invokeCustomRangeInstruction:   OP_INVOKE_CUSTOM_RANGE registerRange COMMA callSiteReference;
 
-invokeConstMethodHandleInstruction: OP_CONST_METHOD_HANDLE registerIdentifier COMMA methodHandleReference;
+invokeConstMethodHandleInstruction: OP_CONST_METHOD_HANDLE IDENTIFIER COMMA methodHandleReference;
 
-invokeConstMethodTypeInstruction:   OP_CONST_METHOD_TYPE registerIdentifier COMMA methodProto;
-
-binaryInstruction:
-    filledNewArrayRangeInstruction
-    | filledNewArrayInstruction
-    | fillArrayDataInstruction
-    | arrayLengthInstruction
-
-    | packedSwitchInstruction
-    | sparseSwitchInstruction
-
-    | newInstanceInstruction
-    | checkCastInstruction
-
-    | moveInstruction
-    | moveFrom16Instruction
-    | move16Instruction
-    | moveWideInstruction
-    | moveWideFrom16Instruction
-    | moveWide16Instruction
-    | moveObjectInstruction
-    | moveObjectFrom16Instruction
-    | moveObject16Instruction
-
-    | constInstruction
-    | const4Instruction
-    | const16Instruction
-    | constHigh16Instruction
-    | constWide16Instruction
-    | constWide32Instruction
-    | constWideInstruction
-    | constWideHigh16Instruction
-
-    | constString
-    | constStringJumbo
-    | constClass
-
-    | sGetInstruction
-    | sGetWideInstruction
-    | sGetObjectInstruction
-    | sGetBooleanInstruction
-    | sGetByteInstruction
-    | sGetCharInstruction
-    | sGetShortInstruction
-
-    | sPutInstruction
-    | sPutWideInstruction
-    | sPutObjectInstruction
-    | sPutBooleanInstruction
-    | sPutByteInstruction
-    | sPutCharInstruction
-    | sPutShortInstruction
-
-    | invokeVirtualInstruction
-    | invokeSuperInstruction
-    | invokeDirectInstruction
-    | invokeStaticInstruction
-    | invokeInterfaceInstruction
-
-    | invokeVirtualRangeInstruction
-    | invokeSuperRangeInstruction
-    | invokeDirectRangeInstruction
-    | invokeStaticRangeInstruction
-    | invokeInterfaceRangeInstruction
-
-    | intToLongInstruction
-    | intToFloatInstruction
-    | intToDoubleInstruction
-    | longToIntInstruction
-    | longToFloatInstruction
-    | longToDoubleInstruction
-    | floatToIntInstruction
-    | floatToLongInstruction
-    | floatToDoubleInstruction
-    | doubleToIntInstruction
-    | doubleToLongInstruction
-    | doubleToFloatInstruction
-    | intToByteInstruction
-    | intToCharInstruction
-    | intToShortInstruction
-
-    | ifEqzInstruction
-    | ifNezInstruction
-    | ifLtzInstruction
-    | ifGezInstruction
-    | ifGtzInstruction
-    | ifLezInstruction
-
-    | negIntInstruction
-    | notIntInstruction
-    | negLongInstruction
-    | notLongInstruction
-    | negFloatInstruction
-    | negDoubleInstruction
-
-    | ifEqInstruction
-    | ifNeInstruction
-    | ifLtInstruction
-    | ifGeInstruction
-    | ifGtInstruction
-    | ifLeInstruction
-
-    | addInt2addrInstruction
-    | subInt2addrInstruction
-    | mulInt2addrInstruction
-    | divInt2addrInstruction
-    | remInt2addrInstruction
-    | andInt2addrInstruction
-    | orInt2addrInstruction
-    | xorInt2addrInstruction
-    | shlInt2addrInstruction
-    | shrInt2addrInstruction
-    | ushrInt2addrInstruction
-    | addLong2addrInstruction
-    | subLong2addrInstruction
-    | mulLong2addrInstruction
-    | divLong2addrInstruction
-    | remLong2addrInstruction
-    | andLong2addrInstruction
-    | orLong2addrInstruction
-    | xorLong2addrInstruction
-    | shlLong2addrInstruction
-    | shrLong2addrInstruction
-    | ushrLong2addrInstruction
-    | addFloat2addrInstruction
-    | subFloat2addrInstruction
-    | mulFloat2addrInstruction
-    | divFloat2addrInstruction
-    | remFloat2addrInstruction
-    | addDouble2addrInstruction
-    | subDouble2addrInstruction
-    | mulDouble2addrInstruction
-    | divDouble2addrInstruction
-    | remDouble2addrInstruction
-
-    | cmplFloatInstruction
-    | cmpgFloatInstruction
-    | cmplDoubleInstruction
-    | cmpgDoubleInstruction
-    | cmpLongInstruction
-    ;
-
-ternaryInstruction:
-    invokePolymorphicInstruction
-    | invokePolymorphicRangeInstruction
-    | invokeCustomInstruction
-    | invokeCustomRangeInstruction
-    | invokeConstMethodHandleInstruction
-    | invokeConstMethodTypeInstruction
-
-    | instanceOfInstruction
-    | newArrayInstruction
-
-    | agetInstruction
-    | agetWideInstruction
-    | agetObjectInstruction
-    | agetBooleanInstruction
-    | agetByteInstruction
-    | agetCharInstruction
-    | agetShortInstruction
-
-    | aputInstruction
-    | aputWideInstruction
-    | aputObjectInstruction
-    | aputBooleanInstruction
-    | aputByteInstruction
-    | aputCharInstruction
-    | aputShortInstruction
-
-    | igetInstruction
-    | igetWideInstruction
-    | igetObjectInstruction
-    | igetBooleanInstruction
-    | igetByteInstruction
-    | igetCharInstruction
-    | igetShortInstruction
-
-    | iputInstruction
-    | iputWideInstruction
-    | iputObjectInstruction
-    | iputBooleanInstruction
-    | iputByteInstruction
-    | iputCharInstruction
-    | iputShortInstruction
-
-    | addIntInstruction
-    | subIntInstruction
-    | mulIntInstruction
-    | divIntInstruction
-    | remIntInstruction
-    | andIntInstruction
-    | orIntInstruction
-    | xorIntInstruction
-    | shlIntInstruction
-    | shrIntInstruction
-    | ushrIntInstruction
-    | rsubIntInstruction
-
-    | addLongInstruction
-    | subLongInstruction
-    | mulLongInstruction
-    | divLongInstruction
-    | remLongInstruction
-    | andLongInstruction
-    | orLongInstruction
-    | xorLongInstruction
-    | shlLongInstruction
-    | shrLongInstruction
-    | ushrLongInstruction
-
-    | addFloatInstruction
-    | subFloatInstruction
-    | mulFloatInstruction
-    | divFloatInstruction
-    | remFloatInstruction
-
-    | addDoubleInstruction
-    | subDoubleInstruction
-    | mulDoubleInstruction
-    | divDoubleInstruction
-    | remDoubleInstruction
-
-    | addIntLit16Instruction
-    | mulIntLit16Instruction
-    | divIntLit16Instruction
-    | remIntLit16Instruction
-    | andIntLit16Instruction
-    | orIntLit16Instruction
-    | xorIntLit16Instruction
-
-    | addIntLit8Instruction
-    | rsubIntLit8Instruction
-    | mulIntLit8Instruction
-    | divIntLit8Instruction
-    | remIntLit8Instruction
-    | andIntLit8Instruction
-    | orIntLit8Instruction
-    | xorIntLit8Instruction
-    | shlIntLit8Instruction
-    | shrIntLit8Instruction
-    | ushrIntLit8Instruction
-    ;
-
-instruction:
-    ternaryInstruction
-    | binaryInstruction
-
-    | returnVoidInstruction
-    | nopInstruction
-
-    | gotoInstruction
-    | goto16Instruction
-    | goto32Instruction
-
-    | moveResultInstruction
-    | moveResultWideInstruction
-    | moveResultObjectInstruction
-    | moveExceptionInstruction
-
-    | returnInstruction
-    | returnWideInstruction
-    | returnObjectInstruction
-
-    | monitorEnterInstruction
-    | monitorExitInstruction
-    | throwInstruction
-    ;
+invokeConstMethodTypeInstruction:   OP_CONST_METHOD_TYPE IDENTIFIER COMMA methodProto;
 
 methodInvocationTarget:         referenceOrArrayType ARROW methodSignature;
 
@@ -1038,7 +746,7 @@ fieldInvocationTarget:          referenceOrArrayType ARROW fieldNameAndType;
 
 // Fields and methods
 
-fieldName:                  SUB? identifier;  // Allow -prefixed field names
+fieldName:                  SUB? identifier;  // Allow -prefixed IDENTIFIER names
 
 fieldType:                  anyType;
 
@@ -1096,14 +804,12 @@ localDirectiveType:         nonVoidType;
 
 localDirectiveGenericHint:  stringLiteral;
 
-localDirectiveRegister:     registerIdentifier;
-
 // `.local v0`, `.local v0, "name":T`, `.local v0, null:T, "signature"`
-localDirective:             LOCAL_DIRECTIVE localDirectiveRegister (COMMA locaDirectiveVariableName (COLON localDirectiveType)? (COMMA localDirectiveGenericHint)?)?;
+localDirective:             LOCAL_DIRECTIVE IDENTIFIER (COMMA locaDirectiveVariableName (COLON localDirectiveType)? (COMMA localDirectiveGenericHint)?)?;
 
-localEndDirective:          LOCAL_END_DIRECTIVE registerIdentifier;
+localEndDirective:          LOCAL_END_DIRECTIVE IDENTIFIER;
 
-localRestartDirective:      RESTART_LOCAL_DIRECTIVE registerIdentifier;
+localRestartDirective:      RESTART_LOCAL_DIRECTIVE IDENTIFIER;
 
 prologueDirective:          PROLOGUE_DIRECTIVE;
 
@@ -1111,27 +817,252 @@ epilogueDirective:          EPILOGUE_DIRECTIVE;
 
 lineLabel:                  label;
 
-methodBodyStatement:
-    registersDirective
-    | localsDirective
-    | paramDirective
-    | lineDirective
-    | prologueDirective
-    | epilogueDirective
-    | instruction
-    | lineLabel
-    | catchDirective
-    | catchAllDirective
-    | annotationDirective
-    | localDirective
-    | localEndDirective
-    | localRestartDirective
-    | packedSwitchDirective
-    | arrayDataDirective
-    | sparseSwitchDirective
+// Every statement of a method body is a direct alternative: no instruction/binaryInstruction/
+// methodBodyStatement wrappers, which cost three rule contexts per instruction.
+methodBody:
+    (
+        registersDirective
+        | localsDirective
+        | paramDirective
+        | lineDirective
+        | prologueDirective
+        | epilogueDirective
+        | invokePolymorphicInstruction
+        | invokePolymorphicRangeInstruction
+        | invokeCustomInstruction
+        | invokeCustomRangeInstruction
+        | invokeConstMethodHandleInstruction
+        | invokeConstMethodTypeInstruction
+        | instanceOfInstruction
+        | newArrayInstruction
+        | agetInstruction
+        | agetWideInstruction
+        | agetObjectInstruction
+        | agetBooleanInstruction
+        | agetByteInstruction
+        | agetCharInstruction
+        | agetShortInstruction
+        | aputInstruction
+        | aputWideInstruction
+        | aputObjectInstruction
+        | aputBooleanInstruction
+        | aputByteInstruction
+        | aputCharInstruction
+        | aputShortInstruction
+        | igetInstruction
+        | igetWideInstruction
+        | igetObjectInstruction
+        | igetBooleanInstruction
+        | igetByteInstruction
+        | igetCharInstruction
+        | igetShortInstruction
+        | iputInstruction
+        | iputWideInstruction
+        | iputObjectInstruction
+        | iputBooleanInstruction
+        | iputByteInstruction
+        | iputCharInstruction
+        | iputShortInstruction
+        | addIntInstruction
+        | subIntInstruction
+        | mulIntInstruction
+        | divIntInstruction
+        | remIntInstruction
+        | andIntInstruction
+        | orIntInstruction
+        | xorIntInstruction
+        | shlIntInstruction
+        | shrIntInstruction
+        | ushrIntInstruction
+        | rsubIntInstruction
+        | addLongInstruction
+        | subLongInstruction
+        | mulLongInstruction
+        | divLongInstruction
+        | remLongInstruction
+        | andLongInstruction
+        | orLongInstruction
+        | xorLongInstruction
+        | shlLongInstruction
+        | shrLongInstruction
+        | ushrLongInstruction
+        | addFloatInstruction
+        | subFloatInstruction
+        | mulFloatInstruction
+        | divFloatInstruction
+        | remFloatInstruction
+        | addDoubleInstruction
+        | subDoubleInstruction
+        | mulDoubleInstruction
+        | divDoubleInstruction
+        | remDoubleInstruction
+        | addIntLit16Instruction
+        | mulIntLit16Instruction
+        | divIntLit16Instruction
+        | remIntLit16Instruction
+        | andIntLit16Instruction
+        | orIntLit16Instruction
+        | xorIntLit16Instruction
+        | addIntLit8Instruction
+        | rsubIntLit8Instruction
+        | mulIntLit8Instruction
+        | divIntLit8Instruction
+        | remIntLit8Instruction
+        | andIntLit8Instruction
+        | orIntLit8Instruction
+        | xorIntLit8Instruction
+        | shlIntLit8Instruction
+        | shrIntLit8Instruction
+        | ushrIntLit8Instruction
+        | filledNewArrayRangeInstruction
+        | filledNewArrayInstruction
+        | fillArrayDataInstruction
+        | arrayLengthInstruction
+        | packedSwitchInstruction
+        | sparseSwitchInstruction
+        | newInstanceInstruction
+        | checkCastInstruction
+        | moveInstruction
+        | moveFrom16Instruction
+        | move16Instruction
+        | moveWideInstruction
+        | moveWideFrom16Instruction
+        | moveWide16Instruction
+        | moveObjectInstruction
+        | moveObjectFrom16Instruction
+        | moveObject16Instruction
+        | constInstruction
+        | const4Instruction
+        | const16Instruction
+        | constHigh16Instruction
+        | constWide16Instruction
+        | constWide32Instruction
+        | constWideInstruction
+        | constWideHigh16Instruction
+        | constString
+        | constStringJumbo
+        | constClass
+        | sGetInstruction
+        | sGetWideInstruction
+        | sGetObjectInstruction
+        | sGetBooleanInstruction
+        | sGetByteInstruction
+        | sGetCharInstruction
+        | sGetShortInstruction
+        | sPutInstruction
+        | sPutWideInstruction
+        | sPutObjectInstruction
+        | sPutBooleanInstruction
+        | sPutByteInstruction
+        | sPutCharInstruction
+        | sPutShortInstruction
+        | invokeVirtualInstruction
+        | invokeSuperInstruction
+        | invokeDirectInstruction
+        | invokeStaticInstruction
+        | invokeInterfaceInstruction
+        | invokeVirtualRangeInstruction
+        | invokeSuperRangeInstruction
+        | invokeDirectRangeInstruction
+        | invokeStaticRangeInstruction
+        | invokeInterfaceRangeInstruction
+        | intToLongInstruction
+        | intToFloatInstruction
+        | intToDoubleInstruction
+        | longToIntInstruction
+        | longToFloatInstruction
+        | longToDoubleInstruction
+        | floatToIntInstruction
+        | floatToLongInstruction
+        | floatToDoubleInstruction
+        | doubleToIntInstruction
+        | doubleToLongInstruction
+        | doubleToFloatInstruction
+        | intToByteInstruction
+        | intToCharInstruction
+        | intToShortInstruction
+        | ifEqzInstruction
+        | ifNezInstruction
+        | ifLtzInstruction
+        | ifGezInstruction
+        | ifGtzInstruction
+        | ifLezInstruction
+        | negIntInstruction
+        | notIntInstruction
+        | negLongInstruction
+        | notLongInstruction
+        | negFloatInstruction
+        | negDoubleInstruction
+        | ifEqInstruction
+        | ifNeInstruction
+        | ifLtInstruction
+        | ifGeInstruction
+        | ifGtInstruction
+        | ifLeInstruction
+        | addInt2addrInstruction
+        | subInt2addrInstruction
+        | mulInt2addrInstruction
+        | divInt2addrInstruction
+        | remInt2addrInstruction
+        | andInt2addrInstruction
+        | orInt2addrInstruction
+        | xorInt2addrInstruction
+        | shlInt2addrInstruction
+        | shrInt2addrInstruction
+        | ushrInt2addrInstruction
+        | addLong2addrInstruction
+        | subLong2addrInstruction
+        | mulLong2addrInstruction
+        | divLong2addrInstruction
+        | remLong2addrInstruction
+        | andLong2addrInstruction
+        | orLong2addrInstruction
+        | xorLong2addrInstruction
+        | shlLong2addrInstruction
+        | shrLong2addrInstruction
+        | ushrLong2addrInstruction
+        | addFloat2addrInstruction
+        | subFloat2addrInstruction
+        | mulFloat2addrInstruction
+        | divFloat2addrInstruction
+        | remFloat2addrInstruction
+        | addDouble2addrInstruction
+        | subDouble2addrInstruction
+        | mulDouble2addrInstruction
+        | divDouble2addrInstruction
+        | remDouble2addrInstruction
+        | cmplFloatInstruction
+        | cmpgFloatInstruction
+        | cmplDoubleInstruction
+        | cmpgDoubleInstruction
+        | cmpLongInstruction
+        | returnVoidInstruction
+        | nopInstruction
+        | gotoInstruction
+        | goto16Instruction
+        | goto32Instruction
+        | moveResultInstruction
+        | moveResultWideInstruction
+        | moveResultObjectInstruction
+        | moveExceptionInstruction
+        | returnInstruction
+        | returnWideInstruction
+        | returnObjectInstruction
+        | monitorEnterInstruction
+        | monitorExitInstruction
+        | throwInstruction
+        | lineLabel
+        | catchDirective
+        | catchAllDirective
+        | annotationDirective
+        | localDirective
+        | localEndDirective
+        | localRestartDirective
+        | packedSwitchDirective
+        | arrayDataDirective
+        | sparseSwitchDirective
+    )+
     ;
-
-methodBody:                 methodBodyStatement+;
 
 packedSwitchIdent:          numericLiteral;
 
@@ -1152,7 +1083,7 @@ paramName:                  stringLiteral;
 paramAnnotations:           annotationDirective* PARAM_END_DIRECTIVE;
 
 // `.param p1`, `.param p1, "name"`, either optionally followed by annotations and `.end param`.
-paramDirective:             PARAM_DIRECTIVE registerIdentifier (COMMA paramName)? paramAnnotations?;
+paramDirective:             PARAM_DIRECTIVE IDENTIFIER (COMMA paramName)? paramAnnotations?;
 
 lineDirective:              LINE_DIRECTIVE numericLiteral;
 
