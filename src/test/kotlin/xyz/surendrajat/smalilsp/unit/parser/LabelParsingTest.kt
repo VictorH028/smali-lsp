@@ -203,7 +203,7 @@ class LabelParsingTest {
     }
     
     @Test
-    fun `parse all if-* two register comparisons`() {
+    fun `parse every two-register if comparison`() {
         val content = """
             .class public Lcom/example/Test;
             .super Ljava/lang/Object;

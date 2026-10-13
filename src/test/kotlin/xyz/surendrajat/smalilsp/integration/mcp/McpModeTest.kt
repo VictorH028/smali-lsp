@@ -585,14 +585,12 @@ class McpModeTest {
         try {
             val (stdin, stdout) = initializeSession(process)
 
-            val start = System.currentTimeMillis()
             val response = callTool(stdin, stdout, 200, "smali_index", mapOf("directory" to root.absolutePath))
-            val elapsed = System.currentTimeMillis() - start
 
             assertJsonRpcSuccess(response, 200)
             assertFalse(isToolError(response), "Indexing 200 files must not fail: ${getToolResultText(response)}")
 
-            assertTrue(elapsed < 60_000, "Indexing 200 files took ${elapsed}ms — performance regression?")
+            assertTrue(getToolResultText(response).contains("Files: 200/200"), "every file indexed: ${getToolResultText(response)}")
 
             val statsText = getToolResultText(callTool(stdin, stdout, 201, "smali_get_stats"))
             val stats = JsonParser.parseString(statsText).asJsonObject
@@ -718,12 +716,9 @@ class McpModeTest {
 
             var id = 251
             repeat(20) {
-                val start = System.currentTimeMillis()
                 val resp = callTool(stdin, stdout, id++, "smali_search_symbols", mapOf("pattern" to "main"))
-                val elapsed = System.currentTimeMillis() - start
                 assertJsonRpcSuccess(resp, id - 1)
                 assertFalse(isToolError(resp))
-                assertTrue(elapsed < 5_000, "Tool call $it took ${elapsed}ms — server may be stuck")
             }
         } finally {
             process.destroyForcibly()

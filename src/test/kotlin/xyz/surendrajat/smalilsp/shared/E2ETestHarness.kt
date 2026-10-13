@@ -39,11 +39,8 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         
         // Send initialize request
         val initParams = InitializeParams().apply {
-            rootUri = workspace.rootUri
             capabilities = clientCapabilities
-            if (workspaceFolders != null) {
-                setWorkspaceFolders(workspaceFolders)
-            }
+            setWorkspaceFolders(workspaceFolders ?: listOf(WorkspaceFolder(workspace.rootUri, "root")))
         }
         
         server.initialize(initParams).get(30, TimeUnit.SECONDS)
@@ -65,7 +62,7 @@ class E2ETestHarness(val workspace: TestWorkspace) {
     private fun createDefaultClientCapabilities(): ClientCapabilities {
         return ClientCapabilities().apply {
             workspace = WorkspaceClientCapabilities().apply {
-                workspaceEdit = WorkspaceEditCapabilities(true)
+                workspaceEdit = WorkspaceEditCapabilities().apply { documentChanges = true }
                 didChangeConfiguration = DidChangeConfigurationCapabilities(true)
                 didChangeWatchedFiles = DidChangeWatchedFilesCapabilities(true)
             }
