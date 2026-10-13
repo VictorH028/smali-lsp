@@ -26,14 +26,19 @@ class SmaliParser(private val strings: StringPool = StringPool()) {
         val syntaxErrors: List<SyntaxError>
     )
     
-    /**
-     * Syntax error with location and message.
-     */
+    /** Syntax error at a 1-based line, with the length of the offending token (1 when there is none). */
     data class SyntaxError(
         val line: Int,
         val charPositionInLine: Int,
-        val message: String
+        val message: String,
+        val length: Int = 1
     )
+
+    private fun tokenLength(offendingSymbol: Any?): Int {
+        val token = offendingSymbol as? Token ?: return 1
+        if (token.type == Token.EOF) return 1
+        return token.text?.length?.coerceAtLeast(1) ?: 1
+    }
     
     /**
      * Parse a smali file from string content using ANTLR4 grammar.
@@ -130,7 +135,7 @@ class SmaliParser(private val strings: StringPool = StringPool()) {
                     msg: String?,
                     e: RecognitionException?
                 ) {
-                    syntaxErrors.add(SyntaxError(line, charPositionInLine, msg ?: "Parser error"))
+                    syntaxErrors.add(SyntaxError(line, charPositionInLine, msg ?: "Parser error", tokenLength(offendingSymbol)))
                 }
             })
             

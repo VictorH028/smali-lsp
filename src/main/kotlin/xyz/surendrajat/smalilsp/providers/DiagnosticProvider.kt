@@ -85,7 +85,7 @@ class DiagnosticProvider(
             createDiagnostic(
                 range = Range(
                     Position(line, error.charPositionInLine),
-                    Position(line, error.charPositionInLine + 10)
+                    Position(line, error.charPositionInLine + error.length)
                 ),
                 message = error.message,
                 severity = DiagnosticSeverity.Error,

@@ -345,6 +345,16 @@ class DiagnosticProviderTest {
     }
 
     @Test
+    fun `a syntax error underlines the offending token`() {
+        val line = "    bogus-opcode v0"
+        val content = ".class public Lcom/example/Broken;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n$line\n    return-void\n.end method"
+        val error = provider.computeDiagnostics("file:///Broken.smali", content).first { it.code.left == "syntax-error" }
+        assertEquals(4, error.range.start.line)
+        assertEquals(line.indexOf("bogus"), error.range.start.character)
+        assertEquals(line.indexOf("bogus") + "bogus-opcode".length, error.range.end.character, "the token, not a fixed width: ${error.message}")
+    }
+
+    @Test
     fun `computeSyntaxDiagnosticsFromParseResult returns only syntax errors`() {
         // File with both syntax issues AND undefined class references
         val content = """
