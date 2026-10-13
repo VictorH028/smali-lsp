@@ -112,6 +112,14 @@ class WorkspaceIndex {
         return true
     }
 
+    /** Removes every indexed file under [folderUri] (a workspace folder the client closed); returns how many. */
+    fun removeFilesUnder(folderUri: String): Int {
+        val prefix = canonicalUri(folderUri).trimEnd('/') + "/"
+        val uris = filesByUri.keys.filter { it.startsWith(prefix) }
+        for (uri in uris) removeFile(uri)
+        return uris.size
+    }
+
     /** Undoes what [indexFile] recorded for [file] outside the usage tables. */
     private fun retract(file: SmaliFile, uri: String) {
         val className = file.classDefinition.name

@@ -84,4 +84,19 @@ class DocumentLifecycleTest {
         watched(uri, FileChangeType.Changed)
         assertEquals(listOf("again"), methodsOf(uri), "not open any more: watched changes apply")
     }
+
+    @Test
+    fun `a removed workspace folder drops its files and an added one is handed to the server`() {
+        val folder = File(dir, "lib").apply { mkdirs() }
+        val file = File(folder, "Lib.smali").apply { writeText(".class public Lcom/Lib;\n.super Ljava/lang/Object;") }
+        index.indexFile(SmaliParser().parse(file.toPath().toUri().toString(), file.readText())!!)
+        val added = mutableListOf<String>()
+        workspace.onFoldersAdded = { folders -> added.addAll(folders.map { it.uri }) }
+
+        val folderUri = folder.toPath().toUri().toString()
+        workspace.didChangeWorkspaceFolders(org.eclipse.lsp4j.DidChangeWorkspaceFoldersParams(org.eclipse.lsp4j.WorkspaceFoldersChangeEvent(listOf(org.eclipse.lsp4j.WorkspaceFolder("file:///elsewhere", "new")), listOf(org.eclipse.lsp4j.WorkspaceFolder(folderUri, "lib")))))
+        workspace.awaitWrites()
+        assertNull(index.findClass("Lcom/Lib;"), "the closed folder's class is gone")
+        assertEquals(listOf("file:///elsewhere"), added)
+    }
 }

@@ -1,6 +1,8 @@
 package xyz.surendrajat.smalilsp
 
 import org.eclipse.lsp4j.DidChangeConfigurationParams
+import org.eclipse.lsp4j.DidChangeWorkspaceFoldersParams
+import org.eclipse.lsp4j.WorkspaceFolder
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams
 import org.eclipse.lsp4j.FileChangeType
 import org.eclipse.lsp4j.SymbolInformation
@@ -36,6 +38,22 @@ class SmaliWorkspaceService(
 
     private val logger = LoggerFactory.getLogger(SmaliWorkspaceService::class.java)
     private val symbolProvider = WorkspaceSymbolProvider(index)
+
+    /** Receives the folders the client adds, so the server can index them; the server sets it. */
+    var onFoldersAdded: (List<WorkspaceFolder>) -> Unit = {}
+
+    /** A closed folder's files leave the index; an opened folder is indexed like the initial ones. */
+    override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
+        val removed = params.event.removed
+        val added = params.event.added
+        logger.info("Workspace folders changed: ${added.size} added, ${removed.size} removed")
+        if (removed.isNotEmpty()) {
+            writes.submit("didChangeWorkspaceFolders") {
+                for (folder in removed) logger.info("Removed ${index.removeFilesUnder(folder.uri)} file(s) under ${folder.uri}")
+            }
+        }
+        if (added.isNotEmpty()) onFoldersAdded(added)
+    }
 
     /** Blocks until every notification received so far has been applied. For tests. */
     fun awaitWrites(timeoutSeconds: Long = 30) {

@@ -199,4 +199,16 @@ class WorkspaceIndexStorageTest {
         assertEquals(listOf("second"), index.searchStrings("sec").map { it.value })
         assertEquals(1, index.getStats().strings)
     }
+
+    @Test
+    fun `the files of a closed workspace folder leave the index`() {
+        indexSource("file:///ws/app/A.smali", source("Lcom/A;", "return-void"))
+        indexSource("file:///ws/app/sub/B.smali", source("Lcom/B;", "return-void"))
+        indexSource("file:///other/C.smali", source("Lcom/C;", "return-void"))
+        assertEquals(2, index.removeFilesUnder("file:///ws/app"))
+        assertNull(index.findClass("Lcom/A;"))
+        assertNull(index.findClass("Lcom/B;"))
+        assertNotNull(index.findClass("Lcom/C;"))
+        assertEquals(0, index.removeFilesUnder("file:///ws/app/"), "nothing left under it")
+    }
 }

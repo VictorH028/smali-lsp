@@ -77,6 +77,17 @@ class SmaliLanguageServer : LanguageServer {
     fun connect(client: LanguageClient) {
         this.client = client
         textDocumentService.connect(client)
+        workspaceService.onFoldersAdded = { folders ->
+            CompletableFuture.runAsync {
+                try {
+                    indexWorkspace(folders)
+                } catch (e: Throwable) {
+                    logger.error("Failed to index added workspace folders", e)
+                } finally {
+                    textDocumentService.refreshDiagnosticsForOpenFiles()
+                }
+            }
+        }
     }
 
     /** Blocks until every notification received so far has been applied. For tests. */
@@ -240,6 +251,14 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setImplementationProvider(true)
         capabilities.setDocumentHighlightProvider(true)
         capabilities.setFoldingRangeProvider(true)
+
+        // Folders added or removed during the session are indexed or dropped
+        capabilities.workspace = WorkspaceServerCapabilities().apply {
+            workspaceFolders = WorkspaceFoldersOptions().apply {
+                supported = true
+                setChangeNotifications(Either.forRight(true))
+            }
+        }
 
         val versionInfo = loadVersionInfo()
         val serverInfo = ServerInfo("Smali Language Server", versionInfo.version)
