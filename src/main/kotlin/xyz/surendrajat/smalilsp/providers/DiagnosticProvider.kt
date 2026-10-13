@@ -23,29 +23,10 @@ class DiagnosticProvider(
 ) {
     private val logger = LoggerFactory.getLogger(DiagnosticProvider::class.java)
     
-    /**
-     * Compute all diagnostics for a file.
-     * Includes both syntax and semantic errors.
-     * 
-     * @param uri File URI
-     * @param content File content
-     * @return List of diagnostics to display
-     */
-    fun computeDiagnostics(uri: String, content: String): List<Diagnostic> {
-        val diagnostics = mutableListOf<Diagnostic>()
-        
-        // 1. Parse with error recovery to get syntax errors
-        val parseResult = parseWithErrorRecovery(uri, content)
-        diagnostics.addAll(parseResult.syntaxDiagnostics)
-        
-        // 2. If we have an AST (even partial), check semantic errors
-        parseResult.smaliFile?.let { file ->
-            diagnostics.addAll(computeSemanticDiagnostics(uri, file))
-        }
-        
-        return diagnostics
-    }
-    
+    /** Every diagnostic for [content]: syntax errors from the parser, then the semantic checks on whatever AST it produced. */
+    fun computeDiagnostics(uri: String, content: String): List<Diagnostic> =
+        computeDiagnosticsFromParseResult(uri, parser.parseWithErrors(uri, content))
+
     /**
      * Compute diagnostics from an already-parsed result.
      * Avoids re-parsing when the caller already has a ParseResult (e.g. didChange).
@@ -65,18 +46,6 @@ class DiagnosticProvider(
      */
     fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult): List<Diagnostic> {
         return convertSyntaxErrors(parseResult.syntaxErrors)
-    }
-
-    /**
-     * Parse file with error recovery enabled.
-     * Collects syntax errors but continues parsing.
-     */
-    private fun parseWithErrorRecovery(uri: String, content: String): ParseResult {
-        val parseResult = parser.parseWithErrors(uri, content)
-        return ParseResult(
-            smaliFile = parseResult.smaliFile,
-            syntaxDiagnostics = convertSyntaxErrors(parseResult.syntaxErrors)
-        )
     }
 
     private fun convertSyntaxErrors(errors: List<SmaliParser.SyntaxError>): List<Diagnostic> {
@@ -216,14 +185,4 @@ class DiagnosticProvider(
     ): Diagnostic {
         return Diagnostic(range, message, severity, "smali-lsp", code)
     }
-    
-    /**
-     * Result of parsing with error recovery.
-     */
-    private data class ParseResult(
-        val smaliFile: SmaliFile?,
-        val syntaxDiagnostics: List<Diagnostic>
-    )
 }
-
-
