@@ -11,6 +11,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
@@ -67,6 +68,9 @@ class McpMode {
     @Volatile
     private var session: Session? = null
 
+    /** Tool calls run concurrently; only one index can be under construction at a time. */
+    private val indexing = Mutex()
+
     fun run() {
         // kotlin-logging (transitive via the MCP SDK) prints a banner to STDOUT on first use,
         // which corrupts the protocol stream; it must be off before any SDK class initializes.
@@ -78,7 +82,7 @@ class McpMode {
         )
         registerTools(server)
 
-        val transport = StdioServerTransport(System.`in`.asSource().buffered(), System.out.asSink().buffered())
+        val transport = StdioServerTransport(System.`in`.asSource().buffered(), System.out.asSink().buffered()) {}
         runBlocking {
             val mcpSession = server.createSession(transport)
             logger.info("MCP server started")
@@ -164,16 +168,22 @@ class McpMode {
             val directory = args.require("directory")
             val dir = File(directory)
             if (!dir.exists() || !dir.isDirectory) throw ToolError("Directory not found: $directory")
+            if (!indexing.tryLock()) throw ToolError("An index is already being built; wait for it to finish")
 
             logger.info("Indexing: ${dir.absolutePath}")
             val startTime = System.currentTimeMillis()
-            // Drop the old session before building the new one: for a large app the two
-            // indexes would not fit in the heap together. No System.gc(): forcing a full
-            // collection before a long scan only pegs every core with GC threads.
-            session = null
-            val index = WorkspaceIndex()
-            val result = WorkspaceScanner(index).scanDirectory(dir) { _, _ -> }
-            session = Session(dir.absolutePath, index)
+            val (index, result) = try {
+                // Drop the old session before building the new one: for a large app the two
+                // indexes would not fit in the heap together. No System.gc(): forcing a full
+                // collection before a long scan only pegs every core with GC threads.
+                session = null
+                val index = WorkspaceIndex()
+                val result = WorkspaceScanner(index).scanDirectory(dir) { _, _ -> }
+                session = Session(dir.absolutePath, index)
+                index to result
+            } finally {
+                indexing.unlock()
+            }
 
             val duration = System.currentTimeMillis() - startTime
             val stats = index.getStats()
