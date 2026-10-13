@@ -377,9 +377,15 @@ class SmaliLanguageServer : LanguageServer {
         if (!clientSupportsWatcherRegistration) return
         val options = DidChangeWatchedFilesRegistrationOptions(listOf(FileSystemWatcher(Either.forLeft("**/*.smali"))))
         val registration = Registration("smali-file-watcher", "workspace/didChangeWatchedFiles", options)
-        client.registerCapability(RegistrationParams(listOf(registration))).exceptionally { e ->
-            logger.warn("Client rejected file watcher registration: ${e.message}")
-            null
+        try {
+            client.registerCapability(RegistrationParams(listOf(registration))).exceptionally { e ->
+                logger.warn("Client rejected file watcher registration: ${e.message}")
+                null
+            }
+        } catch (e: Exception) {
+            // An in-process client may throw instead of returning a failed future; never let that
+            // stop initialization.
+            logger.warn("Client does not accept capability registration: ${e.message}")
         }
     }
 
