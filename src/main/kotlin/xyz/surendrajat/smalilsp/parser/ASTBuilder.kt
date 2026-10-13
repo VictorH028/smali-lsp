@@ -412,14 +412,12 @@ class ASTBuilder(
         val openParen = methodSig.indexOf('(')
         if (openParen < 0) return
 
-        val methodName = methodSig.substring(0, openParen)
-        val descriptor = methodSig.substring(openParen)
-
+        // Owners, names and descriptors repeat across the workspace; interning them is most of the AST's memory
         currentInstructions.add(InvokeInstruction(
             opcode = opcode,
-            className = className,
-            methodName = methodName,
-            descriptor = descriptor,
+            className = StringPool.intern(className),
+            methodName = StringPool.intern(methodSig.substring(0, openParen)),
+            descriptor = StringPool.intern(methodSig.substring(openParen)),
             range = range,
             targetLine = target.start.line - 1,
             targetStart = target.contiguousStart(targetText)
@@ -559,14 +557,11 @@ class ASTBuilder(
         val colonIndex = fieldPart.indexOf(':')
         if (colonIndex < 0) return
 
-        val fieldName = fieldPart.substring(0, colonIndex)
-        val fieldType = fieldPart.substring(colonIndex + 1)
-
         currentInstructions.add(FieldAccessInstruction(
             opcode = opcode,
-            className = className,
-            fieldName = fieldName,
-            fieldType = fieldType,
+            className = StringPool.intern(className),
+            fieldName = StringPool.intern(fieldPart.substring(0, colonIndex)),
+            fieldType = StringPool.intern(fieldPart.substring(colonIndex + 1)),
             range = range,
             targetLine = fieldCtx.start.line - 1,
             targetStart = fieldCtx.contiguousStart(fieldText)
@@ -609,7 +604,7 @@ class ASTBuilder(
         val className = typeCtx.src()
         currentInstructions.add(TypeInstruction(
             opcode = opcode,
-            className = className,
+            className = StringPool.intern(className),
             range = range,
             typeLine = typeCtx.start.line - 1,
             typeStart = typeCtx.contiguousStart(className)
@@ -651,7 +646,7 @@ class ASTBuilder(
         if (pendingMethod == null) return
 
         val labelCtx = ctx.label() ?: return
-        val labelName = labelCtx.identifier()?.src() ?: return
+        val labelName = StringPool.intern(labelCtx.identifier()?.src() ?: return)
 
         currentLabels[labelName] = LabelDefinition(
             name = labelName,
@@ -729,7 +724,7 @@ class ASTBuilder(
     ) {
         if (pendingMethod == null || labelCtx == null) return
 
-        val labelName = labelCtx.identifier()?.src() ?: return
+        val labelName = StringPool.intern(labelCtx.identifier()?.src() ?: return)
 
         currentInstructions.add(JumpInstruction(
             opcode = opcode,
@@ -737,6 +732,6 @@ class ASTBuilder(
             range = fullRange,
             labelRange = labelCtx.toRange()
         ))
-        currentLabelRefs.add(LabelRef(StringPool.intern(labelName), labelCtx.toSpan()))
+        currentLabelRefs.add(LabelRef(labelName, labelCtx.toSpan()))
     }
 }
