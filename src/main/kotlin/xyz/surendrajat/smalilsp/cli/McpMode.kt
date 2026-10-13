@@ -300,7 +300,7 @@ class McpMode {
             val uri = args.require("uri")
             val content = args.require("content")
             val results = s!!.diagnostics.computeDiagnostics(uri, content).map { diagnostic ->
-                mapOf("range" to range(diagnostic.range), "severity" to diagnostic.severity.value, "message" to diagnostic.message)
+                mapOf("range" to range(diagnostic.range), "severity" to diagnostic.severity.value, "message" to diagnostic.message.let { if (it.isLeft) it.left else it.right.value })
             }
             json(mapOf("diagnostics" to results, "count" to results.size))
         }

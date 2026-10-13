@@ -9,6 +9,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.DiagnosticProvider
 import xyz.surendrajat.smalilsp.shared.positionOf
+import xyz.surendrajat.smalilsp.shared.text
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -151,7 +152,7 @@ class DiagnosticProviderTest {
                 DiagnosticSeverity.Warning to "Class 'Lcom/example/Missing5;' not found in workspace or SDK",
                 DiagnosticSeverity.Information to "Type 'Lcom/example/Missing3;' not found in workspace or SDK",
             ),
-            diagnosticsOf(source).map { it.severity to it.message }
+            diagnosticsOf(source).map { it.severity to it.text }
         )
     }
 
@@ -234,7 +235,7 @@ class DiagnosticProviderTest {
             .end method
         """.trimIndent()
         val byClass = diagnosticsOf(source).associate { d ->
-            val name = Regex("'(L[^']+;)'").find(d.message)?.groupValues?.get(1) ?: error("no class in ${d.message}")
+            val name = Regex("'(L[^']+;)'").find(d.text)?.groupValues?.get(1) ?: error("no class in ${d.text}")
             name to d.range
         }
         assertEquals(
@@ -281,7 +282,7 @@ class DiagnosticProviderTest {
         assertTrue(errors.isNotEmpty(), "a method that never ends is a syntax error")
         val atEof = errors.last()
         assertEquals(atEof.range.start.line, atEof.range.end.line)
-        assertEquals(1, atEof.range.end.character - atEof.range.start.character, "EOF has no token text, so the range is one character wide: ${atEof.message}")
+        assertEquals(1, atEof.range.end.character - atEof.range.start.character, "EOF has no token text, so the range is one character wide: ${atEof.text}")
     }
 
     @Test
@@ -304,7 +305,7 @@ class DiagnosticProviderTest {
             .method
         """.trimIndent()
         val errors = syntaxErrors(diagnosticsOf(source))
-        assertTrue(errors.size >= 2, "three broken directives, not just the first: ${errors.map { it.message }}")
+        assertTrue(errors.size >= 2, "three broken directives, not just the first: ${errors.map { it.text }}")
     }
 
     @Test
@@ -337,7 +338,7 @@ class DiagnosticProviderTest {
                 "Superclass 'Lcom/example/NonExistent;' not found in workspace or SDK",
                 "Class 'Lcom/example/Missing;' not found in workspace or SDK",
             ),
-            full.map { it.message }
+            full.map { it.text }
         )
         assertEquals(setOf("undefined-class"), full.map { it.code.left }.toSet())
         assertEquals(full, diagnosticsOf(source), "computeDiagnostics parses and reports the same")

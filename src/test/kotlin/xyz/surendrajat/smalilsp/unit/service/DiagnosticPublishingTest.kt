@@ -22,6 +22,7 @@ import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import xyz.surendrajat.smalilsp.shared.TestLSPClient
+import xyz.surendrajat.smalilsp.shared.text
 import java.util.concurrent.TimeoutException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -89,7 +90,7 @@ class DiagnosticPublishingTest {
         val diagnostics = published(uri)
         assertEquals(
             listOf(missingSuperclass("Lcom/example/NonExistentSuperClass;"), "Class 'Lcom/example/UndefinedClass;' not found in workspace or SDK"),
-            diagnostics.map { it.message }
+            diagnostics.map { it.text }
         )
         assertTrue(diagnostics.all { it.severity == DiagnosticSeverity.Warning && it.code.left == "undefined-class" }, diagnostics.toString())
     }
@@ -110,7 +111,7 @@ class DiagnosticPublishingTest {
         service.refreshDiagnosticsForOpenFiles()
 
         assertEquals(emptyList(), published(resolved), "the dependency is indexed now")
-        assertEquals(listOf(missingSuperclass("Lcom/example/ReallyMissing;")), published(unresolved).map { it.message }, "a class nobody indexed stays undefined")
+        assertEquals(listOf(missingSuperclass("Lcom/example/ReallyMissing;")), published(unresolved).map { it.text }, "a class nobody indexed stays undefined")
     }
 
     @Test
@@ -124,7 +125,7 @@ class DiagnosticPublishingTest {
 
         service.indexingComplete = true
         change(uri, source(superClass = "Lcom/example/NotIndexedYet;"), version = 3)
-        assertEquals(listOf(missingSuperclass("Lcom/example/NotIndexedYet;")), published(uri).map { it.message })
+        assertEquals(listOf(missingSuperclass("Lcom/example/NotIndexedYet;")), published(uri).map { it.text })
     }
 
     @Test
@@ -132,7 +133,7 @@ class DiagnosticPublishingTest {
         service.indexingComplete = true
         val uri = "file:///Test.smali"
         open(uri, source(superClass = "Lcom/example/Missing;"))
-        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(uri).map { it.message })
+        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(uri).map { it.text })
 
         change(uri, source(), version = 2)
         assertEquals(emptyList(), published(uri))
@@ -145,15 +146,15 @@ class DiagnosticPublishingTest {
         val stillOpen = "file:///Open.smali"
         open(closed, source(name = "Lcom/example/Closed;", superClass = "Lcom/example/Missing;"))
         open(stillOpen, source(name = "Lcom/example/Open;", superClass = "Lcom/example/Missing;"))
-        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(closed).map { it.message })
-        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(stillOpen).map { it.message })
+        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(closed).map { it.text })
+        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(stillOpen).map { it.text })
 
         close(closed)
         assertEquals(emptyList(), published(closed), "closing clears what the editor shows")
 
         client.clearAll()
         service.refreshDiagnosticsForOpenFiles()
-        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(stillOpen).map { it.message })
+        assertEquals(listOf(missingSuperclass("Lcom/example/Missing;")), published(stillOpen).map { it.text })
         // Every write has been applied by now, so a short wait is a pure negative check.
         assertFailsWith<TimeoutException>("a closed file is not refreshed") { client.waitForDiagnostics(closed, timeoutMs = 200) }
     }
@@ -168,7 +169,7 @@ class DiagnosticPublishingTest {
         open(uri, source(body = methods))
         assertEquals(
             (1..100).map { "Class 'Lcom/example/Missing$it;' not found in workspace or SDK" },
-            published(uri).map { it.message }
+            published(uri).map { it.text }
         )
     }
 
@@ -184,7 +185,7 @@ class DiagnosticPublishingTest {
 
         for (i in 1..10) {
             val expected = if (i % 2 == 0) listOf(missingSuperclass("Lcom/example/Missing$i;")) else emptyList()
-            assertEquals(expected, published(uri(i)).map { it.message }, "file $i")
+            assertEquals(expected, published(uri(i)).map { it.text }, "file $i")
             assertTrue(index.hasClass("LTest$i;"), "file $i is indexed")
         }
     }

@@ -25,6 +25,7 @@ import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
 import xyz.surendrajat.smalilsp.shared.TestUtils
+import xyz.surendrajat.smalilsp.shared.text
 import org.eclipse.lsp4j.Location
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
@@ -406,8 +407,8 @@ class RealApkInvariantsTest {
             val content = File(java.net.URI(file.uri)).readText()
             checked++
             for (d in diag.computeDiagnostics(file.uri, content)) {
-                if (d.code?.left == "syntax-error") bad.add("${file.classDefinition.name}: syntax error: ${d.message.take(60)}")
-                val named = Regex("""'(L[^']+;)'""").find(d.message)?.groupValues?.get(1)
+                if (d.code?.left == "syntax-error") bad.add("${file.classDefinition.name}: syntax error: ${d.text.take(60)}")
+                val named = Regex("""'(L[^']+;)'""").find(d.text)?.groupValues?.get(1)
                 if (named != null && index.hasClass(named.trimStart('['))) bad.add("${file.classDefinition.name}: flags existing class $named")
             }
         }

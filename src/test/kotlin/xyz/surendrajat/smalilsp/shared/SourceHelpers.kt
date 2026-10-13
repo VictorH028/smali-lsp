@@ -1,5 +1,6 @@
 package xyz.surendrajat.smalilsp.shared
 
+import org.eclipse.lsp4j.Diagnostic
 import org.eclipse.lsp4j.Position
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -25,3 +26,6 @@ fun String.positionOf(marker: String, needle: String, offset: Int = 0, after: St
     require(from >= 0) { "no $needle on line $line" }
     return Position(line, from + offset)
 }
+
+/** The plain-text message of a diagnostic (lsp4j 1.0 models it as string-or-markup). */
+val Diagnostic.text: String get() = message.left
