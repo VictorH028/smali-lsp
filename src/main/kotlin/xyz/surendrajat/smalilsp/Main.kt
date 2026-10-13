@@ -26,6 +26,7 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
+import kotlin.system.exitProcess
 
 /**
  * Main entry point for Smali Language Server.
@@ -58,8 +59,7 @@ internal fun loadVersionInfo(): VersionInfo {
 fun main(args: Array<String>) {
     val options = parseArgs(args) ?: run {
         printUsage()
-        System.exit(2)
-        return
+        exitProcess(2)
     }
     configureLogging(options.verbose, options.logFile)
 
@@ -74,7 +74,7 @@ fun main(args: Array<String>) {
         else -> {
             System.err.println("Unknown command: ${options.command}")
             printUsage()
-            System.exit(1)
+            exitProcess(1)
         }
     }
 }
@@ -440,7 +440,7 @@ class SmaliLanguageServer : LanguageServer {
      */
     override fun exit() {
         logger.info("Server exiting")
-        System.exit(if (shutdownRequested) 0 else 1)
+        exitProcess(if (shutdownRequested) 0 else 1)
     }
     
     override fun getTextDocumentService(): TextDocumentService {
