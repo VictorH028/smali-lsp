@@ -466,39 +466,45 @@ class McpMode {
     // Symbol resolution shared by find_references and hover
     // ======================================================================
 
-    private fun referencesByName(s: Session, args: Args): List<Location> {
-        val className = args.require("class_name")
-        val member = args.string("member_name") ?: return s.references.findClassReferences(className, includeDeclaration = true)
+    /** A member named by `class_name` + `member_name`: declared in the class, or pinned by `descriptor` / `field_type` when the class is outside the workspace. */
+    private sealed class Member(val className: String, val name: String, val declared: Boolean) {
+        class Method(className: String, name: String, val descriptor: String, declared: Boolean) : Member(className, name, declared)
+        class Field(className: String, name: String, val type: String, declared: Boolean) : Member(className, name, declared)
+    }
+
+    private fun membersByName(s: Session, args: Args, className: String, member: String): List<Member> {
         val descriptor = args.string("descriptor")
         val fieldType = args.string("field_type")
         val file = s.index.findClass(className)
-        val methods = file?.methods?.filter { it.name == member && (descriptor == null || it.descriptor == descriptor) } ?: emptyList()
-        val fields = file?.fields?.filter { it.name == member && (fieldType == null || it.type == fieldType) } ?: emptyList()
+        val methods = file?.methods?.filter { it.name == member && (descriptor == null || it.descriptor == descriptor) }.orEmpty()
+        val fields = file?.fields?.filter { it.name == member && (fieldType == null || it.type == fieldType) }.orEmpty()
         return when {
-            methods.isNotEmpty() -> methods.flatMap { s.references.findMethodReferences(className, it.name, it.descriptor, includeDeclaration = true) }
-            fields.isNotEmpty() -> fields.flatMap { s.references.findFieldReferences(className, it.name, it.type, includeDeclaration = true) }
-            descriptor != null -> s.references.findMethodReferences(className, member, descriptor, includeDeclaration = false)
-            fieldType != null -> s.references.findFieldReferences(className, member, fieldType, includeDeclaration = false)
+            methods.isNotEmpty() -> methods.map { Member.Method(className, it.name, it.descriptor, declared = true) }
+            fields.isNotEmpty() -> fields.map { Member.Field(className, it.name, it.type, declared = true) }
+            descriptor != null -> listOf(Member.Method(className, member, descriptor, declared = false))
+            fieldType != null -> listOf(Member.Field(className, member, fieldType, declared = false))
             file != null -> throw ToolError("$className has no member named '$member'")
             else -> throw ToolError("$className is not in the workspace; pass descriptor for a method or field_type for a field")
+        }
+    }
+
+    private fun referencesByName(s: Session, args: Args): List<Location> {
+        val className = args.require("class_name")
+        val member = args.string("member_name") ?: return s.references.findClassReferences(className, includeDeclaration = true)
+        return membersByName(s, args, className, member).flatMap {
+            when (it) {
+                is Member.Method -> s.references.findMethodReferences(it.className, it.name, it.descriptor, includeDeclaration = it.declared)
+                is Member.Field -> s.references.findFieldReferences(it.className, it.name, it.type, includeDeclaration = it.declared)
+            }
         }
     }
 
     private fun hoverByName(s: Session, args: Args): Hover? {
         val className = args.require("class_name")
         val member = args.string("member_name") ?: return s.hover.hoverForClassReference(className)
-        val descriptor = args.string("descriptor")
-        val fieldType = args.string("field_type")
-        val file = s.index.findClass(className)
-        file?.methods?.firstOrNull { it.name == member && (descriptor == null || it.descriptor == descriptor) }
-            ?.let { return s.hover.hoverForMethodReference(className, it.name, it.descriptor) }
-        file?.fields?.firstOrNull { it.name == member && (fieldType == null || it.type == fieldType) }
-            ?.let { return s.hover.hoverForFieldReference(className, it.name, it.type) }
-        return when {
-            descriptor != null -> s.hover.hoverForMethodReference(className, member, descriptor)
-            fieldType != null -> s.hover.hoverForFieldReference(className, member, fieldType)
-            file != null -> throw ToolError("$className has no member named '$member'")
-            else -> throw ToolError("$className is not in the workspace; pass descriptor for a method or field_type for a field")
+        return when (val first = membersByName(s, args, className, member).first()) {
+            is Member.Method -> s.hover.hoverForMethodReference(first.className, first.name, first.descriptor)
+            is Member.Field -> s.hover.hoverForFieldReference(first.className, first.name, first.type)
         }
     }
 
