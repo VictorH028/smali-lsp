@@ -18,6 +18,7 @@ import xyz.surendrajat.smalilsp.providers.CodeLensProvider
 import xyz.surendrajat.smalilsp.providers.CompletionProvider
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.DiagnosticProvider
+import xyz.surendrajat.smalilsp.providers.DocumentSymbolProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.RenameProvider
@@ -47,6 +48,7 @@ class SmaliTextDocumentService(
     private val logger = LoggerFactory.getLogger(SmaliTextDocumentService::class.java)
     private val parser = SmaliParser()
     private val diagnosticProvider = DiagnosticProvider(parser, index)
+    private val documentSymbolProvider = DocumentSymbolProvider()
     private var client: LanguageClient? = null
 
     /** Open file URIs, so diagnostics can be refreshed once workspace indexing completes. */
@@ -200,21 +202,7 @@ class SmaliTextDocumentService(
     override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<MutableList<Either<SymbolInformation, DocumentSymbol>>> =
         request("documentSymbol", params.textDocument.uri, { mutableListOf() }) {
             val file = index.findFileByUri(params.textDocument.uri) ?: return@request mutableListOf()
-
-            val classSymbol = DocumentSymbol(
-                file.classDefinition.name,
-                SymbolKind.Class,
-                file.classDefinition.range,
-                file.classDefinition.range
-            )
-            classSymbol.children = mutableListOf()
-            file.methods.forEach { method ->
-                classSymbol.children.add(DocumentSymbol("${method.name}${method.descriptor}", SymbolKind.Method, method.range, method.range))
-            }
-            file.fields.forEach { field ->
-                classSymbol.children.add(DocumentSymbol("${field.name}: ${field.type}", SymbolKind.Field, field.range, field.range))
-            }
-            mutableListOf(Either.forRight(classSymbol))
+            documentSymbolProvider.provideDocumentSymbols(file).map { Either.forRight<SymbolInformation, DocumentSymbol>(it) }.toMutableList()
         }
 
     override fun prepareCallHierarchy(params: CallHierarchyPrepareParams): CompletableFuture<MutableList<CallHierarchyItem>> =
