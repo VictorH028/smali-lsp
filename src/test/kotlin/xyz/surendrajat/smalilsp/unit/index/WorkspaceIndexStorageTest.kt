@@ -93,6 +93,17 @@ class WorkspaceIndexStorageTest {
     }
 
     @Test
+    fun `string literals follow re-indexing and removal without a rebuild`() {
+        indexSource("file:///S.smali", source("Lcom/S;", "const-string v0, \"hello world\""))
+        assertEquals(1, index.searchStrings("HELLO").size, "case-insensitive")
+        indexSource("file:///S.smali", source("Lcom/S;", "const-string v0, \"goodbye\""))
+        assertEquals(0, index.searchStrings("hello").size, "the old literal is retired with the file's generation")
+        assertEquals(1, index.searchStrings("goodbye").size)
+        assertTrue(index.removeFile("file:///S.smali"))
+        assertEquals(0, index.searchStrings("goodbye").size)
+    }
+
+    @Test
     fun `fields with the same name and different types are distinct`() {
         indexSource("file:///Holder.smali", """
             .class public Lcom/Holder;

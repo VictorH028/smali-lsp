@@ -60,10 +60,8 @@ class WorkspaceIndex {
     private val totalEntries = AtomicLong(0)
     private val staleEntries = AtomicLong(0)
 
-    // ---- string literals: value → sites, built on first search, rebuilt after any change ----
-    private var stringIndex = HashMap<String, UsageList>()
-    @Volatile private var stringIndexDirty = true
-    private val stringIndexLock = Any()
+    // ---- string literals: value → sites, maintained like the member tables ----
+    private val stringUsages = ConcurrentHashMap<String, UsageList>()
     private val stringValueCounts = ConcurrentHashMap<String, Int>()
 
     // ---- open documents ----
@@ -98,7 +96,6 @@ class WorkspaceIndex {
             added++
         }
         totalEntries.addAndGet(added.toLong())
-        stringIndexDirty = true
         synchronized(fileLock) {
             // Under the lock: fileId() may replace the arrays while growing them
             contributions.set(id, added)
@@ -112,7 +109,6 @@ class WorkspaceIndex {
         val file = filesByUri.remove(key) ?: return false
         retract(file, key)
         retireUsages(fileId(key))
-        stringIndexDirty = true
         return true
     }
 
@@ -159,9 +155,10 @@ class WorkspaceIndex {
     }
 
     /**
-     * Every usage a file contributes: call sites, field accesses and class references
-     * (owners, type operands, field types, descriptor types), each at its token. Array types are
-     * filed under their element class; a primitive-array owner (`[I->clone()`) names no class.
+     * Every usage a file contributes: call sites, field accesses, class references (owners, type
+     * operands, field types, descriptor types) and string literals, each at its token. Array
+     * types are filed under their element class; a primitive-array owner (`[I->clone()`) names
+     * no class.
      */
     private inline fun forEachUsage(
         file: SmaliFile,
@@ -182,7 +179,8 @@ class WorkspaceIndex {
                     is TypeInstruction -> {
                         Types.className(instr.className)?.let { sink(classRefs, it, instr.typeSpan ?: instr.range.toSpan()) }
                     }
-                    is JumpInstruction, is ConstStringInstruction -> {}
+                    is ConstStringInstruction -> sink(stringUsages, instr.value, Span(instr.startLine, instr.startChar, if (instr.endLine == instr.startLine) instr.endChar else instr.startChar))
+                    is JumpInstruction -> {}
                 }
             }
             val descriptor = method.descriptorSpan
@@ -218,7 +216,7 @@ class WorkspaceIndex {
         if (stale < 100_000 || stale * 4 < totalEntries.get()) return
         val gen = generation
         var dropped = 0L
-        for (table in listOf(methodUsages, fieldUsages, classRefs)) {
+        for (table in listOf(methodUsages, fieldUsages, classRefs, stringUsages)) {
             for (list in table.values) dropped += list.compact(gen)
         }
         totalEntries.addAndGet(-dropped)
@@ -426,35 +424,11 @@ class WorkspaceIndex {
     // String literals
     // ======================================================================
 
-    private fun ensureStringIndex() {
-        if (!stringIndexDirty) return
-        synchronized(stringIndexLock) {
-            if (!stringIndexDirty) return
-            val fresh = HashMap<String, UsageList>()
-            for ((uri, file) in filesByUri) {
-                val id = fileId(uri)
-                val gen = generation.get(id)
-                for (method in file.methods) {
-                    for (instr in method.instructions) {
-                        if (instr is ConstStringInstruction) {
-                            val end = if (instr.endLine == instr.startLine) instr.endChar else instr.startChar
-                            fresh.getOrPut(instr.value) { UsageList() }.add(id, gen, instr.startLine, instr.startChar, end)
-                        }
-                    }
-                }
-            }
-            stringIndex = fresh
-            stringIndexDirty = false
-        }
-    }
-
     /** String literals containing [query] (case-insensitive), with where they occur. */
     fun searchStrings(query: String, maxResults: Int = 500): List<StringSearchResult> {
-        ensureStringIndex()
-        val normalizedQuery = query.lowercase()
         val results = ArrayList<StringSearchResult>(minOf(maxResults, 64))
-        for ((value, sites) in stringIndex) {
-            if (normalizedQuery.isNotEmpty() && !value.lowercase().contains(normalizedQuery)) continue
+        for ((value, sites) in stringUsages) {
+            if (query.isNotEmpty() && !value.contains(query, ignoreCase = true)) continue
             for (location in sites.toLocations()) {
                 results.add(StringSearchResult(value, location))
                 if (results.size >= maxResults) return results
@@ -518,9 +492,9 @@ class WorkspaceIndex {
             methodUsages.clear()
             fieldUsages.clear()
             classRefs.clear()
+            stringUsages.clear()
             totalEntries.set(0)
             staleEntries.set(0)
-            stringIndexDirty = true
             stringValueCounts.clear()
             methodCount.set(0)
             fieldCount.set(0)
