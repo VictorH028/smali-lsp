@@ -3,6 +3,7 @@ package xyz.surendrajat.smalilsp.providers
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
@@ -29,15 +30,16 @@ class ReferenceProvider(
     fun findReferences(
         uri: String,
         position: Position,
-        includeDeclaration: Boolean = true
+        includeDeclaration: Boolean = true,
+        cancel: CancelChecker? = null
     ): List<Location> {
         val file = workspaceIndex.findFileByUri(uri) ?: return emptyList()
         return when (val symbol = file.symbolAt(position)) {
             null -> emptyList()
-            is Symbol.ClassDecl -> findClassReferences(symbol.classDef.name, includeDeclaration)
+            is Symbol.ClassDecl -> findClassReferences(symbol.classDef.name, includeDeclaration, cancel)
             // A type inside an invoke's descriptor: the user is on a call, so answer with the call's references
             is Symbol.ClassRef -> symbol.descriptorOf?.let { methodReferences(it, includeDeclaration) }
-                ?: findClassReferences(symbol.className, includeDeclaration)
+                ?: findClassReferences(symbol.className, includeDeclaration, cancel)
             is Symbol.MethodDecl -> findMethodReferences(file.classDefinition.name, symbol.method.name, symbol.method.descriptor, includeDeclaration)
             is Symbol.FieldDecl -> findFieldReferences(file.classDefinition.name, symbol.fieldDef.name, symbol.fieldDef.type, includeDeclaration)
             is Symbol.MethodRef -> methodReferences(symbol.instruction, includeDeclaration)
@@ -59,7 +61,7 @@ class ReferenceProvider(
      * Declaration (if requested), `.super`/`.implements` lines of subclasses and implementors,
      * then every other use: instructions, field types, method signatures.
      */
-    fun findClassReferences(className: String, includeDeclaration: Boolean): List<Location> {
+    fun findClassReferences(className: String, includeDeclaration: Boolean, cancel: CancelChecker? = null): List<Location> {
         val locations = mutableListOf<Location>()
 
         if (includeDeclaration) {
@@ -77,7 +79,7 @@ class ReferenceProvider(
             }
         }
 
-        locations.addAll(workspaceIndex.findClassRefLocations(className))
+        locations.addAll(workspaceIndex.findClassRefLocations(className, cancel))
 
         return locations.distinctBy { "${it.uri}:${it.range.start.line}:${it.range.start.character}" }
     }

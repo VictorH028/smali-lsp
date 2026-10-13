@@ -6,7 +6,6 @@ import org.eclipse.lsp4j.FileChangeType
 import org.eclipse.lsp4j.SymbolInformation
 import org.eclipse.lsp4j.WorkspaceSymbol
 import org.eclipse.lsp4j.WorkspaceSymbolParams
-import org.eclipse.lsp4j.jsonrpc.CompletableFutures
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.WorkspaceService
 import org.slf4j.LoggerFactory
@@ -104,23 +103,12 @@ class SmaliWorkspaceService(
     }
     
     /**
-     * Search workspace for symbols.
-     * 
-     * Supports:
-     * - Fuzzy matching
-     * - Case-insensitive search
-     * - Classes, methods, and fields
-     * - Fast performance (< 500ms for 4000+ files)
-     * 
-     * @param params Search query
-     * @return List of matching symbols (up to 100 results)
+     * Search workspace for symbols: case-insensitive, fuzzy, classes, methods and fields, the
+     * best 500 matches. The editor sends one request per keystroke and cancels the previous
+     * one, which stops its scan.
      */
-    override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> {
-        logger.debug("workspace/symbol: query='${params.query}'")
-        val barrier = writes.barrier()
-        return CompletableFutures.computeAsync {
-            barrier.join()
-            Either.forLeft<List<SymbolInformation>, List<WorkspaceSymbol>>(symbolProvider.search(params.query))
+    override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> =
+        writes.request("workspace/symbol", params.query, { Either.forLeft(emptyList()) }) { checker ->
+            Either.forLeft(symbolProvider.search(params.query, checker))
         }
-    }
 }

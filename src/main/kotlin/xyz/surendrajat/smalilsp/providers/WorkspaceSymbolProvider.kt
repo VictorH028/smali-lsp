@@ -3,6 +3,7 @@ package xyz.surendrajat.smalilsp.providers
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.SymbolInformation
 import org.eclipse.lsp4j.SymbolKind
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import java.util.PriorityQueue
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -41,7 +42,7 @@ class WorkspaceSymbolProvider(
      * @param query Search string (case-insensitive, supports fuzzy matching)
      * @return List of matching symbols, ranked by relevance
      */
-    fun search(query: String): List<SymbolInformation> {
+    fun search(query: String, cancel: CancelChecker? = null): List<SymbolInformation> {
         val normalizedQuery = query.lowercase().trim()
         if (normalizedQuery.isEmpty()) {
             return collectFirstSymbols()
@@ -56,6 +57,7 @@ class WorkspaceSymbolProvider(
         val merged = TopSymbolMatches(MAX_RESULTS)
         files.chunked(chunkSize).parallelStream()
             .map { chunk ->
+                cancel?.checkCanceled()
                 val top = TopSymbolMatches(MAX_RESULTS)
                 for (file in chunk) matchFile(file, normalizedQuery, top)
                 top

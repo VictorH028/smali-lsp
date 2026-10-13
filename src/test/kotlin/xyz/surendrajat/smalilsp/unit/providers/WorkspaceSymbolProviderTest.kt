@@ -464,4 +464,12 @@ class WorkspaceSymbolProviderTest {
             fields = emptyList()
         )
     }
+
+    @Test
+    fun `a cancelled search stops instead of scanning on`() {
+        val index = createTestIndex()
+        val provider = WorkspaceSymbolProvider(index)
+        val cancelled = org.eclipse.lsp4j.jsonrpc.CancelChecker { throw java.util.concurrent.CancellationException("superseded") }
+        org.junit.jupiter.api.assertThrows<java.util.concurrent.CancellationException> { provider.search("a", cancelled) }
+    }
 }

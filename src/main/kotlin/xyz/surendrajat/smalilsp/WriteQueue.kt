@@ -1,6 +1,10 @@
 package xyz.surendrajat.smalilsp
 
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
+import org.eclipse.lsp4j.jsonrpc.CompletableFutures
+import org.eclipse.lsp4j.jsonrpc.ResponseErrorException
 import org.slf4j.LoggerFactory
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 
@@ -9,8 +13,8 @@ import java.util.concurrent.Executors
  *
  * Notifications (didOpen, didChange, didClose, watched-file changes) hand their work here and
  * return at once, so the LSP4J reader thread never parses and a burst of watched-file events
- * cannot stall message dispatch. Requests take the [barrier] of the writes queued before them
- * and wait for it, so a request always sees every edit the editor sent ahead of it.
+ * cannot stall message dispatch. Requests ([request]) take the [barrier] of the writes queued
+ * before them and wait for it, so a request always sees every edit the editor sent ahead of it.
  */
 class WriteQueue : AutoCloseable {
     private val logger = LoggerFactory.getLogger(WriteQueue::class.java)
@@ -35,6 +39,31 @@ class WriteQueue : AutoCloseable {
 
     /** Completes once every write queued so far has run. */
     fun barrier(): CompletableFuture<Void> = synchronized(lock) { tail }
+
+    /**
+     * Answers a request on the common pool once the writes queued before it have been applied.
+     * A failing [compute] is logged and answered with [fallback], so one bad request never takes
+     * the session down; a [ResponseErrorException] thrown by [compute] or [fallback] reaches the
+     * client as that error; a cancelled request ($/cancelRequest) stays cancelled, and long scans
+     * check the [CancelChecker] so a superseded request stops early.
+     */
+    fun <T> request(name: String, context: String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
+        logger.debug("{}: {}", name, context)
+        val barrier = barrier()
+        return CompletableFutures.computeAsync { checker ->
+            try {
+                barrier.join()
+                compute(checker)
+            } catch (e: ResponseErrorException) {
+                throw e
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.error("Error in $name${context?.let { ": $it" } ?: ""}", e)
+                fallback()
+            }
+        }
+    }
 
     override fun close() {
         executor.shutdown()

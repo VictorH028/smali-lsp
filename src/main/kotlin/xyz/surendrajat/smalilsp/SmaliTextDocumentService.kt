@@ -1,8 +1,6 @@
 package xyz.surendrajat.smalilsp
 
 import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.CancelChecker
-import org.eclipse.lsp4j.jsonrpc.CompletableFutures
 import org.eclipse.lsp4j.jsonrpc.ResponseErrorException
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.jsonrpc.messages.Either3
@@ -25,7 +23,6 @@ import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import java.io.File
 import java.net.URI
-import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -69,30 +66,6 @@ class SmaliTextDocumentService(
     /** Blocks until every notification received so far has been applied. For tests. */
     fun awaitWrites(timeoutSeconds: Long = 30) {
         writes.barrier().get(timeoutSeconds, TimeUnit.SECONDS)
-    }
-
-    /**
-     * Answers a request on the common pool once the writes queued before it have been applied.
-     * A failing provider is logged and answered with [fallback], so one bad request never takes
-     * the session down; a [ResponseErrorException] thrown by [compute] or [fallback] reaches
-     * the client as that error.
-     */
-    private fun <T> request(name: String, context: String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
-        logger.debug("{}: {}", name, context)
-        val barrier = writes.barrier()
-        return CompletableFutures.computeAsync { checker ->
-            try {
-                barrier.join()
-                compute(checker)
-            } catch (e: ResponseErrorException) {
-                throw e
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.error("Error in $name${context?.let { ": $it" } ?: ""}", e)
-                fallback()
-            }
-        }
     }
 
     private val TextDocumentPositionParams.at: String
@@ -198,82 +171,82 @@ class SmaliTextDocumentService(
     }
 
     override fun definition(params: DefinitionParams): CompletableFuture<Either<MutableList<out Location>, MutableList<out LocationLink>>> =
-        request("definition", params.at, { Either.forLeft(mutableListOf()) }) {
+        writes.request("definition", params.at, { Either.forLeft(mutableListOf()) }) {
             Either.forLeft(definitionProvider.findDefinition(params.textDocument.uri, params.position).toMutableList())
         }
 
     override fun hover(params: HoverParams): CompletableFuture<Hover?> =
-        request("hover", params.at, { null }) {
+        writes.request("hover", params.at, { null }) {
             hoverProvider.provideHover(params.textDocument.uri, params.position)
         }
 
     override fun references(params: ReferenceParams): CompletableFuture<MutableList<out Location>> =
-        request("references", params.at, { mutableListOf() }) {
-            referenceProvider.findReferences(params.textDocument.uri, params.position, params.context.isIncludeDeclaration).toMutableList()
+        writes.request("references", params.at, { mutableListOf() }) { checker ->
+            referenceProvider.findReferences(params.textDocument.uri, params.position, params.context.isIncludeDeclaration, checker).toMutableList()
         }
 
     override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<MutableList<Either<SymbolInformation, DocumentSymbol>>> =
-        request("documentSymbol", params.textDocument.uri, { mutableListOf() }) {
+        writes.request("documentSymbol", params.textDocument.uri, { mutableListOf() }) {
             val file = index.findFileByUri(params.textDocument.uri) ?: return@request mutableListOf()
             documentSymbolProvider.provideDocumentSymbols(file).map { Either.forRight<SymbolInformation, DocumentSymbol>(it) }.toMutableList()
         }
 
     override fun prepareCallHierarchy(params: CallHierarchyPrepareParams): CompletableFuture<MutableList<CallHierarchyItem>> =
-        request("prepareCallHierarchy", params.at, { mutableListOf() }) {
+        writes.request("prepareCallHierarchy", params.at, { mutableListOf() }) {
             callHierarchyProvider.prepare(params.textDocument.uri, params.position).toMutableList()
         }
 
     override fun callHierarchyIncomingCalls(params: CallHierarchyIncomingCallsParams): CompletableFuture<MutableList<CallHierarchyIncomingCall>> =
-        request("callHierarchyIncomingCalls", params.item.name, { mutableListOf() }) {
+        writes.request("callHierarchyIncomingCalls", params.item.name, { mutableListOf() }) {
             callHierarchyProvider.incomingCalls(params.item).toMutableList()
         }
 
     override fun callHierarchyOutgoingCalls(params: CallHierarchyOutgoingCallsParams): CompletableFuture<MutableList<CallHierarchyOutgoingCall>> =
-        request("callHierarchyOutgoingCalls", params.item.name, { mutableListOf() }) {
+        writes.request("callHierarchyOutgoingCalls", params.item.name, { mutableListOf() }) {
             callHierarchyProvider.outgoingCalls(params.item).toMutableList()
         }
 
     override fun prepareTypeHierarchy(params: TypeHierarchyPrepareParams): CompletableFuture<MutableList<TypeHierarchyItem>> =
-        request("prepareTypeHierarchy", params.at, { mutableListOf() }) {
+        writes.request("prepareTypeHierarchy", params.at, { mutableListOf() }) {
             typeHierarchyProvider.prepare(params.textDocument.uri, params.position).toMutableList()
         }
 
     override fun typeHierarchySupertypes(params: TypeHierarchySupertypesParams): CompletableFuture<MutableList<TypeHierarchyItem>> =
-        request("typeHierarchySupertypes", params.item.name, { mutableListOf() }) {
+        writes.request("typeHierarchySupertypes", params.item.name, { mutableListOf() }) {
             typeHierarchyProvider.supertypes(params.item).toMutableList()
         }
 
     override fun typeHierarchySubtypes(params: TypeHierarchySubtypesParams): CompletableFuture<MutableList<TypeHierarchyItem>> =
-        request("typeHierarchySubtypes", params.item.name, { mutableListOf() }) {
+        writes.request("typeHierarchySubtypes", params.item.name, { mutableListOf() }) {
             typeHierarchyProvider.subtypes(params.item).toMutableList()
         }
 
     override fun codeLens(params: CodeLensParams): CompletableFuture<MutableList<out CodeLens>> =
-        request("codeLens", params.textDocument.uri, { mutableListOf() }) {
+        writes.request("codeLens", params.textDocument.uri, { mutableListOf() }) {
             codeLensProvider.provideCodeLenses(params.textDocument.uri).toMutableList()
         }
 
     override fun resolveCodeLens(params: CodeLens): CompletableFuture<CodeLens> =
-        request("resolveCodeLens", null, { params }) {
+        writes.request("resolveCodeLens", null, { params }) {
             codeLensProvider.resolveCodeLens(params)
         }
 
     override fun completion(params: CompletionParams): CompletableFuture<Either<MutableList<CompletionItem>, CompletionList>> =
-        request("completion", params.at, { Either.forRight(CompletionList(false, emptyList())) }) {
+        writes.request("completion", params.at, { Either.forRight(CompletionList(false, emptyList())) }) {
             val uri = params.textDocument.uri
             val lineText = index.getLineContent(uri, params.position.line) ?: ""
             Either.forRight(completionProvider.provideCompletions(uri, params.position, lineText))
         }
 
     override fun prepareRename(params: PrepareRenameParams): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> =
-        request("prepareRename", params.at, { throw responseError(ResponseErrorCode.InternalError, "Rename preparation failed") }) {
+        writes.request("prepareRename", params.at, { throw responseError(ResponseErrorCode.InternalError, "Rename preparation failed") }) {
             val result = renameProvider.prepareRename(params.textDocument.uri, params.position)
                 ?: throw responseError(ResponseErrorCode.InvalidRequest, "Cannot rename this symbol")
             if (result.isLeft) Either3.forFirst(result.left) else Either3.forSecond(result.right)
         }
 
     override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> =
-        request("rename", "${params.at} -> ${params.newName}", { null }) {
+        writes.request("rename", "${params.at} -> ${params.newName}", { null }) {
             renameProvider.rename(params.textDocument.uri, params.position, params.newName)
         }
 }

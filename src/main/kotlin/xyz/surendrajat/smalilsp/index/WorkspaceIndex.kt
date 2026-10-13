@@ -3,6 +3,7 @@ package xyz.surendrajat.smalilsp.index
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.util.StringPool
 import xyz.surendrajat.smalilsp.util.Types
@@ -365,8 +366,8 @@ class WorkspaceIndex {
     fun findFieldUsages(className: String, fieldName: String, fieldType: String): List<Location> =
         fieldUsages[fieldKey(className, fieldName, fieldType)].toLocations()
 
-    /** Every reference to the class as an owner, operand, field type or descriptor type. */
-    fun findClassRefLocations(className: String): List<Location> = classRefs[className].toLocations()
+    /** Every reference to the class as an owner, operand, field type or descriptor type; [cancel] is checked along the way for the big ones. */
+    fun findClassRefLocations(className: String, cancel: CancelChecker? = null): List<Location> = classRefs[className].toLocations(cancel)
 
     /** URIs of the files that extend or implement [className]. */
     fun findClassUsages(className: String): Set<String> {
@@ -376,7 +377,7 @@ class WorkspaceIndex {
         return uris
     }
 
-    private fun UsageList?.toLocations(): List<Location> {
+    private fun UsageList?.toLocations(cancel: CancelChecker? = null): List<Location> {
         if (this == null) return emptyList()
         val entries = snapshot()
         val gen = generation
@@ -384,6 +385,7 @@ class WorkspaceIndex {
         val out = ArrayList<Location>(entries.size / UsageList.STRIDE)
         var i = 0
         while (i < entries.size) {
+            if (cancel != null && i % (UsageList.STRIDE * 4096) == 0) cancel.checkCanceled()
             val fileId = entries[i]
             if (fileId < gen.length() && gen.get(fileId) == entries[i + 1]) {
                 val line = entries[i + 2]
