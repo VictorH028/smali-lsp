@@ -282,10 +282,23 @@ class ASTBuilder(
     override fun enterMethodProto(ctx: GeneratedSmaliParser.MethodProtoContext) { typeRefDepth++ }
     override fun exitMethodProto(ctx: GeneratedSmaliParser.MethodProtoContext) { typeRefDepth-- }
 
-    /** Inside an annotation, `.local` or method prototype every class name token is a reference. */
+    /**
+     * Inside an annotation, `.local` or method prototype every class name is a reference: a
+     * `QUALIFIED_TYPE_NAME` token, or the class at the end of a `COMPOUND_METHOD_ARG_LITERAL`
+     * (`ILjava/lang/String;` lexes as one token).
+     */
     override fun visitTerminal(node: TerminalNode) {
-        if (typeRefDepth > 0 && node.symbol.type == GeneratedSmaliLexer.QUALIFIED_TYPE_NAME) {
-            typeRefs.add(TypeRef(strings.intern(node.text), node.symbol.toSpan()))
+        if (typeRefDepth == 0) return
+        val token = node.symbol
+        when (token.type) {
+            GeneratedSmaliLexer.QUALIFIED_TYPE_NAME -> typeRefs.add(TypeRef(strings.intern(node.text), token.toSpan()))
+            GeneratedSmaliLexer.COMPOUND_METHOD_ARG_LITERAL -> {
+                val span = token.toSpan()
+                for (type in Types.parseTypeSequence(node.text)) {
+                    val className = type.className ?: continue
+                    typeRefs.add(TypeRef(strings.intern(className), Span(span.line, span.start + type.start, span.start + type.end)))
+                }
+            }
         }
     }
 
