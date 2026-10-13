@@ -285,11 +285,11 @@ class SmaliLanguageServer : LanguageServer {
                         logger.info("Scanning: ${dir.absolutePath}")
 
                         val startTime = System.currentTimeMillis()
-                        var lastReportedPercent = 0
+                        val lastReportedPercent = java.util.concurrent.atomic.AtomicInteger(0)
                         val result = scanner.scanDirectory(dir) { processed, total ->
+                            // Reported from the scanner's worker threads
                             val percent = if (total > 0) processed * 100 / total else 0
-                            if (percent > lastReportedPercent || processed == total) {
-                                lastReportedPercent = percent
+                            if (lastReportedPercent.getAndAccumulate(percent, ::maxOf) < percent || processed == total) {
                                 logger.info("Indexing: $processed/$total ($percent%)")
                                 if (progress) {
                                     client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
