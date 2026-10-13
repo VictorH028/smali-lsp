@@ -249,7 +249,7 @@ class WorkspaceIndex {
     /** URI of the file defining [className]. */
     fun getUri(className: String): String? = uriByClass[className]
 
-    fun findFileByUri(uri: String): SmaliFile? = filesByUri[canonicalUri(uri)]
+    fun findFileByUri(uri: String): SmaliFile? = filesByUri[uri] ?: filesByUri[canonicalUri(uri)]
 
     fun findClassNameByUri(uri: String): String? = findFileByUri(uri)?.classDefinition?.name
 
@@ -497,12 +497,22 @@ class WorkspaceIndex {
     private fun simpleKey(className: String): String = className.removePrefix("L").removeSuffix(";").substringAfterLast('/')
 
     companion object {
-        /** `file:/x` (java.io.File) and `file://x` become `file:///x`, the form LSP clients send. */
-        fun canonicalUri(uri: String): String = when {
-            uri.startsWith("file:///") -> uri
-            uri.startsWith("file://") -> "file:///" + uri.substring("file://".length)
-            uri.startsWith("file:/") -> "file:///" + uri.substring("file:/".length)
-            else -> uri
+        /**
+         * One spelling per file. `file:/x` (java.io.File) and `file://x` become `file:///x`, and
+         * percent-encoding is normalized through the path: VS Code sends `Foo%24Bar.smali` for the
+         * file the scanner found as `Foo$Bar.smali`. Non-file URIs are kept as they are.
+         */
+        fun canonicalUri(uri: String): String {
+            if (!uri.startsWith("file:")) return uri
+            return try {
+                File(URI(uri)).toPath().toUri().toString()
+            } catch (_: Exception) {
+                when {
+                    uri.startsWith("file:///") -> uri
+                    uri.startsWith("file://") -> "file:///" + uri.substring("file://".length)
+                    else -> "file:///" + uri.substring("file:/".length)
+                }
+            }
         }
     }
 }

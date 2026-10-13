@@ -70,6 +70,21 @@ class WorkspaceIndexStorageTest {
     }
 
     @Test
+    fun `a percent-encoded spelling of a file is the same entry`() {
+        // The scanner finds Outer$Inner.smali; VS Code opens it as Outer%24Inner.smali
+        indexSource("file:///tmp/Outer\$Inner.smali", source("Lcom/Outer\$Inner;", "invoke-virtual {p0}, Lcom/Outer\$Inner;->run()V"))
+        indexSource("file:///tmp/Outer%24Inner.smali", source("Lcom/Outer\$Inner;", "invoke-virtual {p0}, Lcom/Outer\$Inner;->run()V"))
+        assertEquals(1, index.getStats().classes)
+        assertEquals(1, index.getFilesView().size, "one entry for both spellings")
+        assertNotNull(index.findFileByUri("file:///tmp/Outer%24Inner.smali"))
+        assertNotNull(index.findFileByUri("file:///tmp/Outer\$Inner.smali"))
+        assertEquals(1, index.findMethodUsages("Lcom/Outer\$Inner;", "run", "()V").size, "no duplicate usage from the second spelling")
+        assertEquals("file:///tmp/Outer%24Inner.smali", index.findClass("Lcom/Outer\$Inner;")!!.uri, "the last indexed spelling is the file's")
+        assertTrue(index.removeFile("file:///tmp/Outer\$Inner.smali"))
+        assertNull(index.findClass("Lcom/Outer\$Inner;"))
+    }
+
+    @Test
     fun `fields with the same name and different types are distinct`() {
         indexSource("file:///Holder.smali", """
             .class public Lcom/Holder;
