@@ -181,7 +181,7 @@ class LspStdioTest {
             assertTrue(client.awaitIndexed(), "indexing must not depend on window/workDoneProgress/create succeeding")
             client.result("shutdown"); client.notify("exit")
             client.waitForExit()
-            assertTrue(client.stderr.contains("WARN") && client.stderr.contains("rejected progress"), "warnings reach stderr by default: ${client.stderr}")
+            assertTrue(client.stderr.contains("WARN") && client.stderr.contains("indexing without progress"), "warnings reach stderr by default: ${client.stderr}")
         }
     }
 
