@@ -330,7 +330,11 @@ class WorkspaceIndex {
     fun findMethod(className: String, methodName: String, descriptor: String): List<Location> =
         listOfNotNull(resolveMethod(className, methodName, descriptor)?.let { Location(it.file.uri, it.method.nameSpan.toRange()) })
 
-    /** The declaration a field reference resolves to, in [className] or up its superclasses. The type is part of a field's identity. */
+    /**
+     * The declaration a field reference resolves to: in [className], else in its superinterfaces
+     * (interface constants are accessed through the implementing class), else up its superclass.
+     * The type is part of a field's identity.
+     */
     fun resolveField(className: String, fieldName: String, fieldType: String): FieldMatch? =
         resolveFieldIn(className, fieldName, fieldType, HashSet())
 
@@ -338,6 +342,9 @@ class WorkspaceIndex {
         if (!visited.add(className)) return null
         val file = findClass(className) ?: return null
         file.fields.firstOrNull { it.name == fieldName && it.type == fieldType }?.let { return FieldMatch(file, it) }
+        for (iface in file.classDefinition.interfaces) {
+            resolveFieldIn(iface, fieldName, fieldType, visited)?.let { return it }
+        }
         val superClass = file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" } ?: return null
         return resolveFieldIn(superClass, fieldName, fieldType, visited)
     }

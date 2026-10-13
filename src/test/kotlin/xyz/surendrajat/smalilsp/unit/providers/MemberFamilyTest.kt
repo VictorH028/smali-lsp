@@ -174,6 +174,20 @@ class MemberFamilyTest {
     }
 
     @Test
+    fun `an interface constant is reached through the implementing class`() {
+        val consts = ".class public interface abstract Lcom/Consts;\n.super Ljava/lang/Object;\n.field public static final MAX:I = 0x10"
+        val impl = ".class public Lcom/Impl;\n.super Ljava/lang/Object;\n.implements Lcom/Consts;"
+        val user = ".class public Lcom/User;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n    sget v0, Lcom/Impl;->MAX:I\n    sget v0, Lcom/Consts;->MAX:I\n    return-void\n.end method"
+        index.openSource("file:///Consts.smali", consts)
+        index.openSource("file:///Impl.smali", impl)
+        index.openSource("file:///User.smali", user)
+        val onImplMax = user.positionOf("Lcom/Impl;->MAX", "MAX")
+        assertEquals("file:///Consts.smali", xyz.surendrajat.smalilsp.providers.DefinitionProvider(index).findDefinition("file:///User.smali", onImplMax).single().uri)
+        val refs = ReferenceProvider(index).findReferences("file:///User.smali", onImplMax, includeDeclaration = false)
+        assertEquals(listOf(4, 5), refs.map { it.range.start.line }.sorted(), "both accesses bind to Consts.MAX")
+    }
+
+    @Test
     fun `a virtual method includes calls that dispatch to it and its overrides`() {
         assertEquals(callerLines("Lcom/Grand;", "virtualOnly"), referencesAt("file:///Base.smali", base, ".method public virtualOnly", "virtualOnly"))
         assertEquals("2 references", lensCount("file:///Child.smali", "area"), "the lens on an override counts calls on Child and Grand")
