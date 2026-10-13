@@ -5,7 +5,6 @@ import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Find references. Classes: subclasses, implementors and every use as a type or owner.
@@ -99,8 +98,9 @@ class ReferenceProvider(
     }
 
     /**
-     * Direct call sites plus calls through subclasses and implementors. Polymorphic matching is
-     * skipped for SDK classes, where it would list every `Object.<init>` in the workspace.
+     * Direct call sites plus calls through subclasses and implementors. Polymorphic matching
+     * needs the class in the workspace: a bundled `androidx` or `kotlin` class qualifies, a
+     * framework class such as `Ljava/lang/Object;` does not (it would list every `Object.<init>`).
      */
     private fun findMethodReferences(
         className: String,
@@ -117,7 +117,7 @@ class ReferenceProvider(
 
         locations.addAll(workspaceIndex.findMethodUsages(className, methodName, descriptor))
 
-        if (!Types.isSdkClass(className)) {
+        if (workspaceIndex.hasClass(className)) {
             for (subClass in workspaceIndex.getAllSubclasses(className)) {
                 locations.addAll(workspaceIndex.findMethodUsages(subClass, methodName, descriptor))
             }
@@ -140,7 +140,7 @@ class ReferenceProvider(
         }
 
         locations.addAll(workspaceIndex.findFieldUsages(className, fieldName, fieldType))
-        if (!Types.isSdkClass(className)) {
+        if (workspaceIndex.hasClass(className)) {
             for (subClass in workspaceIndex.getAllSubclasses(className)) {
                 locations.addAll(workspaceIndex.findFieldUsages(subClass, fieldName, fieldType))
             }

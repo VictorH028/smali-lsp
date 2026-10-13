@@ -10,7 +10,6 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Rename of methods (declaration, overrides in subclasses and every call site), fields
@@ -85,7 +84,7 @@ class RenameProvider(
     private fun withoutColon(range: Range) = Range(Position(range.start.line, range.start.character + 1), range.end)
 
     private fun collectMethodRenameEdits(target: RenameTarget.Method, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) {
-        val classes = listOf(target.className) + if (Types.isSdkClass(target.className)) emptyList() else index.getAllSubclasses(target.className)
+        val classes = listOf(target.className) + if (index.hasClass(target.className)) index.getAllSubclasses(target.className) else emptyList()
         for (className in classes) {
             // The declaration in this class, if it has one (subclasses may override)
             index.findClass(className)?.let { file ->
@@ -102,7 +101,7 @@ class RenameProvider(
         index.findClass(target.className)?.let { file ->
             file.fields.find { it.name == target.currentName && it.type == target.type }?.let { edits.add(file.uri, TextEdit(it.nameSpan.toRange(), newName)) }
         }
-        val classes = listOf(target.className) + if (Types.isSdkClass(target.className)) emptyList() else index.getAllSubclasses(target.className)
+        val classes = listOf(target.className) + if (index.hasClass(target.className)) index.getAllSubclasses(target.className) else emptyList()
         for (className in classes) {
             for (usage in index.findFieldUsages(className, target.currentName, target.type)) {
                 addUsageEdit(usage, target.currentName, newName, edits)

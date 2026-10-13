@@ -100,6 +100,28 @@ class InheritedMemberTest {
     }
 
     @Test
+    fun `a bundled class with an SDK-looking name is a workspace class`() {
+        // AndroidX, Kotlin and Play Services ship inside the APK: their smali is indexed, so calls
+        // through app subclasses are references to their members like for any other class
+        val lib = ".class public Landroidx/lib/Widget;\n.super Ljava/lang/Object;\n.field protected size:I\n.method public draw()V\n    .registers 1\n    return-void\n.end method"
+        val app = ".class public Lcom/app/Button;\n.super Landroidx/lib/Widget;"
+        val user = ".class public Lcom/app/Screen;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    invoke-virtual {v0}, Lcom/app/Button;->draw()V\n    iget v1, v0, Lcom/app/Button;->size:I\n    return-void\n.end method"
+        index.openSource("file:///Widget.smali", lib)
+        index.openSource("file:///Button.smali", app)
+        index.openSource("file:///Screen.smali", user)
+        val onDraw = lib.positionOf(".method public draw", "draw")
+        val refs = ReferenceProvider(index).findReferences("file:///Widget.smali", onDraw, includeDeclaration = false)
+        assertEquals(listOf("file:///Screen.smali"), refs.map { it.uri }, "the call through the app subclass: $refs")
+        val onSize = lib.positionOf(".field protected size", "size")
+        assertEquals(1, ReferenceProvider(index).findReferences("file:///Widget.smali", onSize, includeDeclaration = false).size)
+        val edit = RenameProvider(index).rename("file:///Widget.smali", onDraw, "paint")!!
+        assertEquals(setOf("file:///Widget.smali", "file:///Screen.smali"), edit.changes.keys)
+        val provider = CodeLensProvider(index)
+        val titles = provider.provideCodeLenses("file:///Widget.smali").map { provider.resolveCodeLens(it) }.associate { (it.data as com.google.gson.JsonObject).get("memberName").asString to it.command.title }
+        assertEquals("1 reference", titles["draw"])
+    }
+
+    @Test
     fun `a member of a class outside the workspace keeps the owner-based answer`() {
         val onToString = "invoke-virtual {v0}, Lcom/Child;->toString()Ljava/lang/String;"
         index.openSource("file:///Sdk.smali", ".class public Lcom/Sdk;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n    $onToString\n    return-void\n.end method")
