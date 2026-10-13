@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Label operations scoped to the containing method** — rename, go-to-definition, and hover for labels resolved the label name against methods in file order; since baksmali reuses `:cond_0`/`:goto_0` in nearly every method, renaming a label in any method after the first silently rewrote the *first* method's labels, go-to-definition jumped into the wrong method, and hover inflated jump counts
+- **Rename rejected for SDK/unindexed members** — renaming e.g. `String.length()` from a call site rewrote every call site in the workspace while the SDK declaration kept its name, breaking each rewritten call
+- **Arrays of workspace classes no longer flagged** — `check-cast v0, [Lcom/app/Foo;` produced a false "class not found" warning even when `Lcom/app/Foo;` was indexed (primitive/SDK arrays were already handled)
+- **Ghost class evicted on watched-file class rename** — when apktool regenerates a file whose class name changed, the previous class at that URI is now removed from the index
+- **MCP stdout protocol corruption** — kotlin-logging 8.x (transitive via MCP SDK 0.14) printed a startup banner to stdout ahead of the first JSON-RPC response; suppressed via `kotlin-logging.logStartupMessage`
+
+### Changed
+
+- **Toolchain modernized** — Gradle 9.6.1, JDK 24 toolchain (auto-provisioned via foojay resolver; emitted bytecode stays Java 17 so the jar keeps running on Java 17+ runtimes), `com.gradleup.shadow` 9.5.1, Kotlin 2.4.10; CI builds/tests/releases on JDK 24
+- **Dependencies updated** — lsp4j 0.24.0, MCP Kotlin SDK 0.14.0, JUnit 6.1.2, coroutines 1.11.0, Gson 2.14.0, SLF4J 2.0.18, Logback 1.5.38, ANTLR 4.13.2 (lsp4j 1.0.0 deliberately deferred: its LSP-3.18 `Either` type changes on `Diagnostic.message`/`TextDocumentEdit.edits` are breaking with no feature benefit here)
+- **Shadow jar 23% smaller (13 MB → 10 MB)** — stopped bundling kotlin-reflect (8.7 MB of classes) and jansi, which only ktor-server-core references; ktor itself was already excluded on the stdio-only path
+- `StringPool.clear()` re-seeds the pre-interned common strings, so MCP re-indexing keeps the hot-path fast lookups
+
+### Internal
+
+- Regression tests for label scoping, SDK rename guard, workspace-class arrays, and watched-file class renames
+- Corrected stale docs (opcode DB coverage claim, ReferenceProvider complexity note); removed a dead `unused_` filter
+
 ## [1.5.0] - 2026-04-21
 
 ### Changed
