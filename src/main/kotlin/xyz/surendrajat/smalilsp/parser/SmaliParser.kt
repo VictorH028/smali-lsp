@@ -8,12 +8,9 @@ import xyz.surendrajat.smalilsp.util.StringPool
 import org.slf4j.LoggerFactory
 
 /**
- * Wrapper around ANTLR-generated parser.
- * 
- * Responsibilities:
- * - Set up ANTLR lexer and parser
- * - Handle errors gracefully
- * - Convert parse tree to our clean data structures
+ * The parser entry: runs the ANTLR lexer and parser over a file's text and hands the parse to
+ * [ASTBuilder], which listens to it and builds the model, so the tree is never walked twice.
+ * Syntax errors are collected, not thrown: a broken method still yields the class around it.
  */
 class SmaliParser(private val strings: StringPool = StringPool()) {
     private val logger = LoggerFactory.getLogger(SmaliParser::class.java)
@@ -41,44 +38,18 @@ class SmaliParser(private val strings: StringPool = StringPool()) {
     }
     
     /**
-     * Parse a smali file from string content using ANTLR4 grammar.
-     * 
-     * **Single-Stage SLL Parsing:**
-     * 
-     * Uses SLL (Simpler LL) prediction mode exclusively.
-     * - **Speed**: O(n) time complexity, fast DFA-based prediction
-     * - **Coverage**: 100% of Smali files (verified on 88,688 real files)
-     * - **Rationale**: Smali grammar has no ambiguity, no need for LL fallback
-     * 
-     * **Why No Two-Stage?**
-     * - Deep analysis found 0% LL fallback rate (0 out of 88,688 files)
-     * - Smali's rigid syntax doesn't trigger parser ambiguities
-     * - Removed dead code for simplicity (YAGNI principle)
-     * 
-     * **Performance** (real-world testing on 88,688 files):
-     * - Average: 0.53ms per file
-     * - P95: 5.5ms
-     * - P99: 19.8ms
-     * - Max: 208ms (outlier: DesugarUnsafe.smali)
-     * - Success rate: 100%
-     * 
-     * @param uri The URI of the file (for error reporting and indexing)
-     * @param content The smali source code as a string
-     * @return Parsed SmaliFile with AST, or null if parsing failed
-     * @see parseWithErrors for version that also returns syntax errors
+     * The model of a file, or null for empty or class-less text or when the parse itself fails.
+     *
+     * Prediction is single-stage SLL: the grammar has no ambiguity that needs LL fallback, and
+     * every file of the three decompiled apps under test-data (98,686 files) parses this way
+     * without a syntax error, at about 0.14 ms per file single-threaded. Call [parseWithErrors]
+     * for the syntax errors as well.
      */
     fun parse(uri: String, content: String): SmaliFile? {
         return parseWithErrors(uri, content).smaliFile
     }
     
-    /**
-     * Parse with syntax error collection.
-     * Returns both the parsed file (if successful) and any syntax errors encountered.
-     * 
-     * @param uri The URI of the file
-     * @param content The smali source code
-     * @return ParseResult with file and errors
-     */
+    /** The model (possibly partial) and every lexer and parser error, each with the offending token's length. */
     fun parseWithErrors(uri: String, content: String): ParseResult {
         // Strip UTF-8 BOM if present (some editors add it)
         val cleanContent = if (content.startsWith('\uFEFF')) content.substring(1) else content
@@ -118,9 +89,6 @@ class SmaliParser(private val strings: StringPool = StringPool()) {
             
             val tokens = CommonTokenStream(lexer)
             
-            // SINGLE-STAGE PARSING with SLL mode
-            // Testing showed 0% fallback rate (0 out of 88,688 files needed LL mode)
-            // Smali grammar has no ambiguity, so SLL is sufficient
             val parser = GeneratedSmaliParser(tokens)
             parser.interpreter.predictionMode = org.antlr.v4.runtime.atn.PredictionMode.SLL
             

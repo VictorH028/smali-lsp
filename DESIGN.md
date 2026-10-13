@@ -12,13 +12,16 @@ production app, measured on a 12-core Apple Silicon laptop with JDK 21.
 
 ## 1. Startup
 
-### 1.1 Entry point (`Main.kt`)
+### 1.1 Entry point (`Main.kt`, `Cli.kt`, `Logging.kt`, `SmaliLanguageServer.kt`)
 
 ```
 main() → parseArgs → configureLogging → startLsp() | McpMode().run()
 ```
 
 `java -jar smali-lsp.jar <lsp|mcp> [--verbose] [--log-file <path>]`
+
+`Main.kt` holds `main()`; `Cli.kt` the options, the usage text and the version resource;
+`Logging.kt` the logback setup; `SmaliLanguageServer.kt` the server.
 
 - **lsp**: `SmaliLanguageServer` wired to stdin/stdout through LSP4J's `Launcher`; the JVM
   blocks in `startListening()`.
@@ -171,9 +174,11 @@ server on 12 cores, including file reads:
 
 ### 3.4 String literals
 
-`const-string` values are indexed lazily on the first `searchStrings` call and rebuilt after
-any change, because the MCP string search is rare and building the table during the parallel
-scan was a contention point. `getStats().strings` is kept incrementally.
+`const-string` values go into a usage table like members (value → sites), retired by the file's
+generation like everything else, so a search after an edit never rebuilds anything. The search
+is a case-insensitive `contains` over the table, allocation-free. `getStats().strings` is a
+count map kept incrementally. The table costs about 7 MB on ProtonMail and 20 MB on the
+76 K-file app.
 
 ---
 
@@ -187,10 +192,14 @@ post-indexing diagnostics refresh. Notifications enqueue their work and return, 
 reader thread never parses and a regenerated project's burst of watched-file events cannot
 stall message dispatch.
 
-Every request first takes the queue's barrier (a future for the writes queued before it) and
-waits for it on the common pool before computing, so a request always sees the edits the
-editor sent ahead of it. There is no debounce: re-indexing a file is sub-millisecond, and a
-delay would only make hover and completion stale.
+Every request goes through `WriteQueue.request`, the one helper both services use: it takes
+the queue's barrier (a future for the writes queued before it) and waits for it on the common
+pool before computing, so a request always sees the edits the editor sent ahead of it; a
+failing provider is logged and answered with the request's empty value; a `ResponseError`
+reaches the client as such; and the cancellation token of `$/cancelRequest` is checked by the
+symbol scan and by big reference lists, so the query the editor cancels on the next keystroke
+stops instead of finishing its scan. There is no debounce: re-indexing a file is
+sub-millisecond, and a delay would only make hover and completion stale.
 
 ### 4.2 `SmaliTextDocumentService`
 
@@ -199,6 +208,12 @@ provider can honour cancellation later), a logged fallback on failure, and `Resp
 passed through. `TextDocumentSyncKind.Full`: the client sends the whole document on every
 change, which is cheaper than maintaining an edit buffer for files this size. Diagnostics are
 published on `didOpen` and `didChange`, syntax-only until indexing completes.
+
+The editor's buffer is the truth while a file is open: `didOpen` always indexes the text it
+receives (a restored unsaved buffer differs from the disk), `didChange` re-indexes, and
+watched-file events for an open file are ignored. `didClose` re-reads the file from disk, so
+an edit discarded without saving leaves the index, and a buffer that was never saved is
+removed.
 
 ### 4.3 Workspace
 
@@ -215,16 +230,24 @@ deleted ones. `workspace/symbol` runs on the common pool after the barrier.
 |----------|------------|-------|------------|--------|
 | class name in `.class` | itself | class info | declaration, `.super`/`.implements` lines, every reference | not supported |
 | `.super`, `.implements`, owner, type operand, descriptor type, field type, directive reference | the class, by element type for arrays | class info, or SDK note | references to that class (a type inside an invoke's descriptor answers with the call's references) | — |
-| method name in `.method` | — | signature | call sites incl. through subclasses | declaration, overrides, every call site |
-| method name in an invoke | declaration, via hierarchy | the declaration's signature, or SDK note | the declaring class's method: its declaration and every call site through it or any subclass | same, starting from the declaring class; nothing for classes outside the workspace |
-| field name in `.field` / access | declaration, via hierarchy | type | accesses through the declaring class or any subclass | declaration and accesses |
+| method name in `.method` | — | signature | the member family: every declaration (the topmost ones it overrides and their overrides) and every call that binds to one of them | the whole family |
+| method name in an invoke | declaration, via hierarchy | the declaration's signature, or SDK note | the family of the method the call resolves to; only the exact owner's call sites for a class outside the workspace | same; nothing for classes outside the workspace |
+| field name in `.field` / access | declaration, via hierarchy (interfaces first) | type | the declaration and every access that binds to it: through subclasses that inherit it without redeclaring it | same |
 | primitive type | the member, when inside a reference | primitive info | — | — |
 | `:label` definition or reference | definition | reference count and label kind | every reference in the method | definition and every reference |
 | opcode or register | the instruction's primary symbol | opcode documentation | — | — |
 
-Definitions point at the name token, so an editor lands on the name instead of selecting the
-whole declaration. Usage locations are name tokens too, so rename edits are the usage
-locations themselves. Labels are method-local: a `:cond_0` in another method is never touched.
+A call binds to a member by resolution, as the runtime would: constructors and private
+methods to their own class only; static methods and fields to the nearest declaration up the
+superclass chain (superinterfaces first for fields); virtual methods to the nearest
+declaration, with a redeclaration below counting as an override of the same member. The
+expansion through subclasses applies to every indexed class, including bundled classes whose
+names look like the SDK (`androidx`, `kotlin`, `com.google.android`); a class that is not
+indexed (`Ljava/lang/Object;`) has only its exact call sites.
+
+Definitions and the declaration entries of references point at the name token, so an editor
+lands on the name instead of selecting the whole declaration. Usage locations are name tokens
+too, so rename edits are the usage locations themselves. Labels are method-local: a `:cond_0` in another method is never touched.
 `<init>`/`<clinit>` are not renamed; neither are members of classes outside the workspace,
 whose declarations are unreachable.
 
@@ -247,7 +270,7 @@ whose declarations are unreachable.
 
 Completion works on the text being typed by nature. The opcode-documentation hover takes the
 first word of the line, because instructions without symbols have no AST node. Both read the
-open document's buffer.
+open document's buffer, or the file on disk when the document is not open (MCP by position).
 
 ---
 
@@ -303,6 +326,10 @@ missing index or argument uniformly, and turns any failure into a tool error.
 
 - Class rename is not offered: it would mean renaming the file and rewriting the package path
   across the workspace.
+- A method that overrides one declared outside the workspace (`onCreate` of a framework
+  `Activity`) is renamed with its own subclasses only; the server cannot see the framework
+  declaration, so the override silently stops overriding. The family starts at the topmost
+  declaration *in the workspace*.
 - Two files defining the same class (duplicate dex splits) keep both files indexed, but the
   class name maps to the last one indexed.
 - The 76 K-file app needs more than the 1 GB test fork, so the fixture-invariant test skips it
@@ -337,31 +364,34 @@ missing index or argument uniformly, and turns any failure into a tool error.
 | File | Lines | Role |
 |------|-------|------|
 | SmaliParser.g4 | 1,062 | parser grammar |
-| SmaliLexer.g4 | 484 | lexer grammar |
 | DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
-| ASTBuilder.kt | 738 | parse listener building the model |
-| McpMode.kt | 521 | MCP server |
-| WorkspaceIndex.kt | 502 | the index |
-| Main.kt | 452 | entry point, CLI, LSP server |
-| WorkspaceSymbolProvider.kt | 282 | workspace symbol search |
-| SmaliTextDocumentService.kt | 258 | document lifecycle and requests |
-| DiagnosticProvider.kt | 235 | diagnostics |
+| ASTBuilder.kt | 748 | parse listener building the model |
+| McpMode.kt | 537 | MCP server |
+| WorkspaceIndex.kt | 515 | the index |
+| SmaliLexer.g4 | 484 | lexer grammar |
+| SmaliLanguageServer.kt | 317 | the LSP server: handshake, indexing, capabilities |
+| WorkspaceSymbolProvider.kt | 254 | workspace symbol search |
+| SmaliTextDocumentService.kt | 252 | document lifecycle and requests |
+| DataStructures.kt | 252 | the AST model |
 | Types.kt | 222 | descriptor and class-name helpers |
-| HoverProvider.kt | 211 | hover |
-| CompletionProvider.kt | 188 | completion |
-| DataStructures.kt | 183 | the AST model |
-| CallHierarchyProvider.kt | 159 | call hierarchy |
-| ReferenceProvider.kt | 156 | references |
-| SmaliParser.kt | 153 | parser entry |
-| WorkspaceScanner.kt | 152 | parallel scan |
-| RenameProvider.kt | 141 | rename |
+| HoverProvider.kt | 209 | hover |
+| ReferenceProvider.kt | 195 | references and member families |
+| DiagnosticProvider.kt | 188 | diagnostics |
+| CompletionProvider.kt | 185 | completion |
+| WorkspaceScanner.kt | 142 | parallel scan |
 | TypeHierarchyProvider.kt | 140 | type hierarchy |
-| Symbol.kt | 139 | `symbolAt` and the symbol kinds |
-| SmaliWorkspaceService.kt | 122 | watched files, workspace symbols |
-| DocumentSymbolProvider.kt | 87 | outline |
-| CodeLensProvider.kt | 86 | reference counts |
+| Symbol.kt | 140 | `symbolAt` and the symbol kinds |
+| RenameProvider.kt | 130 | rename |
+| CallHierarchyProvider.kt | 127 | call hierarchy |
+| SmaliParser.kt | 126 | parser entry |
+| SmaliWorkspaceService.kt | 113 | watched files, workspace symbols |
+| CodeLensProvider.kt | 88 | reference counts |
+| DocumentSymbolProvider.kt | 82 | outline |
+| WriteQueue.kt | 71 | the writer thread and the request helper |
 | DefinitionProvider.kt | 68 | definition |
+| Cli.kt | 64 | command line, usage, version |
 | StringCharStream.kt | 55 | UTF-16 char stream |
-| StringPool.kt | 53 | per-index interning |
 | UsageList.kt | 53 | packed usage sites |
-| WriteQueue.kt | 42 | the writer thread |
+| StringPool.kt | 53 | per-index interning |
+| Logging.kt | 39 | logback setup |
+| Main.kt | 31 | entry point |
