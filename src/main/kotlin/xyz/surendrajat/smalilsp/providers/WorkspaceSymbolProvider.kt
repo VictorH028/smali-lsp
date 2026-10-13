@@ -47,64 +47,41 @@ class WorkspaceSymbolProvider(
             return collectFirstSymbols()
         }
 
-        val matches = TopSymbolMatches(MAX_RESULTS)
+        // Every class, method and field name is compared on every keystroke of the symbol
+        // picker; the scan is memory-bound, so it runs in parallel chunks, each keeping its
+        // own top matches, merged at the end. The global top set is contained in the union
+        // of the per-chunk top sets, so the result equals a sequential scan's.
+        val files = index.getFilesView().toList()
+        val chunkSize = maxOf(256, files.size / (Runtime.getRuntime().availableProcessors() * 4) + 1)
+        val merged = TopSymbolMatches(MAX_RESULTS)
+        files.chunked(chunkSize).parallelStream()
+            .map { chunk ->
+                val top = TopSymbolMatches(MAX_RESULTS)
+                for (file in chunk) matchFile(file, normalizedQuery, top)
+                top
+            }
+            .toList()
+            .forEach { top -> top.forEach(merged::offer) }
+        return merged.toSortedSymbolInformation()
+    }
 
-        index.getFilesView().forEach { file ->
-            // Add class symbol - match on simple name OR full package path.
-            // e.g. query "billingclient" should match "Lcom/android/billingclient/BillingClient;"
-            val className = file.classDefinition.name
-            val classMatch = matchSymbol(Types.simpleName(className), normalizedQuery)
-                ?: if (pathContains(className, normalizedQuery)) 50 else null
-            if (classMatch != null) {
-                matches.offer(
-                    ScoredSymbol(
-                        name = file.classDefinition.name,
-                        kind = SymbolKind.Class,
-                        location = Location(file.uri, file.classDefinition.range),
-                        containerName = null,
-                        score = classMatch
-                    )
-                )
-            }
-            
-            // Add method symbols - match ONLY on method name, not class+method
-            file.methods.forEach { method ->
-                val methodMatch = matchSymbol(method.name, normalizedQuery)
-                if (methodMatch != null) {
-                    // Display name includes class for context
-                    val displayName = "${file.classDefinition.name}.${method.name}"
-                    matches.offer(
-                        ScoredSymbol(
-                            name = displayName,
-                            kind = SymbolKind.Method,
-                            location = Location(file.uri, method.range),
-                            containerName = file.classDefinition.name,
-                            score = methodMatch
-                        )
-                    )
-                }
-            }
-            
-            // Add field symbols - match ONLY on field name, not class+field
-            file.fields.forEach { field ->
-                val fieldMatch = matchSymbol(field.name, normalizedQuery)
-                if (fieldMatch != null) {
-                    // Display name includes class for context
-                    val displayName = "${file.classDefinition.name}.${field.name}"
-                    matches.offer(
-                        ScoredSymbol(
-                            name = displayName,
-                            kind = SymbolKind.Field,
-                            location = Location(file.uri, field.range),
-                            containerName = file.classDefinition.name,
-                            score = fieldMatch
-                        )
-                    )
-                }
-            }
+    private fun matchFile(file: SmaliFile, normalizedQuery: String, matches: TopSymbolMatches) {
+        // Class symbol: match on the simple name, or on the package path at a lower score
+        // (query "billingclient" should find "Lcom/android/billingclient/BillingClient;")
+        val className = file.classDefinition.name
+        val classMatch = matchSymbol(Types.simpleName(className), normalizedQuery)
+            ?: if (pathContains(className, normalizedQuery)) 50 else null
+        if (classMatch != null) {
+            matches.offer(ScoredSymbol(className, SymbolKind.Class, Location(file.uri, file.classDefinition.range), null, classMatch))
         }
-
-        return matches.toSortedSymbolInformation()
+        for (method in file.methods) {
+            val score = matchSymbol(method.name, normalizedQuery) ?: continue
+            matches.offer(ScoredSymbol("$className.${method.name}", SymbolKind.Method, Location(file.uri, method.range), className, score))
+        }
+        for (field in file.fields) {
+            val score = matchSymbol(field.name, normalizedQuery) ?: continue
+            matches.offer(ScoredSymbol("$className.${field.name}", SymbolKind.Field, Location(file.uri, field.range), className, score))
+        }
     }
 
     private fun collectFirstSymbols(): List<SymbolInformation> {
@@ -239,6 +216,10 @@ class WorkspaceSymbolProvider(
             }
 
             offerIntoHeap(activeHeap, symbol)
+        }
+
+        fun forEach(action: (ScoredSymbol) -> Unit) {
+            (heap?.toList() ?: buffered).forEach(action)
         }
 
         fun toSortedSymbolInformation(): List<SymbolInformation> {
