@@ -251,11 +251,44 @@ class ASTBuilder(
     }
     
     /**
-     * Common helper to parse all invoke instructions
+     * invoke-polymorphic targets a regular method reference followed by a call-site prototype.
+     */
+    override fun enterInvokePolymorphicInstruction(ctx: GeneratedSmaliParser.InvokePolymorphicInstructionContext) {
+        parseInvokeInstruction("invoke-polymorphic", ctx.methodInvocationTarget(), ctx.toRange())
+    }
+
+    override fun enterInvokePolymorphicRangeInstruction(ctx: GeneratedSmaliParser.InvokePolymorphicRangeInstructionContext) {
+        parseInvokeInstruction("invoke-polymorphic/range", ctx.methodInvocationTarget(), ctx.toRange())
+    }
+
+    /**
+     * invoke-custom: the navigable symbol is the bootstrap method after `@`.
+     */
+    override fun enterInvokeCustomInstruction(ctx: GeneratedSmaliParser.InvokeCustomInstructionContext) {
+        parseInvokeInstruction("invoke-custom", ctx.callSiteReference()?.methodReference(), ctx.toRange())
+    }
+
+    override fun enterInvokeCustomRangeInstruction(ctx: GeneratedSmaliParser.InvokeCustomRangeInstructionContext) {
+        parseInvokeInstruction("invoke-custom/range", ctx.callSiteReference()?.methodReference(), ctx.toRange())
+    }
+
+    /**
+     * const-method-handle references either a method (`invoke-static@...`) or a field (`instance-get@...`).
+     */
+    override fun enterInvokeConstMethodHandleInstruction(ctx: GeneratedSmaliParser.InvokeConstMethodHandleInstructionContext) {
+        val handle = ctx.methodHandleReference() ?: return
+        handle.methodReference()?.let { parseInvokeInstruction("const-method-handle", it, ctx.toRange()) }
+        handle.fieldInvocationTarget()?.let { parseFieldAccessInstruction("const-method-handle", it, ctx.toRange()) }
+    }
+
+    /**
+     * Common helper to parse all invoke instructions.
+     * [target] is any context whose text has the form `Lcom/Foo;->name(desc)ret`
+     * (methodInvocationTarget or methodReference).
      */
     private fun parseInvokeInstruction(
         opcode: String,
-        target: GeneratedSmaliParser.MethodInvocationTargetContext?,
+        target: ParserRuleContext?,
         range: Range
     ) {
         if (currentMethod == null || target == null) return

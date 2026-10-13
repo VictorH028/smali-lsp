@@ -64,6 +64,7 @@ LT:                         '<';
 GT:                         '>';
 ARROW:                      '->';
 SEMI:                       ';';
+AT:                         '@';
 // Directives
 
 METHOD_DIRECTIVE:               '.method';

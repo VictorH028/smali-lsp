@@ -721,17 +721,46 @@ packedSwitchInstruction:        OP_PACKED_SWITCH packedSwitchRegister COMMA pack
 
 sparseSwitchInstruction:        OP_SPARSE_SWITCH sparseSwitchRegister COMMA sparseSwitchLabel;
 
-invokePolymorphicInstruction:   OP_INVOKE_POLYMORPHIC;
+// Method prototype without a name, e.g. `(ILjava/lang/String;)V` (invoke-polymorphic, const-method-type, call sites).
+methodProto:                LPAREN methodArguments? RPAREN methodReturnType;
 
-invokePolymorphicRangeInstruction:  OP_INVOKE_POLYMORPHIC_RANGE;
+// `invoke-static@Lcom/Foo;->bar()V`, `instance-get@Lcom/Foo;->field:I`. The kind is one of
+// invoke-static/instance/constructor/direct/interface or static/instance-get/put; all lex as
+// identifiers or opcode tokens, so `identifier` covers them.
+methodHandleKind:           identifier;
 
-invokeCustomInstruction:        OP_INVOKE_CUSTOM;
+methodHandleReference:      methodHandleKind AT (methodReference | fieldInvocationTarget);
 
-invokeCustomRangeInstruction:   OP_INVOKE_CUSTOM_RANGE;
+callSiteName:               identifier;
 
-invokeConstMethodHandleInstruction: OP_CONST_METHOD_HANDLE;
+callSiteExtraArgument:
+    numericLiteral
+    | stringLiteral
+    | charLiteral
+    | booleanLiteral
+    | nullLiteral
+    | enumFieldReference
+    | methodHandleReference
+    | methodProto
+    | methodReference
+    | fieldInvocationTarget
+    | anyType
+    ;
 
-invokeConstMethodTypeInstruction:   OP_CONST_METHOD_TYPE;
+// `call_site_0("name", (I)V, extra...)@Lcom/Bsm;->bootstrap(...)Ljava/lang/invoke/CallSite;`
+callSiteReference:          callSiteName LPAREN stringLiteral COMMA methodProto (COMMA callSiteExtraArgument)* RPAREN AT methodReference;
+
+invokePolymorphicInstruction:   OP_INVOKE_POLYMORPHIC registerList COMMA methodInvocationTarget COMMA methodProto;
+
+invokePolymorphicRangeInstruction:  OP_INVOKE_POLYMORPHIC_RANGE registerRange COMMA methodInvocationTarget COMMA methodProto;
+
+invokeCustomInstruction:        OP_INVOKE_CUSTOM registerList COMMA callSiteReference;
+
+invokeCustomRangeInstruction:   OP_INVOKE_CUSTOM_RANGE registerRange COMMA callSiteReference;
+
+invokeConstMethodHandleInstruction: OP_CONST_METHOD_HANDLE registerIdentifier COMMA methodHandleReference;
+
+invokeConstMethodTypeInstruction:   OP_CONST_METHOD_TYPE registerIdentifier COMMA methodProto;
 
 binaryInstruction:
     filledNewArrayRangeInstruction

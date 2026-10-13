@@ -41,7 +41,7 @@ class GrammarConsistencyTest {
         // punctuation, literals with structure, whitespace/comments, and the catch-all identifier.
         val excluded = setOf(
             "QUALIFIED_TYPE_NAME", "COMPOUND_METHOD_ARG_LITERAL", "LBRACK", "RBRACK", "LPAREN", "RPAREN",
-            "LBRACE", "RBRACE", "COLON", "ASSIGN", "DOT", "SUB", "COMMA", "SLASH", "LT", "GT", "ARROW", "SEMI",
+            "LBRACE", "RBRACE", "COLON", "ASSIGN", "DOT", "SUB", "COMMA", "SLASH", "LT", "GT", "ARROW", "SEMI", "AT",
             "DECIMAL_LITERAL", "HEX_LITERAL", "OCT_LITERAL", "BINARY_LITERAL", "FLOAT_LITERAL", "HEX_FLOAT_LITERAL",
             "CHAR_LITERAL", "STRING_LITERAL", "WS", "LINE_COMMENT", "IDENTIFIER",
         )
