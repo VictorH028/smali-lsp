@@ -20,6 +20,28 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** (224 opcode tokens, including `invoke-custom`, `invoke-polymorphic` and method handles); navigation covers invoke-\*, field access, type operands, labels and strings
 
+<details>
+<summary>Supported requests</summary>
+
+| Request | Notes |
+| --- | --- |
+| `initialize` / `initialized` / `shutdown` / `exit` | workspace folders, or `rootUri` for older clients; indexing runs after `initialized` with `window/workDoneProgress` when the client supports it |
+| `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer is indexed while open, the disk version again on close |
+| `textDocument/publishDiagnostics` | syntax errors on the offending token; undefined classes once indexing has finished |
+| `textDocument/definition` `hover` `references` | references follow the member family: overrides, calls through subclasses, calls on the supertype |
+| `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search over classes, methods and fields, best 500 |
+| `textDocument/codeLens` + `codeLens/resolve` | reference counts, resolved lazily |
+| `textDocument/completion` | trigger characters `L`, `>`, `/` |
+| `textDocument/prepareRename` + `rename` | methods, fields, labels |
+| `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
+| `textDocument/prepareTypeHierarchy` + `typeHierarchy/supertypes` `subtypes` | |
+| `workspace/didChangeWatchedFiles` | registered dynamically for `**/*.smali`; events for open files are left to the editor |
+| `$/cancelRequest` | honoured by symbol search and reference lists |
+
+URIs are matched by file, so a client that percent-encodes (`Outer%24Inner.smali`) and the scanner agree on one entry.
+
+</details>
+
 ### MCP Server (for AI agents)
 
 Built-in [MCP](https://modelcontextprotocol.io) server for full semantic understanding of decompiled APKs by AI agents — various tools covering indexing, navigation, search, call graphs, and cross-references.
@@ -159,7 +181,7 @@ Measured on three apktool projects (Mastodon v2.13.4, ProtonMail 7.11.5 and a 76
 
 ## Building
 
-Requires Java 17+; the Gradle wrapper (9.6) downloads itself.
+Requires Java 17+; the Gradle wrapper (9.8) downloads itself.
 
 ```bash
 ./gradlew shadowJar
