@@ -6,6 +6,7 @@ import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
+import xyz.surendrajat.smalilsp.util.Types
 
 /** One declaration of a member: the file and the name token. */
 data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot: Boolean)
@@ -51,9 +52,14 @@ class ReferenceProvider(
             }
             is Symbol.LabelDecl -> findLabelReferences(symbol.label.name, uri, symbol.method, includeDeclaration)
             is Symbol.LabelRef -> findLabelReferences(symbol.name, uri, symbol.method, includeDeclaration)
-            is Symbol.OnInstruction -> (symbol.instruction as? JumpInstruction)
-                ?.let { findLabelReferences(it.targetLabel, uri, symbol.method, includeDeclaration) }
-                ?: emptyList()
+            // Anywhere else on an instruction (the opcode, a register): its primary symbol
+            is Symbol.OnInstruction -> when (val instruction = symbol.instruction) {
+                is InvokeInstruction -> methodReferences(instruction, includeDeclaration)
+                is FieldAccessInstruction -> fieldReferences(instruction, includeDeclaration)
+                is TypeInstruction -> findClassReferences(Types.elementClass(instruction.className), includeDeclaration, cancel)
+                is JumpInstruction -> findLabelReferences(instruction.targetLabel, uri, symbol.method, includeDeclaration)
+                is ConstStringInstruction -> emptyList()
+            }
         }
     }
 

@@ -318,4 +318,11 @@ class ReferenceProviderTest {
         assertTrue(referencesAt("file:///Missing.smali", Position(0, 0)).isEmpty())
         assertTrue(ReferenceProvider(WorkspaceIndex()).findReferences(widgetUri, Position(0, 20)).isEmpty(), "an empty index")
     }
+
+    @Test
+    fun `a caret on the opcode of a call, an access or a type operand answers like its symbol`() {
+        assertEquals(fromWidget("String;->length", "length"), fromWidget("String;->length", "invoke-virtual"), "the call's method")
+        assertEquals(fromWidget("iget v0, p0", "count"), fromWidget("iget v0, p0", "iget"), "the access's field")
+        assertEquals(fromUser("new-instance v0", "Lcom/Widget;"), fromUser("new-instance v0", "new-instance"), "the operand's class")
+    }
 }
