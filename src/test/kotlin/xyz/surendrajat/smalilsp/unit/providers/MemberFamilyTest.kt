@@ -19,9 +19,13 @@ class MemberFamilyTest {
 
     private val index = WorkspaceIndex()
 
+    private val shape = ".class public interface abstract Lcom/Shape;\n.super Ljava/lang/Object;\n.method public abstract area()I\n.end method"
+    private val other = ".class public Lcom/Other;\n.super Ljava/lang/Object;\n.implements Lcom/Shape;\n.method public area()I\n    .registers 1\n    const/4 v0, 0x2\n    return v0\n.end method"
+
     private val base = """
         .class public Lcom/Base;
         .super Ljava/lang/Object;
+        .implements Lcom/Shape;
 
         .field public static count:I
 
@@ -100,6 +104,8 @@ class MemberFamilyTest {
             invoke-virtual {v0}, Lcom/Base;->area()I
             invoke-virtual {v0}, Lcom/Child;->area()I
             invoke-virtual {v0}, Lcom/Grand;->area()I
+            invoke-interface {v0}, Lcom/Shape;->area()I
+            invoke-virtual {v0}, Lcom/Other;->area()I
             invoke-static {}, Lcom/Base;->make()Lcom/Base;
             invoke-static {}, Lcom/Child;->make()Lcom/Base;
             invoke-static {}, Lcom/Grand;->make()Lcom/Base;
@@ -116,6 +122,8 @@ class MemberFamilyTest {
 
     @BeforeEach
     fun setup() {
+        index.openSource("file:///Shape.smali", shape)
+        index.openSource("file:///Other.smali", other)
         index.openSource("file:///Base.smali", base)
         index.openSource("file:///Child.smali", child)
         index.openSource("file:///Grand.smali", grand)
@@ -168,10 +176,21 @@ class MemberFamilyTest {
     @Test
     fun `a virtual method includes calls that dispatch to it and its overrides`() {
         assertEquals(callerLines("Lcom/Grand;", "virtualOnly"), referencesAt("file:///Base.smali", base, ".method public virtualOnly", "virtualOnly"))
-        val onChildArea = child.positionOf(".method public area", "area")
-        assertEquals(callerLines("Lcom/Child;", "area") + callerLines("Lcom/Grand;", "area"), referencesAt("file:///Child.smali", child, ".method public area", "area"))
-        assertEquals("2 references", lensCount("file:///Child.smali", "area"))
-        val edit = RenameProvider(index).rename("file:///Child.smali", onChildArea, "size")!!
-        assertEquals(1, edit.changes["file:///Child.smali"]!!.size, "the override's declaration")
+        assertEquals("2 references", lensCount("file:///Child.smali", "area"), "the lens on an override counts calls on Child and Grand")
+        assertEquals("3 references", lensCount("file:///Base.smali", "area"), "Base, Child and Grand")
+    }
+
+    @Test
+    fun `an override and the interface method it implements are one member`() {
+        val everyAreaCall = caller.lines().withIndex().filter { it.value.contains("->area()I") }.map { it.index }
+        assertEquals(everyAreaCall, referencesAt("file:///Child.smali", child, ".method public area", "area"), "from an override: calls through Shape, Base, Child, Grand and Other")
+        assertEquals(everyAreaCall, referencesAt("file:///Shape.smali", shape, ".method public abstract area", "area"))
+        assertEquals(everyAreaCall, referencesAt("file:///Caller.smali", caller, "Lcom/Other;->area", "area"), "from a call on another implementor")
+        val withDeclaration = ReferenceProvider(index).findReferences("file:///Child.smali", child.positionOf(".method public area", "area"), includeDeclaration = true)
+        assertEquals(listOf("file:///Shape.smali"), withDeclaration.filter { it.uri != "file:///Caller.smali" }.map { it.uri }, "the declaration entry is the root, not every override")
+        val edit = RenameProvider(index).rename("file:///Child.smali", child.positionOf(".method public area", "area"), "size")!!
+        assertEquals(setOf("file:///Shape.smali", "file:///Base.smali", "file:///Child.smali", "file:///Other.smali", "file:///Caller.smali"), edit.changes.keys)
+        assertEquals(everyAreaCall, edit.changes["file:///Caller.smali"]!!.map { it.range.start.line }.sorted())
+        for (uri in listOf("file:///Shape.smali", "file:///Base.smali", "file:///Child.smali", "file:///Other.smali")) assertEquals(1, edit.changes[uri]!!.size, uri)
     }
 }

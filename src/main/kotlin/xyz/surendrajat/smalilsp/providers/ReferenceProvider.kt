@@ -98,21 +98,24 @@ class ReferenceProvider(
     /**
      * The method's family: its declaration and every call site that binds to it. A call through a
      * subclass binds to the inherited method unless the subclass redeclares it; the overrides of a
-     * virtual method belong to the family too, since a call on the subclass dispatches to them.
-     * Constructors and private methods bind to their own class only. A method outside the
-     * workspace has no declaration and only the exact owner's call sites.
+     * virtual method belong to the family too, since a call on the subclass dispatches to them,
+     * and with [climb] the family starts at the topmost declarations the method overrides, so an
+     * override and the interface method it implements are one member. Constructors and private
+     * methods bind to their own class only. A method outside the workspace has no declaration
+     * and only the exact owner's call sites.
      */
-    fun methodFamily(className: String, methodName: String, descriptor: String): MemberFamily {
+    fun methodFamily(className: String, methodName: String, descriptor: String, climb: Boolean = true): MemberFamily {
         val declaration = workspaceIndex.resolveMethod(className, methodName, descriptor)
             ?: return MemberFamily(emptyList(), workspaceIndex.findMethodUsages(className, methodName, descriptor))
         val method = declaration.method
         val binding = when {
-            method.isConstructor || "private" in method.modifiers -> Binding.OwnClass
+            method.isVirtual -> Binding.Virtual
             "static" in method.modifiers -> Binding.Inherited
-            else -> Binding.Virtual
+            else -> Binding.OwnClass
         }
+        val roots = if (climb && binding == Binding.Virtual) workspaceIndex.rootMethodDeclarations(declaration, methodName, descriptor) else listOf(declaration)
         return family(
-            roots = listOf(MemberDeclaration(declaration.file, method.nameSpan, method.range, isRoot = true)),
+            roots = roots.map { MemberDeclaration(it.file, it.method.nameSpan, it.method.range, isRoot = true) },
             binding = binding,
             usagesOf = { owner -> workspaceIndex.findMethodUsages(owner, methodName, descriptor) },
             bindsTo = { owner -> workspaceIndex.resolveMethod(owner, methodName, descriptor)?.file?.classDefinition?.name },

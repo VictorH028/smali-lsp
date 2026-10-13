@@ -301,6 +301,31 @@ class WorkspaceIndex {
         return null
     }
 
+    /**
+     * The topmost declarations of the virtual method [start] overrides: walking superclasses and
+     * interfaces, the declarations whose own supertypes in the workspace do not declare the
+     * method. [start] itself when nothing above declares it; several when an interface and a
+     * superclass both do.
+     */
+    fun rootMethodDeclarations(start: MethodMatch, methodName: String, descriptor: String): List<MethodMatch> {
+        val roots = LinkedHashMap<String, MethodMatch>()
+        val visited = HashSet<String>()
+        fun climb(match: MethodMatch) {
+            val definition = match.file.classDefinition
+            if (!visited.add(definition.name)) return
+            var overridesSomething = false
+            for (parent in listOfNotNull(definition.superClass) + definition.interfaces) {
+                val above = resolveMethod(parent, methodName, descriptor) ?: continue
+                if (!above.method.isVirtual) continue
+                overridesSomething = true
+                climb(above)
+            }
+            if (!overridesSomething) roots[definition.name] = match
+        }
+        climb(start)
+        return roots.values.toList()
+    }
+
     /** Where the method is declared, as a location of its name token. */
     fun findMethod(className: String, methodName: String, descriptor: String): List<Location> =
         listOfNotNull(resolveMethod(className, methodName, descriptor)?.let { Location(it.file.uri, it.method.nameSpan.toRange()) })

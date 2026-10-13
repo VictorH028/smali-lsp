@@ -77,10 +77,10 @@ class CodeLensProvider(
         return lens
     }
 
-    /** Call sites on the class and on every subclass: a call through a subclass is the same method. */
+    /** Calls that dispatch to this declaration or to an override below it; the lens on an override counts its own callers, not the whole hierarchy's. */
     private fun countMethodReferences(className: String, methodName: String, descriptor: String): Int =
-        references.findMethodReferences(className, methodName, descriptor, includeDeclaration = false).size
+        references.methodFamily(className, methodName, descriptor, climb = false).usages.size
 
     private fun countFieldReferences(className: String, fieldName: String, fieldType: String): Int =
-        references.findFieldReferences(className, fieldName, fieldType, includeDeclaration = false).size
+        references.fieldFamily(className, fieldName, fieldType).usages.size
 }

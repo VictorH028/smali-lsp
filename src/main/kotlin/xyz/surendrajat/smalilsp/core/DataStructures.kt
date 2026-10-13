@@ -59,6 +59,9 @@ data class MethodDefinition(
 ) {
     /** `<init>` or `<clinit>`: bound to its own class, never inherited or overridden. */
     val isConstructor: Boolean get() = name == "<init>" || name == "<clinit>"
+
+    /** Dispatched at run time: not a constructor, not private, not static. */
+    val isVirtual: Boolean get() = !isConstructor && "private" !in modifiers && "static" !in modifiers
 }
 
 data class Parameter(
