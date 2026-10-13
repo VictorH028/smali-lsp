@@ -191,6 +191,7 @@ class SmaliLanguageServer : LanguageServer {
     
     private var pendingWorkspaceFolders: List<WorkspaceFolder> = emptyList()
     private var clientSupportsProgress = false
+    private var clientSupportsWatcherRegistration = false
 
     @Volatile
     private var shutdownRequested = false
@@ -211,6 +212,7 @@ class SmaliLanguageServer : LanguageServer {
             ?: params.rootPath?.let { listOf(WorkspaceFolder(File(it).toURI().toString(), "root")) }
             ?: emptyList()
         clientSupportsProgress = params.capabilities?.window?.workDoneProgress == true
+        clientSupportsWatcherRegistration = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration == true
 
         return CompletableFuture.completedFuture(createInitializeResult())
     }
@@ -348,6 +350,7 @@ class SmaliLanguageServer : LanguageServer {
      */
     override fun initialized(params: InitializedParams) {
         logger.info("Server initialized, starting workspace indexing...")
+        registerFileWatcher()
         if (pendingWorkspaceFolders.isNotEmpty()) {
             CompletableFuture.runAsync {
                 try {
@@ -365,6 +368,21 @@ class SmaliLanguageServer : LanguageServer {
         }
     }
     
+    /**
+     * Ask the client to report create/change/delete of .smali files on disk (apktool
+     * regenerating a project, deletions outside the editor). Most clients only send
+     * workspace/didChangeWatchedFiles for watchers the server registered.
+     */
+    private fun registerFileWatcher() {
+        if (!clientSupportsWatcherRegistration) return
+        val options = DidChangeWatchedFilesRegistrationOptions(listOf(FileSystemWatcher(Either.forLeft("**/*.smali"))))
+        val registration = Registration("smali-file-watcher", "workspace/didChangeWatchedFiles", options)
+        client.registerCapability(RegistrationParams(listOf(registration))).exceptionally { e ->
+            logger.warn("Client rejected file watcher registration: ${e.message}")
+            null
+        }
+    }
+
     /**
      * Shutdown server.
      */

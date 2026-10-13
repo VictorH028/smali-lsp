@@ -177,6 +177,33 @@ class LspStdioTest {
     }
 
     @Test
+    fun `server registers a smali file watcher when the client allows it`() {
+        writeWorkspace()
+        LspStdioClient().use { client ->
+            client.initializeAndIndex(initParams(client, dynamicWatchers = true))
+            val deadline = System.nanoTime() + 10_000_000_000L
+            while (client.registrations.isEmpty() && System.nanoTime() < deadline) { client.drain(); Thread.sleep(50) }
+            val registration = client.registrations.firstOrNull()?.getAsJsonArray("registrations")?.firstOrNull()?.asJsonObject
+            assertNotNull(registration, "server must register a workspace/didChangeWatchedFiles watcher; requests seen: ${client.serverRequests}")
+            assertEquals("workspace/didChangeWatchedFiles", registration!!["method"].asString)
+            val globs = registration.getAsJsonObject("registerOptions").getAsJsonArray("watchers").map { it.asJsonObject["globPattern"].asString }
+            assertEquals(listOf("**/*.smali"), globs)
+            client.result("shutdown"); client.notify("exit")
+        }
+    }
+
+    @Test
+    fun `no watcher registration without dynamic registration support`() {
+        writeWorkspace()
+        LspStdioClient().use { client ->
+            client.initializeAndIndex(initParams(client, dynamicWatchers = false))
+            Thread.sleep(300); client.drain()
+            assertTrue(client.registrations.isEmpty(), "must not register capabilities the client cannot accept")
+            client.result("shutdown"); client.notify("exit")
+        }
+    }
+
+    @Test
     fun `exit without a prior shutdown returns 1`() {
         writeWorkspace()
         LspStdioClient().use { client ->
