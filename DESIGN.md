@@ -99,10 +99,11 @@ thousands of files is one `String`; the pool is bounded (500 K entries) and per 
 | | ProtonMail (19,637 files) | 76 K-file app |
 |---|---|---|
 | Single-thread parse, all files | 2.7 s (0.14 ms/file) | ~11 s |
-| AST heap after GC | 293 MB (15 KB/file) | 975 MB |
+| AST heap after GC | 190 MB (10 KB/file) | 673 MB |
 
 Interning the instruction strings took the ProtonMail AST from 470 MB to 293 MB for 2 to 5 %
-parse time. The remaining per-instruction cost is mostly LSP4J `Range`/`Position` objects.
+parse time; storing instruction and label ranges as four ints instead of LSP4J `Range`
+objects took it to 190 MB. Declarations keep their `Range`; there are few of them.
 
 ### 2.4 Symbol resolution: `SmaliFile.symbolAt`
 
@@ -151,7 +152,7 @@ and removal scanned every usage set the file touched, so a keystroke in a file t
 | | ProtonMail | 76 K-file app |
 |---|---|---|
 | Index heap after GC | 371 MB → **90 MB** | 1,331 MB → **328 MB** |
-| AST + index | 841 MB → **383 MB** | 2,850 MB → **1,303 MB** |
+| AST + index | 841 MB → **281 MB** | 2,850 MB → **1,027 MB** |
 | Index build, single thread | 0.95 s → 0.52 s | 3.4 s → 1.4 s |
 | didChange (re-parse + re-index one file), p95 | 58 ms → **0.6 ms** | 340 ms → **0.8 ms** |
 | didChange, worst of 200 files | 0.9 s → 18 ms | 7.5 s → 9 ms |
@@ -215,8 +216,8 @@ deleted ones. `workspace/symbol` runs on the common pool after the barrier.
 | class name in `.class` | itself | class info | declaration, `.super`/`.implements` lines, every reference | not supported |
 | `.super`, `.implements`, owner, type operand, descriptor type, field type, directive reference | the class, by element type for arrays | class info, or SDK note | references to that class (a type inside an invoke's descriptor answers with the call's references) | — |
 | method name in `.method` | — | signature | call sites incl. through subclasses | declaration, overrides, every call site |
-| method name in an invoke | declaration, via hierarchy | signature or SDK note | call sites | same, for workspace classes only |
-| field name in `.field` / access | declaration | type | accesses | declaration and accesses |
+| method name in an invoke | declaration, via hierarchy | the declaration's signature, or SDK note | the declaring class's method: its declaration and every call site through it or any subclass | same, starting from the declaring class; nothing for classes outside the workspace |
+| field name in `.field` / access | declaration, via hierarchy | type | accesses through the declaring class or any subclass | declaration and accesses |
 | primitive type | the member, when inside a reference | primitive info | — | — |
 | `:label` definition or reference | definition | reference count and label kind | every reference in the method | definition and every reference |
 | opcode or register | the instruction's primary symbol | opcode documentation | — | — |
@@ -236,7 +237,9 @@ whose declarations are unreachable.
 - **Code lens**: one lens per method and field, resolved lazily to a usage count.
 - **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
   type as detail, name token as `selectionRange`.
-- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept.
+- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
+  scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
+  query over the 76 K-file app's 660 K names.
 - **Diagnostics**: syntax errors, then unresolved classes in `.super`, `.implements`, field
   types and instruction targets, skipping platform SDK classes.
 
@@ -284,8 +287,9 @@ missing index or argument uniformly, and turns any failure into a tool error.
   re-reading lines and matching names with `indexOf`, mis-resolved duplicated names and needed
   file reads for closed documents.
 - **Full ASTs in memory.** Hover, call hierarchy, diagnostics and the MCP tools all need
-  instruction lists. At 13 to 15 KB per file the AST is the larger half of the heap; packing
-  the `Range` objects would be the next saving.
+  instruction lists. At about 10 KB per file after interning and range packing, the AST is
+  two thirds of the heap; re-parsing on demand would save it at the cost of a disk read per
+  request.
 - **Generations, not per-symbol removal.** O(1) retirement is what makes editing a file that
   references popular symbols cheap.
 - **One writer thread.** Ordering is trivial to reason about, the reader thread stays free,
@@ -303,7 +307,9 @@ missing index or argument uniformly, and turns any failure into a tool error.
   class name maps to the last one indexed.
 - The 76 K-file app needs more than the 1 GB test fork, so the fixture-invariant test skips it
   by default (`-Dsmali.invariants.maxFiles`).
-- `Range`/`Position` objects inside the AST are the remaining memory target.
+- Find-references on `Ljava/lang/Object;` answers with every owner, operand and descriptor
+  use: 264 K locations on the 76 K-file app, serialized in well under a second but more than
+  an editor can show. There is no cap; a client that wants fewer should pass a narrower symbol.
 
 ---
 
@@ -317,6 +323,10 @@ missing index or argument uniformly, and turns any failure into a tool error.
   workspace resolves, hierarchy sets agree with `.super`/`.implements`, usage locations name
   the member, re-indexing is a no-op), so fixtures can change version without rewriting tests.
 - `LspStdioTest` and `McpModeTest` drive the real binaries over stdio with JSON-RPC.
+- Before a release, a scripted stdio session against a real app exercises every request at
+  about a thousand positions (declarations, references, operands, labels, directives,
+  opcodes), compares the answers with the previous build, and checks each definition,
+  reference line and rename edit against the source text; the same for the twelve MCP tools.
 - Parser and builder changes are checked with a per-file fingerprint of every AST in the corpus
   against the previous build; a builder change must leave every pre-existing field identical.
 
