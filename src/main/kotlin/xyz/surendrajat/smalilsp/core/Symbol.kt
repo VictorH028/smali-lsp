@@ -59,7 +59,8 @@ sealed class Symbol {
     }
 }
 
-private fun Range.touches(p: Position): Boolean =
+/** The caret is inside the range or right after its last character. */
+fun Range.touches(p: Position): Boolean =
     (p.line > start.line || (p.line == start.line && p.character >= start.character)) &&
         (p.line < end.line || (p.line == end.line && p.character <= end.character))
 

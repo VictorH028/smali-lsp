@@ -5,6 +5,7 @@ import xyz.surendrajat.smalilsp.core.InvokeInstruction
 import xyz.surendrajat.smalilsp.core.MethodDefinition
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.core.methodAt
+import xyz.surendrajat.smalilsp.core.touches
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
@@ -27,9 +28,7 @@ class CallHierarchyProvider(
     fun prepare(uri: String, position: Position): List<CallHierarchyItem> {
         val file = index.findFileByUri(uri) ?: return emptyList()
 
-        // Find the method containing the cursor position
-        val method = file.methods.find { methodContainsPosition(it, position) }
-            ?: return emptyList()
+        val method = file.methods.find { it.range.touches(position) } ?: return emptyList()
 
         return listOf(createItem(file, method))
     }
@@ -78,21 +77,8 @@ class CallHierarchyProvider(
 
         for ((target, callSites) in callsByTarget) {
             val (className, methodName, descriptor) = target
-            val targetLocations = index.findMethod(className, methodName, descriptor)
-            val targetLocation = targetLocations.firstOrNull()
-
-            val toItem = if (targetLocation != null) {
-                val targetFile = index.findFileByUri(targetLocation.uri)
-                val targetMethodDef = targetFile?.methods?.find { it.nameSpan.toRange() == targetLocation.range }
-                if (targetFile != null && targetMethodDef != null) {
-                    createItem(targetFile, targetMethodDef)
-                } else {
-                    // External method — create a synthetic item
-                    createExternalItem(className, methodName, descriptor)
-                }
-            } else {
-                createExternalItem(className, methodName, descriptor)
-            }
+            val toItem = index.resolveMethod(className, methodName, descriptor)?.let { createItem(it.file, it.method) }
+                ?: createExternalItem(className, methodName, descriptor)
 
             val call = CallHierarchyOutgoingCall()
             call.to = toItem
@@ -137,13 +123,5 @@ class CallHierarchyProvider(
         } else {
             Pair(name, "")
         }
-    }
-
-    private fun methodContainsPosition(method: MethodDefinition, position: Position): Boolean {
-        val r = method.range
-        if (position.line < r.start.line || position.line > r.end.line) return false
-        if (position.line == r.start.line && position.character < r.start.character) return false
-        if (position.line == r.end.line && position.character > r.end.character) return false
-        return true
     }
 }
