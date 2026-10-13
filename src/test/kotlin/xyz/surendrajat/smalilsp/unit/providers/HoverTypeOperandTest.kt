@@ -9,6 +9,7 @@ import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.shared.openSource
 import xyz.surendrajat.smalilsp.shared.positionOf
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -218,7 +219,7 @@ class HoverTypeOperandTest {
     }
 
     @Test
-    fun `the opcode word documents the instruction, a register nothing`() {
+    fun `the opcode word documents the instruction, a register itself`() {
         val opcodes = listOf(
             "check-cast" to "1F", "instance-of" to "20", "new-instance" to "22", "const-class" to "1C",
             "new-array" to "23", "filled-new-array {" to "24", "filled-new-array/range" to "25",
@@ -229,9 +230,9 @@ class HoverTypeOperandTest {
             val hover = hoverAt(marker, opcode, 2)
             assertTrue(hover != null && hover.startsWith("## ${opcode.uppercase()}\n\n**Opcode:** `0x$hex`\n\n"), "$opcode: $hover")
         }
-        assertNull(hoverAt("check-cast", "v0"))
-        assertNull(hoverAt("filled-new-array {", "v1"))
-        assertNull(hoverAt("invoke-static", "v2"))
+        assertTrue(assertNotNull(hoverAt("check-cast", "v0")).contains("Register"))
+        assertTrue(assertNotNull(hoverAt("filled-new-array {", "v1")).contains("Register"))
+        assertTrue(assertNotNull(hoverAt("invoke-static", "v2")).contains("Register"))
     }
 
     @Test

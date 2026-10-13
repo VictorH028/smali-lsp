@@ -1,0 +1,219 @@
+package xyz.surendrajat.smalilsp.core
+
+/** A token of an instruction line: its UTF-16 columns `[start, end)` in [line]; the text is cut only when asked for. */
+open class TextToken(val line: String, val start: Int, val end: Int) {
+    val text: String get() = line.substring(start, end)
+
+    /** The caret is on the token or right after it. */
+    fun touches(character: Int): Boolean = character in start..end
+
+    /** The token spells [other]. */
+    fun matches(other: String): Boolean = end - start == other.length && line.regionMatches(start, other, 0, other.length)
+}
+
+/** A register operand: `v12` or `p0`, with its kind and number read while scanning. */
+class RegisterToken(line: String, start: Int, end: Int, val isParameter: Boolean, val number: Int) : TextToken(line, start, end)
+
+/**
+ * An instruction line decoded the way an assembler reads it: the opcode, every register operand
+ * with its position, whether the registers form a `{vA .. vB}` range, and the literal operand if
+ * the last operand is a number. The AST keeps only navigable instructions and no registers, so
+ * register-level features read the text.
+ */
+class DecodedInstruction(val line: String, val opcodeStart: Int, val opcodeEnd: Int, val registers: List<RegisterToken>, val isRange: Boolean, val literal: TextToken?) {
+    val opcode: String get() = line.substring(opcodeStart, opcodeEnd)
+
+    /** The register token under [character], if any. */
+    fun registerAt(character: Int): RegisterToken? = registers.firstOrNull { it.touches(character) }
+}
+
+/**
+ * Scans one instruction line into reusable fields. The diagnostics pass runs it over every line
+ * of the edited file on each change, so a scan allocates nothing: the opcode, registers and
+ * literal are spans into the line until something asks for their text. One scanner serves one
+ * thread.
+ */
+class InstructionScanner {
+    var line: String = ""
+        private set
+    var opcodeStart = 0
+        private set
+    var opcodeEnd = 0
+        private set
+    var registerCount = 0
+        private set
+    var isRange = false
+        private set
+    private var literalStart = -1
+    private var literalEnd = -1
+    private var starts = IntArray(8)
+    private var ends = IntArray(8)
+    private var numbers = IntArray(8)
+    private var parameters = BooleanArray(8)
+    private var depth = 0
+    private var tokenStart = -1
+    private var lastStart = -1
+    private var lastEnd = -1
+
+    val opcode: String get() = line.substring(opcodeStart, opcodeEnd)
+    val hasLiteral: Boolean get() = literalStart >= 0
+    val literal: TextToken? get() = if (literalStart >= 0) TextToken(line, literalStart, literalEnd) else null
+    fun registerStart(i: Int): Int = starts[i]
+    fun registerEnd(i: Int): Int = ends[i]
+    fun registerNumber(i: Int): Int = numbers[i]
+    fun isParameter(i: Int): Boolean = parameters[i]
+    fun registerText(i: Int): String = line.substring(starts[i], ends[i])
+    fun register(i: Int): RegisterToken = RegisterToken(line, starts[i], ends[i], parameters[i], numbers[i])
+
+    /** The opcode starts with [prefix] (`invoke-`, `move-result`). */
+    fun opcodeStartsWith(prefix: String): Boolean = opcodeEnd - opcodeStart >= prefix.length && line.startsWith(prefix, opcodeStart)
+
+    /** The scanned line as an instruction object. */
+    fun toInstruction(): DecodedInstruction =
+        DecodedInstruction(line, opcodeStart, opcodeEnd, List(registerCount) { register(it) }, isRange, literal)
+
+    /**
+     * Scans [line]; false for a blank line, a comment, a directive or a label, after which the
+     * fields are stale. Operands are comma-separated at brace depth 0; a `{...}` group holds
+     * registers separated by commas or `..`; a string operand ends the scan (a quoted string may
+     * hold anything); the last operand is the literal when it is a number.
+     */
+    fun scan(line: String): Boolean {
+        this.line = line
+        var i = 0
+        while (i < line.length && isBlank(line[i])) i++
+        if (i >= line.length) return false
+        val first = line[i]
+        if (first == '.' || first == ':' || first == '#' || !first.isLetter()) return false
+        opcodeStart = i
+        while (i < line.length && !isBlank(line[i])) i++
+        opcodeEnd = i
+        registerCount = 0
+        isRange = opcodeEnd - opcodeStart > 6 && line.startsWith("/range", opcodeEnd - 6)
+        literalStart = -1
+        depth = 0
+        tokenStart = -1
+        lastStart = -1
+        while (i < line.length) {
+            val c = line[i]
+            when {
+                c == '"' -> { flush(i); break }
+                c == '{' -> { flush(i); depth++ }
+                c == '}' -> { flush(i); depth-- }
+                c == ',' -> flush(i)
+                isBlank(c) -> flush(i)
+                c == '.' && depth > 0 && i + 1 < line.length && line[i + 1] == '.' -> { flush(i); isRange = true; i++ }
+                c == '#' && depth == 0 -> { flush(i); break }
+                else -> if (tokenStart < 0) tokenStart = i
+            }
+            i++
+        }
+        flush(i)
+        if (lastStart >= 0 && isLiteral(lastStart, lastEnd)) { literalStart = lastStart; literalEnd = lastEnd }
+        return true
+    }
+
+    private fun flush(end: Int) {
+        if (tokenStart < 0) return
+        addRegister(tokenStart, end)
+        if (depth == 0) { lastStart = tokenStart; lastEnd = end }
+        tokenStart = -1
+    }
+
+    /** Records `[start, end)` when it spells `v<n>` or `p<n>`. */
+    private fun addRegister(start: Int, end: Int) {
+        if (end - start < 2 || end - start > 8) return
+        val kind = line[start]
+        if (kind != 'v' && kind != 'p') return
+        var number = 0
+        for (k in start + 1 until end) {
+            val digit = line[k] - '0'
+            if (digit !in 0..9) return
+            number = number * 10 + digit
+        }
+        if (registerCount == starts.size) {
+            starts = starts.copyOf(registerCount * 2); ends = ends.copyOf(registerCount * 2)
+            numbers = numbers.copyOf(registerCount * 2); parameters = parameters.copyOf(registerCount * 2)
+        }
+        starts[registerCount] = start; ends[registerCount] = end; numbers[registerCount] = number; parameters[registerCount] = kind == 'p'
+        registerCount++
+    }
+
+    private fun isBlank(c: Char): Boolean = c == ' ' || c == '\t' || c == '\r'
+
+    /** `[start, end)` starts like a number: an optional sign, then a digit. */
+    private fun isLiteral(start: Int, end: Int): Boolean {
+        val digit = if (line[start] == '-') start + 1 else start
+        return digit < end && line[digit] in '0'..'9'
+    }
+}
+
+object InstructionText {
+
+    /** The decoded instruction, or null for a blank line, a comment, a directive or a label. */
+    fun decode(line: String): DecodedInstruction? {
+        val scanner = InstructionScanner()
+        return if (scanner.scan(line)) scanner.toInstruction() else null
+    }
+
+    /**
+     * The value of an integer literal as baksmali writes it: hex or decimal, optional sign, an
+     * optional `L` (long), `t` (byte) or `s` (short) suffix. Null for anything else (floats, chars).
+     */
+    fun literalValue(text: String): Long? {
+        var body = text
+        val negative = body.startsWith("-")
+        if (negative) body = body.substring(1)
+        body = body.removeSuffix("L").removeSuffix("t").removeSuffix("s").removeSuffix("S")
+        val value = try {
+            if (body.startsWith("0x") || body.startsWith("0X")) body.substring(2).toULong(16).toLong() else body.toULong(10).toLong()
+        } catch (_: NumberFormatException) {
+            return null
+        }
+        return if (negative) -value else value
+    }
+}
+
+/**
+ * A method's register frame: how many registers it declares and how many of them are parameters
+ * (which sit at the top of the frame). `pN` is register `total - parameters + N`.
+ */
+class RegisterFrame(val total: Int, val parameters: Int, val directive: String) {
+    val locals: Int get() = total - parameters
+
+    /** The frame index of a register: `v3` is 3, `p1` is `total - parameters + 1`. */
+    fun absolute(isParameter: Boolean, number: Int): Int = if (isParameter) locals + number else number
+    fun absolute(register: RegisterToken): Int = absolute(register.isParameter, register.number)
+
+    /** Whether the method declares the register. */
+    fun declares(isParameter: Boolean, number: Int): Boolean = if (isParameter) number < parameters else number < total
+    fun declares(register: RegisterToken): Boolean = declares(register.isParameter, register.number)
+
+    companion object {
+        /** Slots a parameter type occupies: two for `J` and `D`, one otherwise. */
+        fun slots(type: String): Int = if (type == "J" || type == "D") 2 else 1
+
+        /** The parameter slot count of [method]: `this` unless static, then each parameter's slots. */
+        fun parameterSlots(method: MethodDefinition): Int =
+            (if ("static" in method.modifiers) 0 else 1) + method.parameters.sumOf { slots(it.type) }
+
+        /** The frame declared by the `.registers` or `.locals` directive in [method]'s lines, or null when there is none. */
+        fun of(method: MethodDefinition, lines: List<String>): RegisterFrame? {
+            val parameters = parameterSlots(method)
+            for (lineNumber in method.range.start.line..minOf(method.range.end.line, lines.size - 1)) {
+                val line = lines[lineNumber]
+                var i = 0
+                while (i < line.length && (line[i] == ' ' || line[i] == '\t')) i++
+                if (i >= line.length || line[i] != '.') continue
+                val directive = when {
+                    line.startsWith(".registers ", i) -> ".registers"
+                    line.startsWith(".locals ", i) -> ".locals"
+                    else -> continue
+                }
+                val count = line.substring(i + directive.length).trim().toIntOrNull() ?: continue
+                return RegisterFrame(if (directive == ".locals") count + parameters else count, parameters, directive)
+            }
+            return null
+        }
+    }
+}

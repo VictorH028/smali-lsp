@@ -4,6 +4,7 @@ import org.eclipse.lsp4j.MarkupKind
 import org.eclipse.lsp4j.Position
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -145,7 +146,7 @@ class HoverProviderTest {
             assertTrue(hover.contains(marker.substringBefore(' ')), "$marker: $hover")
             assertTrue(hover.lowercase().contains(hex), "$marker should document opcode 0x$hex: $hover")
         }
-        assertNull(hoverAt("move v0", "v1"), "a register")
+        assertTrue(assertNotNull(hoverAt("move v0", "v1"), "a register").contains("**Parameter** `v1`"), "a register hovers as what it holds")
         assertNull(hoverAt(".registers", ".registers", 2))
     }
 

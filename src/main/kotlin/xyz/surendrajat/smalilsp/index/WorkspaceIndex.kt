@@ -467,6 +467,18 @@ class WorkspaceIndex {
     /** Whether an editor buffer is open for the file, under any spelling of its URI. */
     fun isOpen(uri: String): Boolean = documentContents.containsKey(canonicalUri(uri))
 
+    /** The lines of an open document (split once and cached), or of the file on disk when it is not open. */
+    fun getLines(uri: String): List<String>? {
+        val key = canonicalUri(uri)
+        val content = documentContents[key]
+        if (content != null) return documentLines.getOrPut(key) { content.lines() }
+        return try {
+            File(URI(uri)).readLines()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** A line of an open document, or of the file on disk when it is not open. */
     fun getLineContent(uri: String, lineIndex: Int): String? {
         val key = canonicalUri(uri)

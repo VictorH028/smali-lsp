@@ -22,7 +22,7 @@ class HoverProvider(
     fun provideHover(uri: String, position: Position): Hover? {
         val file = workspaceIndex.findFileByUri(uri) ?: return null
         return when (val symbol = file.symbolAt(position)) {
-            null -> hoverForOpcodeKeyword(uri, position)
+            null -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position)
             is Symbol.ClassDecl -> hoverForClass(symbol.classDef)
             is Symbol.ClassRef -> hoverForClassReference(symbol.type)
             is Symbol.MethodDecl -> hoverForMethod(symbol.method, file.classDefinition.name)
@@ -33,8 +33,15 @@ class HoverProvider(
             is Symbol.LabelDecl -> hoverForLabel(symbol.label, symbol.method)
             is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { hoverForLabel(it, symbol.method) }
                 ?: Hover(MarkupContent(MarkupKind.MARKDOWN, "**Jump to label:** `:${symbol.name}`"))
-            is Symbol.OnInstruction -> hoverForOpcodeKeyword(uri, position)
+            is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position)
         }
+    }
+
+    /** The register under the caret: which parameter it carries, or its local slot and debug name. */
+    private fun hoverForRegister(uri: String, file: SmaliFile, position: Position): Hover? {
+        val lines = workspaceIndex.getLines(uri) ?: return null
+        val (method, register) = Registers.at(file, lines, position) ?: return null
+        return Registers.hover(method, file.classDefinition.name, lines, register, position.line)
     }
 
     private fun hoverForLabel(labelDef: LabelDefinition, method: MethodDefinition): Hover {

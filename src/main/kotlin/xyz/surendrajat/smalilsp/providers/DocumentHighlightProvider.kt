@@ -27,7 +27,13 @@ class DocumentHighlightProvider(private val index: WorkspaceIndex) {
 
     fun highlights(uri: String, position: Position): List<DocumentHighlight> {
         val file = index.findFileByUri(uri) ?: return emptyList()
-        val highlights = when (val symbol = file.symbolAt(position)) {
+        val symbol = file.symbolAt(position)
+        // A caret on a register, which the AST does not model, highlights the register's uses in its method
+        if (symbol == null || symbol is Symbol.OnInstruction) {
+            val lines = index.getLines(uri)
+            if (lines != null) Registers.at(file, lines, position)?.let { (method, register) -> return Registers.highlights(method, lines, register.text) }
+        }
+        val highlights = when (symbol) {
             null -> emptyList()
             is Symbol.ClassDecl -> classOccurrences(file, symbol.classDef.name)
             is Symbol.ClassRef -> symbol.descriptorOf?.let { methodOccurrences(file, it.className, it.methodName, it.descriptor) } ?: classOccurrences(file, symbol.className)
