@@ -126,6 +126,37 @@ class WorkspaceIndexStorageTest {
     }
 
     @Test
+    fun `classes named only in annotations and catch blocks are referenced`() {
+        indexSource("file:///Anno.smali", ".class public interface abstract annotation Lcom/Anno;\n.super Ljava/lang/Object;")
+        indexSource("file:///Boom.smali", ".class public Lcom/Boom;\n.super Ljava/lang/Exception;")
+        indexSource("file:///User.smali", """
+            .class public Lcom/User;
+            .super Ljava/lang/Object;
+
+            .annotation runtime Lcom/Anno;
+            .end annotation
+
+            .method public run()V
+                .registers 1
+                :try_start_0
+                return-void
+                :try_end_0
+                .catch Lcom/Boom; {:try_start_0 .. :try_end_0} :catch_0
+                :catch_0
+                return-void
+            .end method
+        """.trimIndent())
+        val anno = index.findClassRefLocations("Lcom/Anno;").single()
+        assertEquals(3, anno.range.start.line)
+        assertEquals(".annotation runtime ".length, anno.range.start.character)
+        val boom = index.findClassRefLocations("Lcom/Boom;").single()
+        assertEquals(11, boom.range.start.line)
+        assertEquals("    .catch ".length, boom.range.start.character)
+        indexSource("file:///User.smali", ".class public Lcom/User;\n.super Ljava/lang/Object;")
+        assertTrue(index.findClassRefLocations("Lcom/Anno;").isEmpty())
+    }
+
+    @Test
     fun `string literal search follows file changes`() {
         indexSource("file:///S.smali", source("Lcom/S;", "const-string v0, \"first\""))
         assertEquals(listOf("first"), index.searchStrings("fir").map { it.value })

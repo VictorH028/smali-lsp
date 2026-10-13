@@ -200,6 +200,8 @@ class WorkspaceIndex {
         for (field in file.fields) {
             Types.className(field.type)?.let { sink(classRefs, it, field.typeSpan) }
         }
+        // Annotations, .catch exception types, .local types, method prototypes
+        for (ref in file.typeRefs) sink(classRefs, ref.className, ref.span)
     }
 
     private fun Range.toSpan() = Span(start.line, start.character, if (end.line == start.line) end.character else start.character)
