@@ -11,11 +11,61 @@ import xyz.surendrajat.smalilsp.util.Types
 /** One declaration of a member: the file and the name token. */
 data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot: Boolean, val modifiers: Set<String> = emptySet())
 
-/** A member's declarations (the root first, then the overrides of a virtual method) and the sites that bind to them. */
-class MemberFamily(val declarations: List<MemberDeclaration>, val usages: List<Location>) {
+/** How a call `Owner->member` finds its declaration. */
+internal enum class Binding {
+    /** In `Owner` itself: constructors, private methods. */
+    OwnClass,
+    /** In `Owner` or the nearest superclass declaring it, without dispatch: static methods, fields. */
+    Inherited,
+    /** As [Inherited], but a redeclaration in a subclass is an override of the same member. */
+    Virtual
+}
+
+/**
+ * A member's declarations (the root first, then the overrides of a virtual method) and the sites
+ * that bind to them. [usages] walks the usage tables of every class in the family and is
+ * computed on first use; [includes] answers for one owner without it, which is what a scan of a
+ * single file needs.
+ */
+class MemberFamily internal constructor(
+    val declarations: List<MemberDeclaration>,
+    private val binding: Binding,
+    private val roots: Set<String>,
+    private val members: Set<String>,
+    private val bindsTo: (owner: String) -> String?,
+    private val usagesOf: (owner: String) -> List<Location>
+) {
+    /** Whether a reference whose static owner is [owner] binds to this member. */
+    fun includes(owner: String): Boolean {
+        if (owner in roots) return true
+        if (binding == Binding.OwnClass || owner !in members) return false
+        val target = bindsTo(owner) ?: return false
+        return if (binding == Binding.Virtual) target in members else target in roots
+    }
+
+    /** Every site that binds to the member: the roots' own sites first, then those of the subclasses that inherit or override it. */
+    val usages: List<Location> by lazy {
+        val out = ArrayList<Location>()
+        for (root in roots) out.addAll(usagesOf(root))
+        if (binding != Binding.OwnClass) {
+            for (owner in members) {
+                if (owner in roots) continue
+                val sites = usagesOf(owner)
+                if (sites.isNotEmpty() && includes(owner)) out.addAll(sites)
+            }
+        }
+        out
+    }
+
     /** The usages, preceded when asked by every declaration's name token (root and overrides: the spots rename edits), where go-to-definition lands. */
     fun references(includeDeclaration: Boolean): List<Location> =
         if (includeDeclaration) declarations.map { Location(it.file.uri, it.nameSpan.toRange()) } + usages else usages
+
+    internal companion object {
+        /** The family of a member whose declaration is not in the workspace: the exact owner's sites, nothing else. */
+        fun direct(owner: String, usagesOf: (owner: String) -> List<Location>) =
+            MemberFamily(emptyList(), Binding.OwnClass, setOf(owner), emptySet(), { null }, usagesOf)
+    }
 }
 
 /**
@@ -87,7 +137,7 @@ class ReferenceProvider(
 
         locations.addAll(workspaceIndex.findClassRefLocations(className, cancel))
 
-        return locations.distinctBy { "${it.uri}:${it.range.start.line}:${it.range.start.character}" }
+        return locations.distinctBy { Triple(it.uri, it.range.start.line, it.range.start.character) }
     }
 
     private fun methodReferences(instruction: InvokeInstruction, includeDeclaration: Boolean): List<Location> =
@@ -115,7 +165,7 @@ class ReferenceProvider(
      */
     fun methodFamily(className: String, methodName: String, descriptor: String, climb: Boolean = true): MemberFamily {
         val declaration = workspaceIndex.resolveMethod(className, methodName, descriptor)
-            ?: return MemberFamily(emptyList(), workspaceIndex.findMethodUsages(className, methodName, descriptor))
+            ?: return MemberFamily.direct(className) { owner -> workspaceIndex.findMethodUsages(owner, methodName, descriptor) }
         val method = declaration.method
         val binding = when {
             method.isVirtual -> Binding.Virtual
@@ -135,7 +185,7 @@ class ReferenceProvider(
     /** The field's family: its declaration and every access that binds to it, including through subclasses that inherit it without redeclaring it. */
     fun fieldFamily(className: String, fieldName: String, fieldType: String): MemberFamily {
         val declaration = workspaceIndex.resolveField(className, fieldName, fieldType)
-            ?: return MemberFamily(emptyList(), workspaceIndex.findFieldUsages(className, fieldName, fieldType))
+            ?: return MemberFamily.direct(className) { owner -> workspaceIndex.findFieldUsages(owner, fieldName, fieldType) }
         return family(
             roots = listOf(MemberDeclaration(declaration.file, declaration.field.nameSpan, isRoot = true, modifiers = declaration.field.modifiers)),
             binding = Binding.Inherited,
@@ -143,16 +193,6 @@ class ReferenceProvider(
             bindsTo = { owner -> workspaceIndex.resolveField(owner, fieldName, fieldType)?.file?.classDefinition?.name },
             declaredIn = { null }
         )
-    }
-
-    /** How a call `Owner->member` finds its declaration. */
-    private enum class Binding {
-        /** In `Owner` itself: constructors, private methods. */
-        OwnClass,
-        /** In `Owner` or the nearest superclass declaring it, without dispatch: static methods, fields. */
-        Inherited,
-        /** As [Inherited], but a redeclaration in a subclass is an override of the same member. */
-        Virtual
     }
 
     private fun family(
@@ -163,23 +203,18 @@ class ReferenceProvider(
         declaredIn: (SmaliFile) -> MemberDeclaration?
     ): MemberFamily {
         val declarations = ArrayList(roots)
-        val usages = ArrayList<Location>()
-        val rootNames = roots.mapTo(HashSet()) { it.file.classDefinition.name }
-        for (root in rootNames) usages.addAll(usagesOf(root))
-        if (binding == Binding.OwnClass) return MemberFamily(declarations, usages)
+        val rootNames = roots.mapTo(LinkedHashSet()) { it.file.classDefinition.name }
+        if (binding == Binding.OwnClass) return MemberFamily(declarations, binding, rootNames, emptySet(), bindsTo, usagesOf)
 
-        val family = HashSet(rootNames)
-        for (root in rootNames) family.addAll(workspaceIndex.getAllSubclasses(root))
-        for (owner in family) {
-            if (owner in rootNames) continue
-            val file = workspaceIndex.findClass(owner) ?: continue
-            if (binding == Binding.Virtual) declaredIn(file)?.let { declarations.add(it) }
-            val sites = usagesOf(owner)
-            if (sites.isEmpty()) continue
-            val target = bindsTo(owner) ?: continue
-            if (if (binding == Binding.Virtual) target in family else target in rootNames) usages.addAll(sites)
+        val members = LinkedHashSet(rootNames)
+        for (root in rootNames) members.addAll(workspaceIndex.getAllSubclasses(root))
+        if (binding == Binding.Virtual) {
+            for (owner in members) {
+                if (owner in rootNames) continue
+                workspaceIndex.findClass(owner)?.let(declaredIn)?.let { declarations.add(it) }
+            }
         }
-        return MemberFamily(declarations, usages)
+        return MemberFamily(declarations, binding, rootNames, members, bindsTo, usagesOf)
     }
 
     /** Labels are method-local: the definition (if requested) and every reference in [method]. */
