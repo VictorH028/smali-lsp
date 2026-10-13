@@ -9,7 +9,6 @@ import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
 import java.util.concurrent.atomic.AtomicLong
@@ -59,7 +58,6 @@ class WorkspaceIndex {
     private val classRefs = ConcurrentHashMap<String, UsageList>()
     private val totalEntries = AtomicLong(0)
     private val staleEntries = AtomicLong(0)
-    private val compacting = AtomicBoolean(false)
 
     // ---- string literals: value → sites, built on first search, rebuilt after any change ----
     private var stringIndex = HashMap<String, UsageList>()
@@ -98,10 +96,13 @@ class WorkspaceIndex {
             table.computeIfAbsent(key) { UsageList() }.add(id, gen, span.line, span.start, span.end)
             added++
         }
-        contributions.set(id, added)
         totalEntries.addAndGet(added.toLong())
         stringIndexDirty = true
-        maybeCompact()
+        synchronized(fileLock) {
+            // Under the lock: fileId() may replace the arrays while growing them
+            contributions.set(id, added)
+            maybeCompact()
+        }
     }
 
     /** Removes a deleted file and everything it contributed. Returns false if it was not indexed. */
@@ -206,22 +207,21 @@ class WorkspaceIndex {
 
     private fun Range.toSpan() = Span(start.line, start.character, if (end.line == start.line) end.character else start.character)
 
-    /** Drops retired entries once they make up a quarter of the tables. Runs on the indexing thread. */
+    /**
+     * Drops retired entries once they make up a quarter of the tables. Called with [fileLock]
+     * held, so the generation array cannot be replaced (grown) while entries are judged
+     * against it: an entry of a file id beyond the captured array would look retired.
+     */
     private fun maybeCompact() {
         val stale = staleEntries.get()
         if (stale < 100_000 || stale * 4 < totalEntries.get()) return
-        if (!compacting.compareAndSet(false, true)) return
-        try {
-            val gen = generation
-            var dropped = 0L
-            for (table in listOf(methodUsages, fieldUsages, classRefs)) {
-                for (list in table.values) dropped += list.compact(gen)
-            }
-            totalEntries.addAndGet(-dropped)
-            staleEntries.set(0)
-        } finally {
-            compacting.set(false)
+        val gen = generation
+        var dropped = 0L
+        for (table in listOf(methodUsages, fieldUsages, classRefs)) {
+            for (list in table.values) dropped += list.compact(gen)
         }
+        totalEntries.addAndGet(-dropped)
+        staleEntries.set(0)
     }
 
     private fun updateStringValueCounts(file: SmaliFile, delta: Int) {
