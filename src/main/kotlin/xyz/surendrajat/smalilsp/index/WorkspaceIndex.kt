@@ -1,6 +1,7 @@
 package xyz.surendrajat.smalilsp.index
 
 import xyz.surendrajat.smalilsp.core.*
+import xyz.surendrajat.smalilsp.util.Types
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
@@ -146,7 +147,7 @@ class WorkspaceIndex {
                         ) { ConcurrentHashMap.newKeySet() }.add(Location(file.uri, instr.range))
                         classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
                             .add(Location(file.uri, instr.range))
-                        extractClassFromType(instr.fieldType)?.let { refClass ->
+                        Types.className(instr.fieldType)?.let { refClass ->
                             classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
                                 .add(Location(file.uri, instr.range))
                         }
@@ -164,7 +165,7 @@ class WorkspaceIndex {
 
         // Index class references from field types
         file.fields.forEach { field ->
-            extractClassFromType(field.type)?.let { refClass ->
+            Types.className(field.type)?.let { refClass ->
                 classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
                     .add(Location(file.uri, field.range))
             }
@@ -172,12 +173,12 @@ class WorkspaceIndex {
 
         // Index class references from method signatures (parameters + return type)
         file.methods.forEach { method ->
-            extractClassFromType(method.returnType)?.let { refClass ->
+            Types.className(method.returnType)?.let { refClass ->
                 classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
                     .add(Location(file.uri, method.range))
             }
             method.parameters.forEach { param ->
-                extractClassFromType(param.type)?.let { refClass ->
+                Types.className(param.type)?.let { refClass ->
                     classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
                         .add(Location(file.uri, method.range))
                 }
@@ -264,7 +265,7 @@ class WorkspaceIndex {
                         val sig = fieldSignature(instr.className, instr.fieldName)
                         fieldUsages[sig]?.removeIf { it.uri == uri }
                         classRefLocations[instr.className]?.removeIf { it.uri == uri }
-                        extractClassFromType(instr.fieldType)?.let { refClass ->
+                        Types.className(instr.fieldType)?.let { refClass ->
                             classRefLocations[refClass]?.removeIf { it.uri == uri }
                         }
                     }
@@ -276,30 +277,20 @@ class WorkspaceIndex {
             }
         }
         oldFile.fields.forEach { field ->
-            extractClassFromType(field.type)?.let { refClass ->
+            Types.className(field.type)?.let { refClass ->
                 classRefLocations[refClass]?.removeIf { it.uri == uri }
             }
         }
         oldFile.methods.forEach { method ->
-            extractClassFromType(method.returnType)?.let { refClass ->
+            Types.className(method.returnType)?.let { refClass ->
                 classRefLocations[refClass]?.removeIf { it.uri == uri }
             }
             method.parameters.forEach { param ->
-                extractClassFromType(param.type)?.let { refClass ->
+                Types.className(param.type)?.let { refClass ->
                     classRefLocations[refClass]?.removeIf { it.uri == uri }
                 }
             }
         }
-    }
-
-    /**
-     * Extract class name from a type descriptor, stripping array brackets.
-     * Returns null for primitive types.
-     * Example: "[Lcom/Foo;" → "Lcom/Foo;", "I" → null
-     */
-    private fun extractClassFromType(type: String): String? {
-        val base = type.trimStart('[')
-        return if (base.startsWith('L') && base.endsWith(';')) base else null
     }
 
     private fun updateStringValueCounts(file: SmaliFile, delta: Int) {
@@ -756,7 +747,7 @@ class WorkspaceIndex {
         return "$className->$fieldName"
     }
 
-    /** Extract simple name from full class name: "Lcom/example/MyClass;" → "MyClass" */
+    /** Last path segment of a class name, keeping the Outer$Inner chain (unlike Types.simpleName): "Lcom/a/Outer$Inner;" → "Outer$Inner". */
     private fun extractSimpleNameFromClassName(className: String): String? {
         val cleaned = className.removePrefix("L").removeSuffix(";")
         if (cleaned.isEmpty()) return null

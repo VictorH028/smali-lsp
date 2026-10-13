@@ -52,7 +52,7 @@ class WorkspaceSymbolProvider(
         index.getFilesView().forEach { file ->
             // Add class symbol - match on simple name OR full package path.
             // e.g. query "billingclient" should match "Lcom/android/billingclient/BillingClient;"
-            val simpleName = extractSimpleName(file.classDefinition.name)
+            val simpleName = Types.simpleName(file.classDefinition.name)
             val fullPath = file.classDefinition.name.removePrefix("L").removeSuffix(";").lowercase()
             val classMatch = matchSymbol(simpleName, normalizedQuery)
                 ?: if (fullPath.contains(normalizedQuery)) 50 else null
@@ -279,16 +279,4 @@ class WorkspaceSymbolProvider(
             }
         }
     }
-    
-    /**
-     * Extract simple class name from full Smali type.
-     * 
-     * Examples:
-     * - "Lcom/example/MyClass;" -> "MyClass"
-     * - "Lcom/example/Outer$Inner;" -> "Inner"
-     * - "La/b/c/q;" -> "q"
-     */
-    private fun extractSimpleName(fullName: String): String {
-        return Types.simpleName(fullName)
     }
-}

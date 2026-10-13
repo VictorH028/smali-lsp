@@ -188,7 +188,7 @@ class DiagnosticProvider(
         
         // Check field references
         file.fields.forEach { field ->
-            val typeClass = extractTypeClass(field.type)
+            val typeClass = Types.className(field.type)
             if (typeClass != null && !index.hasClass(typeClass) && !Types.isSdkClass(typeClass)) {
                 diagnostics.add(
                     createDiagnostic(
@@ -203,23 +203,7 @@ class DiagnosticProvider(
         
         return diagnostics
     }
-    
-    /**
-     * Extract class from type descriptor.
-     * Example: "Ljava/lang/String;" → "Ljava/lang/String;"
-     * Example: "[Lcom/example/Foo;" → "Lcom/example/Foo;"
-     */
-    private fun extractTypeClass(type: String): String? {
-        // Remove array markers
-        val baseType = type.replace("[", "")
         
-        // Only class types start with L
-        return if (baseType.startsWith("L")) baseType else null
-    }
-    
-    /**
-     * Create a diagnostic with standard formatting.
-     */
     /**
      * A class reference resolves if its base type (array brackets stripped) is defined
      * in the workspace, or it is an SDK/primitive type. check-cast/instance-of/new-array

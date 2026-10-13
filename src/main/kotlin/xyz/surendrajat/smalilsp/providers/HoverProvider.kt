@@ -386,13 +386,13 @@ class HoverProvider(
      */
     private fun hoverForClassReference(className: String): Hover? {
         // Check if it's a primitive type first
-        if (isPrimitiveType(className)) {
+        if (Types.isPrimitive(className)) {
             return hoverForPrimitiveType(className)
         }
         
         // For arrays, extract the base element class name (preserves descriptor format)
         // [La0/a3; -> La0/a3;, [[Ljava/lang/String; -> Ljava/lang/String;
-        val elementClassName = extractElementClassName(className)
+        val elementClassName = Types.className(className) ?: className
         
         val file = workspaceIndex.findClass(elementClassName)
         if (file != null) {
@@ -410,57 +410,7 @@ class HoverProvider(
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Extracts the base element class name from an array type descriptor.
-     * 
-     * This function handles multi-dimensional arrays by stripping all leading '[' brackets
-     * and returning the base element type in proper descriptor format.
-     * 
-     * **Algorithm**:
-     * 1. Skip all leading '[' characters (array dimensions)
-     * 2. Parse the element type:
-     *    - Object types: Extract from 'L' to ';' (inclusive)
-     *    - Primitives: Return as-is
-     * 
-     * **Examples**:
-     * ```
-     * [La0/a3;                → La0/a3;              (single-dim object array)
-     * [[Ljava/lang/String;    → Ljava/lang/String;  (multi-dim object array)
-     * [I                      → I                    (primitive array)
-     * [[I                     → I                    (multi-dim primitive array)
-     * Lcom/example/Class;     → Lcom/example/Class; (non-array, returned as-is)
-     * ```
-     * 
-     * **Design Note**: The function preserves descriptor format (keeps 'L' and ';' for objects)
-     * because the workspace index stores classes in descriptor format, not readable format.
-     * 
-     * @param className The type descriptor (may be array or non-array)
-     * @return The base element type in descriptor format (e.g., "Ljava/lang/String;" not "java.lang.String")
-     */
-    private fun extractElementClassName(className: String): String {
-        var i = 0
-        // Skip array brackets
-        while (i < className.length && className[i] == '[') {
-            i++
-        }
         
-        // Return element type in descriptor format
-        return when {
-            i >= className.length -> className
-            className[i] == 'L' -> {
-                // Object type: already in descriptor format (Lpackage/Class;)
-                val endIndex = className.indexOf(';', i)
-                if (endIndex > i) {
-                    className.substring(i, endIndex + 1)  // Keep L and ;
-                } else {
-                    className
-                }
-            }
-            else -> className // Primitive or other
-        }
-    }
-    
     /**
      * Hover on method reference in instruction.
      */
@@ -514,18 +464,7 @@ class HoverProvider(
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Check if a type string represents a primitive type.
-     * Primitives: I (int), J (long), Z (boolean), B (byte), C (char), S (short), F (float), D (double), V (void)
-     */
-    private fun isPrimitiveType(type: String): Boolean {
-        // Strip array markers
-        val baseType = type.trimStart('[')
-        // Primitive types are single characters that are not 'L' (which starts object types)
-        return baseType.length == 1 && baseType[0] in "IJZBCSFDV"
-    }
-    
+        
     /**
      * Provide hover information for primitive types.
      */

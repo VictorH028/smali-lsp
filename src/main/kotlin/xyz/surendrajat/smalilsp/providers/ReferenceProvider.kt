@@ -513,7 +513,7 @@ class ReferenceProvider(
         }
         
         // Extract all class references from the descriptor
-        val classRefs = extractClassRefsFromDescriptor(method.descriptor)
+        val classRefs = Types.parseTypeSequence(method.descriptor).mapNotNull { it.className }
         
         // Find which class reference the cursor is on
         var searchStart = descriptorIndex
@@ -530,58 +530,7 @@ class ReferenceProvider(
         
         return null
     }
-    
-    /**
-     * Extract all class references from a method descriptor.
-     * (ILjava/lang/String;[LBundle;)Ljava/lang/Object;
-     * Returns: [Ljava/lang/String;, LBundle;, Ljava/lang/Object;]
-     * Excludes primitives and primitive arrays.
-     */
-    private fun extractClassRefsFromDescriptor(descriptor: String): List<String> {
-        val refs = mutableListOf<String>()
-        var i = 0
         
-        while (i < descriptor.length) {
-            when (descriptor[i]) {
-                'L' -> {
-                    // Class type: Lpath/to/Class;
-                    val end = descriptor.indexOf(';', startIndex = i)
-                    if (end >= 0) {
-                        refs.add(descriptor.substring(i, end + 1))
-                        i = end + 1
-                    } else {
-                        i++
-                    }
-                }
-                '[' -> {
-                    // Array type
-                    while (i < descriptor.length && descriptor[i] == '[') {
-                        i++
-                    }
-                    if (i < descriptor.length && descriptor[i] == 'L') {
-                        // Object array - extract element type
-                        val end = descriptor.indexOf(';', startIndex = i)
-                        if (end >= 0) {
-                            refs.add(descriptor.substring(i, end + 1))  // Element class only
-                            i = end + 1
-                        } else {
-                            i++
-                        }
-                    } else {
-                        // Primitive array - skip
-                        i++
-                    }
-                }
-                else -> {
-                    // Primitive or other character - skip
-                    i++
-                }
-            }
-        }
-        
-        return refs
-    }
-    
     /**
      * Find all references to a label within the same method.
      * Labels are local to the method they're defined in.

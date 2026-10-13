@@ -114,7 +114,7 @@ class TypeHierarchyProvider(
         val classDef = file.classDefinition
         val kind = if (classDef.modifiers.contains("interface")) SymbolKind.Interface else SymbolKind.Class
         val item = TypeHierarchyItem(
-            extractSimpleName(classDef.name),
+            Types.simpleName(classDef.name),
             kind,
             file.uri,
             classDef.range,
@@ -128,7 +128,7 @@ class TypeHierarchyProvider(
         val uri = index.getUri(className) ?: "external:$className"
         val zeroRange = Range(Position(0, 0), Position(0, 0))
         val item = TypeHierarchyItem(
-            extractSimpleName(className),
+            Types.simpleName(className),
             SymbolKind.Class,
             uri,
             zeroRange,
@@ -136,9 +136,5 @@ class TypeHierarchyProvider(
             className
         )
         return item
-    }
-
-    private fun extractSimpleName(fullName: String): String {
-        return Types.simpleName(fullName)
     }
 }
