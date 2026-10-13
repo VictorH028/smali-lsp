@@ -44,9 +44,9 @@ class ImplementationProvider(private val index: WorkspaceIndex) {
             .map { Location(it.file.uri, it.nameSpan.toRange()) }
             .filter { caret == null || it.uri != caret.first || it.range != caret.second }
 
-    /** The classes below [className], at their `.class` name tokens, in file order. */
+    /** The classes below [className], at their `.class` name tokens, in file order. Every class is below `Object`; that answer is no help and is left empty. */
     private fun subtypes(className: String): List<Location> =
-        index.getAllSubclasses(className)
+        if (className == "Ljava/lang/Object;") emptyList() else index.getAllSubclasses(className)
             .mapNotNull { index.findClass(it) }
             .map { Location(it.uri, it.classDefinition.nameSpan.toRange()) }
             .sortedBy { it.uri }

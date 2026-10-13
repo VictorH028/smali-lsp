@@ -43,5 +43,6 @@ class ImplementationProviderTest {
         assertEquals(listOf("Base.smali" to 0, "Child.smali" to 0), at("file:///Shape.smali", shape, ".class", "Lcom/Shape;"))
         assertEquals(listOf("Base.smali" to 0, "Child.smali" to 0), at("file:///User.smali", user, "new-instance", "Lcom/Shape;"), "from a type operand")
         assertEquals(emptyList<Pair<String, Int>>(), at("file:///Child.smali", child, ".class", "Lcom/Child;"))
+        assertEquals(emptyList<Pair<String, Int>>(), at("file:///User.smali", user, ".super", "Ljava/lang/Object;"), "every class is below Object; the answer would be the whole workspace")
     }
 }
