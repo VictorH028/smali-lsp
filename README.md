@@ -8,7 +8,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 - **Go to Definition** — jump from any instruction to its target (classes, methods, fields, labels)
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching
-- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection
+- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection; registers (`p1` is which parameter, `v3` is which local, with `.param`/`.local` names)
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
 - **Code Lens** — inline reference counts on methods and fields
@@ -16,8 +16,8 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors, undefined or duplicate labels, unresolved class references
-- **Implementations, document highlight, folding** — implementors and overrides of a method, occurrences of a symbol in its file (reads and writes apart), foldable methods and directive blocks
+- **Diagnostics** — syntax errors, undefined or duplicate labels, unresolved class references, and what the assembler would reject after a hand edit: a register the method does not declare or that the instruction form cannot address (`move` v0..v15, `invoke-*` five registers below v16 unless `/range`), a literal that does not fit (`const/4` holds -8..7), a `move-result` not right after a call
+- **Implementations, document highlight, folding** — implementors and overrides of a method, occurrences of a symbol or a register in its file (reads and writes apart), foldable methods and directive blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** (224 opcode tokens, including `invoke-custom`, `invoke-polymorphic` and method handles); navigation covers invoke-\*, field access, type operands, labels and strings
 

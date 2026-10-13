@@ -277,10 +277,17 @@ whose declarations are unreachable.
 - **Completion**: after `->`, the members of the owner and of its workspace supertypes (own
   members first, overrides hiding what they override); class names ranked by match kind,
   length and name so the list is stable across keystrokes; opcodes at the start of a line.
-- **Diagnostics**: syntax errors on the offending token and the file-local label checks (a
-  jump to an undefined label, a label defined twice) are published at once; unresolved classes
-  in `.super`, `.implements`, field types and instruction targets wait for indexing to finish
-  and skip platform SDK classes.
+- **Diagnostics**: syntax errors on the offending token and the file-local checks are
+  published at once: a jump to an undefined label, a label defined twice, and the assembler
+  checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per
+  operand, five 4-bit registers for `35c` calls, literal ranges for `11n`/`21s`/`21h`/`22b`/`22s`,
+  `move-result` placement); unresolved classes in `.super`, `.implements`, field types and
+  instruction targets wait for indexing to finish and skip platform SDK classes.
+- **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
+  decodes one instruction line (opcode, register tokens with columns, range form, literal) and
+  `RegisterFrame` maps `pN` to its frame slot from `.registers`/`.locals` and the parameter
+  types; hover and document highlight on a register scan the method's lines on demand, and the
+  assembler checks scan the edited file's lines in the diagnostics pass.
 
 ### 5.3 What still reads line text
 
