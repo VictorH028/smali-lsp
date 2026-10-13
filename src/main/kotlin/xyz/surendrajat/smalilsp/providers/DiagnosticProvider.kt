@@ -106,10 +106,7 @@ class DiagnosticProvider(
             if (!index.hasClass(superClass) && !Types.isSdkClass(superClass)) {
                 diagnostics.add(
                     createDiagnostic(
-                        range = Range(
-                            Position(file.classDefinition.range.start.line, 0),
-                            Position(file.classDefinition.range.end.line, 100)
-                        ),
+                        range = file.classDefinition.superClassRange ?: file.classDefinition.nameSpan.toRange(),
                         message = "Superclass '$superClass' not found in workspace or SDK",
                         severity = DiagnosticSeverity.Warning,
                         code = "undefined-class"
@@ -123,10 +120,7 @@ class DiagnosticProvider(
             if (!index.hasClass(interfaceName) && !Types.isSdkClass(interfaceName)) {
                 diagnostics.add(
                     createDiagnostic(
-                        range = Range(
-                            Position(file.classDefinition.range.start.line, 0),
-                            Position(file.classDefinition.range.end.line, 100)
-                        ),
+                        range = file.classDefinition.interfaceRanges[interfaceName] ?: file.classDefinition.nameSpan.toRange(),
                         message = "Interface '$interfaceName' not found in workspace or SDK",
                         severity = DiagnosticSeverity.Warning,
                         code = "undefined-class"
@@ -143,7 +137,7 @@ class DiagnosticProvider(
                         if (!isKnownClass(instruction.className)) {
                             diagnostics.add(
                                 createDiagnostic(
-                                    range = instruction.range,
+                                    range = instruction.ownerSpan?.toRange() ?: instruction.range,
                                     message = "Class '${instruction.className}' not found in workspace or SDK",
                                     severity = DiagnosticSeverity.Warning,
                                     code = "undefined-class"
@@ -155,7 +149,7 @@ class DiagnosticProvider(
                         if (!isKnownClass(instruction.className)) {
                             diagnostics.add(
                                 createDiagnostic(
-                                    range = instruction.range,
+                                    range = instruction.ownerSpan?.toRange() ?: instruction.range,
                                     message = "Class '${instruction.className}' not found in workspace or SDK",
                                     severity = DiagnosticSeverity.Warning,
                                     code = "undefined-class"
@@ -167,7 +161,7 @@ class DiagnosticProvider(
                         if (!isKnownClass(instruction.className)) {
                             diagnostics.add(
                                 createDiagnostic(
-                                    range = instruction.range,
+                                    range = instruction.typeSpan?.toRange() ?: instruction.range,
                                     message = "Class '${instruction.className}' not found in workspace or SDK",
                                     severity = DiagnosticSeverity.Warning,
                                     code = "undefined-class"
@@ -192,7 +186,7 @@ class DiagnosticProvider(
             if (typeClass != null && !index.hasClass(typeClass) && !Types.isSdkClass(typeClass)) {
                 diagnostics.add(
                     createDiagnostic(
-                        range = field.range,
+                        range = field.typeSpan.toRange(),
                         message = "Type '$typeClass' not found in workspace or SDK",
                         severity = DiagnosticSeverity.Information,
                         code = "undefined-class"
