@@ -17,6 +17,7 @@ import xyz.surendrajat.smalilsp.util.Types
 class HoverProvider(
     private val workspaceIndex: WorkspaceIndex
 ) {
+    private val references = ReferenceProvider(workspaceIndex)
 
     fun provideHover(uri: String, position: Position): Hover? {
         val file = workspaceIndex.findFileByUri(uri) ?: return null
@@ -24,8 +25,8 @@ class HoverProvider(
             null -> hoverForOpcodeKeyword(uri, position)
             is Symbol.ClassDecl -> hoverForClass(symbol.classDef)
             is Symbol.ClassRef -> hoverForClassReference(symbol.type)
-            is Symbol.MethodDecl -> hoverForMethod(symbol.method)
-            is Symbol.FieldDecl -> hoverForField(symbol.fieldDef)
+            is Symbol.MethodDecl -> hoverForMethod(symbol.method, file.classDefinition.name)
+            is Symbol.FieldDecl -> hoverForField(symbol.fieldDef, file.classDefinition.name)
             is Symbol.MethodRef -> hoverForMethodReference(symbol.instruction.className, symbol.instruction.methodName, symbol.instruction.descriptor)
             is Symbol.FieldRef -> hoverForFieldReference(symbol.instruction.className, symbol.instruction.fieldName, symbol.instruction.fieldType)
             is Symbol.Primitive -> hoverForPrimitiveType(symbol.type)
@@ -82,9 +83,11 @@ class HoverProvider(
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    private fun hoverForMethod(method: MethodDefinition): Hover {
+    /** The declaration's signature, where it is declared, and how many calls bind to it (through subclasses and overrides). */
+    private fun hoverForMethod(method: MethodDefinition, className: String): Hover {
         val md = buildString {
             append("**Method:** `${method.name}`\n\n")
+            append("**Declared in:** `${Types.readableName(className)}`\n\n")
             if (method.modifiers.isNotEmpty()) {
                 append("**Modifiers:** ${method.modifiers.joinToString(", ")}\n\n")
             }
@@ -100,18 +103,22 @@ class HoverProvider(
                 }
                 append("\n")
             }
-            append("**Returns:** `$returnType`")
+            append("**Returns:** `$returnType`\n\n")
+            append("**References:** ${references.methodFamily(className, method.name, method.descriptor).usages.size}")
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    private fun hoverForField(field: FieldDefinition): Hover {
+    /** The field's type, where it is declared, and how many accesses bind to it. */
+    private fun hoverForField(field: FieldDefinition, className: String): Hover {
         val md = buildString {
             append("**Field:** `${field.name}`\n\n")
+            append("**Declared in:** `${Types.readableName(className)}`\n\n")
             if (field.modifiers.isNotEmpty()) {
                 append("**Modifiers:** ${field.modifiers.joinToString(", ")}\n\n")
             }
-            append("**Type:** `${Types.readableName(field.type)}`")
+            append("**Type:** `${Types.readableName(field.type)}`\n\n")
+            append("**References:** ${references.fieldFamily(className, field.name, field.type).usages.size}")
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
@@ -148,7 +155,7 @@ class HoverProvider(
     }
 
     fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
-        workspaceIndex.resolveMethod(className, methodName, descriptor)?.let { return hoverForMethod(it.method) }
+        workspaceIndex.resolveMethod(className, methodName, descriptor)?.let { return hoverForMethod(it.method, it.file.classDefinition.name) }
 
         val md = buildString {
             append("**Method:** `${className}.${methodName}`\n\n")
@@ -163,7 +170,7 @@ class HoverProvider(
     }
 
     fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
-        workspaceIndex.resolveField(className, fieldName, fieldType)?.let { return hoverForField(it.field) }
+        workspaceIndex.resolveField(className, fieldName, fieldType)?.let { return hoverForField(it.field, it.file.classDefinition.name) }
 
         val md = buildString {
             append("**Field:** `${className}.${fieldName}`\n\n")

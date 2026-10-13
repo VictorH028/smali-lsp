@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.providers.HoverProvider
+import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.shared.openSource
 import xyz.surendrajat.smalilsp.shared.positionOf
 import kotlin.test.assertEquals
@@ -188,7 +189,8 @@ class HoverTypeOperandTest {
 
     private val uri = "file:///Probe.smali"
     private val probeHover = "**Class:** `com.app.Probe`\n\n**Modifiers:** public\n\n**Extends:** `java.lang.Object`\n\n**Methods:** 2  **Fields:** 2"
-    private val initHover = "**Method:** `<init>`\n\n**Modifiers:** public, constructor\n\n**Signature:** `()void`\n\n**Returns:** `void`"
+    private fun initHover() = "**Method:** `<init>`\n\n**Declared in:** `com.app.Probe`\n\n**Modifiers:** public, constructor\n\n**Signature:** `()void`\n\n**Returns:** `void`\n\n**References:** " +
+        ReferenceProvider(index).findMethodReferences("Lcom/app/Probe;", "<init>", "()V", includeDeclaration = false).size
 
     private lateinit var index: WorkspaceIndex
     private lateinit var provider: HoverProvider
@@ -206,11 +208,12 @@ class HoverTypeOperandTest {
     fun `the member name hovers, its keywords and modifiers do not`() {
         assertNull(hoverAt("constructor", ".method", 2))
         assertNull(hoverAt("constructor", "constructor", 3))
-        assertEquals(initHover, hoverAt("constructor", "<init>", 1))
-        assertEquals(initHover, hoverAt("invoke-direct {v2}", "<init>", 1), "the reference resolves to the declaration")
+        assertEquals(initHover(), hoverAt("constructor", "<init>", 1))
+        assertEquals(initHover(), hoverAt("invoke-direct {v2}", "<init>", 1), "the reference resolves to the declaration")
         assertNull(hoverAt("items:", ".field", 2))
         assertNull(hoverAt("items:", "static"))
-        assertEquals("**Field:** `items`\n\n**Modifiers:** private, static, final\n\n**Type:** `java.lang.String[]`", hoverAt("items:", "items", 2))
+        val itemAccesses = ReferenceProvider(index).findFieldReferences("Lcom/app/Probe;", "items", "[Ljava/lang/String;", includeDeclaration = false).size
+        assertEquals("**Field:** `items`\n\n**Declared in:** `com.app.Probe`\n\n**Modifiers:** private, static, final\n\n**Type:** `java.lang.String[]`\n\n**References:** $itemAccesses", hoverAt("items:", "items", 2))
         assertNull(hoverAt(".end method", ".end", 2))
     }
 
@@ -238,7 +241,7 @@ class HoverTypeOperandTest {
         assertEquals(longArrayHover, hoverAt("new-array", "[J", 2), "end of the line")
         assertEquals(probeHover, hoverAt("invoke-static", "->"), "the arrow right after the owner")
         val name = hoverAt(".method public static run", "(")
-        assertTrue(name != null && name.startsWith("**Method:** `run`\n\n**Modifiers:** public, static\n\n"), "the parenthesis right after the name: $name")
+        assertTrue(name != null && name.startsWith("**Method:** `run`\n\n**Declared in:** `com.app.Probe`\n\n**Modifiers:** public, static\n\n"), "the parenthesis right after the name: $name")
         val call = hoverAt("invoke-static", ")")
         assertTrue(call != null && call.startsWith("**Method:** `run`\n\n"), "a descriptor delimiter in a call is the method: $call")
         assertNull(hoverAt(".method public static run", ")"), "a descriptor delimiter in a declaration is nothing")
