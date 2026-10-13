@@ -1131,6 +1131,8 @@ statement:
     | methodDirective
     ;
 
+// EOF is mandatory: without it the parser would stop silently at the first construct it
+// cannot match and drop the rest of the file without reporting a syntax error.
 parse:
-    (statement | annotationDirective)+
+    (statement | annotationDirective)+ EOF
     ;
