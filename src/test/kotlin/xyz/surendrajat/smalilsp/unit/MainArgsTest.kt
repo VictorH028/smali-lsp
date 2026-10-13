@@ -1,7 +1,7 @@
 package xyz.surendrajat.smalilsp.unit
 
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNull
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.Options
 import xyz.surendrajat.smalilsp.parseArgs

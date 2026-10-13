@@ -1,6 +1,6 @@
 package xyz.surendrajat.smalilsp.unit.parser
 
-import org.junit.jupiter.api.Assertions.assertEquals
+import kotlin.test.assertEquals
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.core.ConstStringInstruction
 import xyz.surendrajat.smalilsp.parser.SmaliParser
@@ -85,6 +85,6 @@ class StringLiteralLexingTest {
         val result = parser.parseWithErrors("file:///C.smali", content)
         assertEquals(emptyList<SmaliParser.SyntaxError>(), result.syntaxErrors)
         assertEquals(listOf("Q", "A", "U"), result.smaliFile!!.fields.map { it.name })
-        assertEquals(listOf("after"), result.smaliFile!!.methods.map { it.name })
+        assertEquals(listOf("after"), result.smaliFile.methods.map { it.name })
     }
 }

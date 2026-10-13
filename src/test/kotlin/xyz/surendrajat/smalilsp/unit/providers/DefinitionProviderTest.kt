@@ -2,8 +2,8 @@ package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex

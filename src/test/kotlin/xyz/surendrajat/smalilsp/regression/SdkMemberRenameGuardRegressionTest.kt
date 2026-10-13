@@ -33,7 +33,7 @@ class SdkMemberRenameGuardRegressionTest {
     private fun indexContent(uri: String, content: String) {
         val file = parser.parse(uri, content)
         assertNotNull(file, "test fixture must parse")
-        index.indexFile(file!!)
+        index.indexFile(file)
         index.setDocumentContent(uri, content)
     }
 
@@ -109,7 +109,7 @@ class SdkMemberRenameGuardRegressionTest {
         val nameIdx = callerContent.lines()[4].indexOf("util()V")
         val edit = renameProvider.rename(callerUri, Position(4, nameIdx + 1), "helper")
         assertNotNull(edit, "workspace method rename from a call site must keep working")
-        assertTrue(edit!!.changes.containsKey(helperUri), "declaration must be renamed")
+        assertTrue(edit.changes.containsKey(helperUri), "declaration must be renamed")
         assertTrue(edit.changes.containsKey(callerUri), "call site must be renamed")
     }
 }

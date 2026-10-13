@@ -2,10 +2,10 @@ package xyz.surendrajat.smalilsp.integration.lsp
 
 import com.google.gson.JsonObject
 import org.eclipse.lsp4j.SymbolKind
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import xyz.surendrajat.smalilsp.shared.LspStdioClient
@@ -207,7 +207,7 @@ class LspStdioTest {
             while (client.registrations.isEmpty() && System.nanoTime() < deadline) { client.drain(); Thread.sleep(50) }
             val registration = client.registrations.firstOrNull()?.getAsJsonArray("registrations")?.firstOrNull()?.asJsonObject
             assertNotNull(registration, "server must register a workspace/didChangeWatchedFiles watcher; requests seen: ${client.serverRequests}")
-            assertEquals("workspace/didChangeWatchedFiles", registration!!["method"].asString)
+            assertEquals("workspace/didChangeWatchedFiles", registration["method"].asString)
             val globs = registration.getAsJsonObject("registerOptions").getAsJsonArray("watchers").map { it.asJsonObject["globPattern"].asString }
             assertEquals(listOf("**/*.smali"), globs)
             client.result("shutdown"); client.notify("exit")

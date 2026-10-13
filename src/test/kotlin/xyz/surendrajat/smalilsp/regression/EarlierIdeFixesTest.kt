@@ -2,9 +2,9 @@ package xyz.surendrajat.smalilsp.regression
 
 import java.io.File
 import org.eclipse.lsp4j.Position
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.loadVersionInfo
@@ -30,7 +30,7 @@ class EarlierIdeFixesTest {
         assertEquals(plain.indexOf("Lcom/app/Bom;"), file.classDefinition.nameSpan.start, "columns ignore the BOM, as the editor does")
         val hover = HoverProvider(index).provideHover("file:///Bom.smali", Position(0, 15))
         assertNotNull(hover)
-        assertTrue(hover!!.contents.right.value.contains("com.app.Bom"))
+        assertTrue(hover.contents.right.value.contains("com.app.Bom"))
         assertTrue(DiagnosticProvider(SmaliParser(index.strings), index).computeDiagnostics("file:///Bom.smali", withBom).isEmpty())
     }
 

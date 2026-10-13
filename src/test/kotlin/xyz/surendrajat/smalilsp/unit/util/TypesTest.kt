@@ -1,10 +1,10 @@
 package xyz.surendrajat.smalilsp.unit.util
 
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.util.Types
 
@@ -197,7 +197,7 @@ class TypesTest {
         assertEquals("I", Types.typeAtOffset("(I)V", 1)?.type)
         val array = Types.typeAtOffset("[I", 0)
         assertNotNull(array)
-        assertEquals("[I", array!!.type)
+        assertEquals("[I", array.type)
         assertTrue(array.isArray)
     }
 
