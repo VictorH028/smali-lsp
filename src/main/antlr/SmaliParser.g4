@@ -132,7 +132,7 @@ referenceOrArrayType:       QUALIFIED_TYPE_NAME | arrayType;
 
 nonVoidType:                QUALIFIED_TYPE_NAME | primitiveType | arrayType;
 
-anyType:                    nonVoidType | VOID_TYPE;
+anyType:                    QUALIFIED_TYPE_NAME | primitiveType | arrayType | VOID_TYPE;
 
 nullLiteral:                NULL_LITERAL;
 
@@ -698,15 +698,13 @@ invokeConstMethodHandleInstruction: OP_CONST_METHOD_HANDLE IDENTIFIER COMMA meth
 
 invokeConstMethodTypeInstruction:   OP_CONST_METHOD_TYPE IDENTIFIER COMMA methodProto;
 
-methodInvocationTarget:         referenceOrArrayType ARROW methodSignature;
+methodInvocationTarget:         (QUALIFIED_TYPE_NAME | arrayType) ARROW methodSignature;
 
-fieldInvocationTarget:          referenceOrArrayType ARROW fieldNameAndType;
+fieldInvocationTarget:          (QUALIFIED_TYPE_NAME | arrayType) ARROW fieldNameAndType;
 
 // Fields and methods
 
-fieldName:                  SUB? identifier;  // Allow -prefixed IDENTIFIER names
-
-fieldNameAndType:           fieldName COLON anyType;
+fieldNameAndType:           SUB? identifier COLON anyType;
 
 fieldDirective:             FIELD_DIRECTIVE fieldModifier* fieldNameAndType (ASSIGN assignableValue)? fieldBody? FIELD_END_DIRECTIVE?;
 
@@ -734,7 +732,7 @@ annotationType:             referenceType;
 
 enumFieldReference:         ENUM_DIRECTIVE fieldInvocationTarget;
 
-methodReference:            referenceOrArrayType ARROW methodSignature;
+methodReference:            (QUALIFIED_TYPE_NAME | arrayType) ARROW methodSignature;
 
 subannotation:              SUBANNOTATION_DIRECTIVE annotationType annotationField* SUBANNOTATION_END_DIRECTIVE;
 
@@ -742,7 +740,7 @@ annotationFieldValue:       (assignableValue | methodReference | referenceType |
 
 annotationValueScoped:      LBRACE (annotationFieldValue (COMMA annotationFieldValue)*)? RBRACE;
 
-annotationField:            fieldName ASSIGN (annotationFieldValue|annotationValueScoped);
+annotationField:            SUB? identifier ASSIGN (annotationFieldValue|annotationValueScoped);
 
 annotationDirective:        ANNOTATION_DIRECTIVE annotationScope annotationType annotationField* ANNOTATION_END_DIRECTIVE;
 
@@ -1057,17 +1055,8 @@ sparseSwitchDirective:      SPARSE_SWITCH_DIRECTIVE sparseSwitchDirectiveValue* 
 
 implementsDirective:        IMPLEMENTS_DIRECTIVE referenceType;
 
-statement:
-    classDirective
-    | superDirective
-    | sourceDirective
-    | implementsDirective
-    | fieldDirective
-    | methodDirective
-    ;
-
 // EOF is mandatory: without it the parser would stop silently at the first construct it
 // cannot match and drop the rest of the file without reporting a syntax error.
 parse:
-    (statement | annotationDirective)+ EOF
+    (classDirective | superDirective | sourceDirective | implementsDirective | fieldDirective | methodDirective | annotationDirective)+ EOF
     ;
