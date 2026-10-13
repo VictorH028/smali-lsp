@@ -476,7 +476,7 @@ class WorkspaceIndex {
             return lines.getOrNull(lineIndex)
         }
         return try {
-            File(URI(uri)).readLines().getOrNull(lineIndex)
+            File(URI(uri)).bufferedReader().useLines { it.elementAtOrNull(lineIndex) }
         } catch (_: Exception) {
             null
         }
