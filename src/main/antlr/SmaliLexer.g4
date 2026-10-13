@@ -398,13 +398,17 @@ BOOL_LITERAL:       'true'
 
 NULL_LITERAL:       'null';
 
-CHAR_LITERAL:       '\'' (CHARACTER) '\'';
+CHAR_LITERAL:       '\'' CharLiteralChar '\'';
 
-STRING_LITERAL:     '"' (CHARACTER)* '"';
+STRING_LITERAL:     '"' StringLiteralChar* '"';
 
 IDENTIFIER:         SimpleName;
 
-fragment CHARACTER: (~['\\\r\n] | EscapeSequence);
+// A string may contain an unescaped apostrophe and a char literal an unescaped quote; each only
+// excludes its own delimiter. Excluding the wrong one made a string run to the last quote on the
+// line, merging `"a", "b"` into one token.
+fragment StringLiteralChar: (~["\\\r\n] | EscapeSequence);
+fragment CharLiteralChar:   (~['\\\r\n] | EscapeSequence);
 
 WS  :  [ \t\r\n\u000C]+ -> skip
     ;
