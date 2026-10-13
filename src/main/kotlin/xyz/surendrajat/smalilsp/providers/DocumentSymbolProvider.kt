@@ -69,13 +69,8 @@ class DocumentSymbolProvider {
             fieldSymbol.range = field.range
             fieldSymbol.selectionRange = field.nameSpan.toRange()
             
-            // Detail: type
-            val typeClass = Types.className(field.type)
-            fieldSymbol.detail = if (typeClass != null) {
-                Types.readableName(typeClass)
-            } else {
-                field.type
-            }
+            // Detail: the type as Java would write it (`int`, `byte[]`, `java.lang.String[]`)
+            fieldSymbol.detail = Types.readableName(field.type)
             
             children.add(fieldSymbol)
         }
