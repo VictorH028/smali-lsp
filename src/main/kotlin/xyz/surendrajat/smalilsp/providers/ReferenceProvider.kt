@@ -6,13 +6,14 @@ import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
-/** One declaration of a member: the file, the name token and the whole declaration. */
-data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val range: Range, val isRoot: Boolean)
+/** One declaration of a member: the file and the name token. */
+data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot: Boolean)
 
 /** A member's declarations (the root first, then the overrides of a virtual method) and the sites that bind to them. */
 class MemberFamily(val declarations: List<MemberDeclaration>, val usages: List<Location>) {
+    /** The usages, preceded by the root declarations' name tokens when asked — the same spot go-to-definition lands on. */
     fun references(includeDeclaration: Boolean): List<Location> =
-        if (includeDeclaration) declarations.filter { it.isRoot }.map { Location(it.file.uri, it.range) } + usages else usages
+        if (includeDeclaration) declarations.filter { it.isRoot }.map { Location(it.file.uri, it.nameSpan.toRange()) } + usages else usages
 }
 
 /**
@@ -62,7 +63,7 @@ class ReferenceProvider(
         val locations = mutableListOf<Location>()
 
         if (includeDeclaration) {
-            workspaceIndex.findClass(className)?.let { locations.add(Location(it.uri, it.classDefinition.range)) }
+            workspaceIndex.findClass(className)?.let { locations.add(Location(it.uri, it.classDefinition.nameSpan.toRange())) }
         }
 
         for (usageUri in workspaceIndex.findClassUsages(className)) {
@@ -115,11 +116,11 @@ class ReferenceProvider(
         }
         val roots = if (climb && binding == Binding.Virtual) workspaceIndex.rootMethodDeclarations(declaration, methodName, descriptor) else listOf(declaration)
         return family(
-            roots = roots.map { MemberDeclaration(it.file, it.method.nameSpan, it.method.range, isRoot = true) },
+            roots = roots.map { MemberDeclaration(it.file, it.method.nameSpan, isRoot = true) },
             binding = binding,
             usagesOf = { owner -> workspaceIndex.findMethodUsages(owner, methodName, descriptor) },
             bindsTo = { owner -> workspaceIndex.resolveMethod(owner, methodName, descriptor)?.file?.classDefinition?.name },
-            declaredIn = { file -> file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { MemberDeclaration(file, it.nameSpan, it.range, isRoot = false) } }
+            declaredIn = { file -> file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { MemberDeclaration(file, it.nameSpan, isRoot = false) } }
         )
     }
 
@@ -128,7 +129,7 @@ class ReferenceProvider(
         val declaration = workspaceIndex.resolveField(className, fieldName, fieldType)
             ?: return MemberFamily(emptyList(), workspaceIndex.findFieldUsages(className, fieldName, fieldType))
         return family(
-            roots = listOf(MemberDeclaration(declaration.file, declaration.field.nameSpan, declaration.field.range, isRoot = true)),
+            roots = listOf(MemberDeclaration(declaration.file, declaration.field.nameSpan, isRoot = true)),
             binding = Binding.Inherited,
             usagesOf = { owner -> workspaceIndex.findFieldUsages(owner, fieldName, fieldType) },
             bindsTo = { owner -> workspaceIndex.resolveField(owner, fieldName, fieldType)?.file?.classDefinition?.name },

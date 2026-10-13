@@ -202,6 +202,9 @@ class MemberFamilyTest {
         assertEquals(everyAreaCall, referencesAt("file:///Caller.smali", caller, "Lcom/Other;->area", "area"), "from a call on another implementor")
         val withDeclaration = ReferenceProvider(index).findReferences("file:///Child.smali", child.positionOf(".method public area", "area"), includeDeclaration = true)
         assertEquals(listOf("file:///Shape.smali"), withDeclaration.filter { it.uri != "file:///Caller.smali" }.map { it.uri }, "the declaration entry is the root, not every override")
+        val declaration = withDeclaration.first { it.uri == "file:///Shape.smali" }
+        assertEquals(shape.positionOf(".method public abstract area", "area"), declaration.range.start, "the declaration entry is the name token")
+        assertEquals("area".length, declaration.range.end.character - declaration.range.start.character)
         val edit = RenameProvider(index).rename("file:///Child.smali", child.positionOf(".method public area", "area"), "size")!!
         assertEquals(setOf("file:///Shape.smali", "file:///Base.smali", "file:///Child.smali", "file:///Other.smali", "file:///Caller.smali"), edit.changes.keys)
         assertEquals(everyAreaCall, edit.changes["file:///Caller.smali"]!!.map { it.range.start.line }.sorted())

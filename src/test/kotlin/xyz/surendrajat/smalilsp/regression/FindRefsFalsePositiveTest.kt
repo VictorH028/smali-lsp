@@ -316,9 +316,10 @@ class FindRefsFalsePositiveTest {
             // Assert exactly 3 references (definition + 2 calls)
             assertEquals(3, refs.size, "Expected 3 references (definition + 2 calls), but got ${refs.size}")
             
-            // Verify it found method references, not class references
-            // Method ranges are multi-line (3-6, 8-12, etc), invocation ranges are single-line
-            val hasDefinition = refs.any { it.range.start.line == 3 && it.range.end.line == 6 }
+            // Verify it found method references, not class references: the declaration entry is
+            // the method's name token, the call entries are the name tokens of the invokes
+            val doWorkColumn = lines[3].indexOf("doWork")
+            val hasDefinition = refs.any { it.range.start.line == 3 && it.range.start.character == doWorkColumn && it.range.end.character == doWorkColumn + "doWork".length }
             val hasInvoke1 = refs.any { it.range.start.line == 10 && it.range.end.line == 10 }
             val hasInvoke2 = refs.any { it.range.start.line == 16 && it.range.end.line == 16 }
             
