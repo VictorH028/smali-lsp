@@ -7,6 +7,7 @@ import xyz.surendrajat.smalilsp.parser.SmaliParser
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -82,8 +83,11 @@ class WorkspaceScanner(
                         try {
                             processFile(file)
                             succeeded.incrementAndGet()
-                        } catch (e: Exception) {
-                            logger.warn("Failed to process ${file.absolutePath}: ${e.message}")
+                        } catch (e: OutOfMemoryError) {
+                            throw e
+                        } catch (e: Throwable) {
+                            // Including a StackOverflowError from a pathological file: one bad file must not end the scan
+                            logger.warn("Failed to process ${file.absolutePath}: $e")
                             failed.incrementAndGet()
                         } finally {
                             val current = processed.incrementAndGet()
@@ -130,7 +134,10 @@ class WorkspaceScanner(
             return emptyList()
         }
         
+        // Symlinked directories are skipped: a link back up the tree would otherwise recurse
+        // until the path is too long, and a link elsewhere would index its files twice
         return directory.walkTopDown()
+            .onEnter { it == directory || !Files.isSymbolicLink(it.toPath()) }
             .filter { it.isFile && it.extension == "smali" }
             .toList()
     }

@@ -24,6 +24,7 @@ import ch.qos.logback.core.FileAppender
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -259,10 +260,11 @@ class SmaliLanguageServer : LanguageServer {
         // Progress is a courtesy: only for clients that advertise it, and never a reason to
         // skip indexing — a client that rejects the create request just gets no progress bar.
         val progress = clientSupportsProgress && try {
-            client.createProgress(WorkDoneProgressCreateParams().apply { token = progressToken }).get()
+            // A client that advertised progress but never answers must not hold up indexing
+            client.createProgress(WorkDoneProgressCreateParams().apply { token = progressToken }).get(5, TimeUnit.SECONDS)
             true
         } catch (e: Exception) {
-            logger.warn("Client rejected progress creation, indexing without progress: ${e.message}")
+            logger.warn("Client did not accept progress creation, indexing without progress: ${e.message}")
             false
         }
         if (progress) {
@@ -386,13 +388,12 @@ class SmaliLanguageServer : LanguageServer {
             CompletableFuture.runAsync {
                 try {
                     indexWorkspace(pendingWorkspaceFolders)
+                } catch (e: Throwable) {
+                    logger.error("Failed to index workspace", e)
+                } finally {
+                    // Whatever went wrong, semantic diagnostics must not stay suppressed for the session
                     textDocumentService.indexingComplete = true
                     textDocumentService.refreshDiagnosticsForOpenFiles()
-                } catch (e: Exception) {
-                    logger.error("Failed to index workspace", e)
-                    // Mark indexing complete even on failure so diagnostics aren't permanently suppressed
-                    textDocumentService.indexingComplete = true
-                } finally {
                     indexingDone.complete(null)
                 }
             }

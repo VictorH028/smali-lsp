@@ -42,6 +42,19 @@ class WorkspaceScannerTest {
     }
     
     @Test
+    fun `a symlink loop does not recurse and a symlinked directory is not indexed twice`() = runBlocking {
+        val src = File(tempDir, "smali").apply { mkdirs() }
+        File(src, "A.smali").writeText(".class public Lcom/A;\n.super Ljava/lang/Object;")
+        java.nio.file.Files.createSymbolicLink(File(src, "loop").toPath(), tempDir.toPath())
+        java.nio.file.Files.createSymbolicLink(File(tempDir, "alias").toPath(), src.toPath())
+
+        val result = scanner.scanDirectory(tempDir)
+
+        assertEquals(1, result.filesProcessed)
+        assertEquals(1, index.getStats().classes)
+    }
+
+    @Test
     fun `scan directory with single smali file`() = runBlocking {
         // Create a simple smali file
         val smaliFile = File(tempDir, "Test.smali")
