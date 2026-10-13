@@ -17,8 +17,8 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
 - **Diagnostics** — syntax errors and unresolved class references
-- **Label Navigation** — goto/if-\*/switch targets within methods
-- **All 41 Dalvik instruction types** supported (invoke-\*, iget/iput/sget/sput, new-instance, check-cast, etc.)
+- **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
+- **Every Dalvik instruction parses** (224 opcode tokens, including `invoke-custom`, `invoke-polymorphic` and method handles); navigation covers invoke-\*, field access, type operands, labels and strings
 
 ### MCP Server (for AI agents)
 
@@ -33,13 +33,13 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | `smali_find_definition`  | Go to definition for a symbol at a position                                      |
 | `smali_search_symbols`   | Fuzzy search across classes, methods, fields                                     |
 | `smali_get_stats`        | Index statistics (class/method/field/string counts)                              |
-| `smali_find_references`  | Find all references to a symbol                                                  |
-| `smali_hover`            | Get hover info (signatures, types, class details)                                |
+| `smali_find_references`  | Find all references to a symbol, by position or by class/member name             |
+| `smali_hover`            | Get hover info (signatures, types, class details), by position or by name        |
 | `smali_diagnostics`      | Compute diagnostics for a file                                                   |
 | `smali_document_symbols` | Get document outline (classes, methods, fields)                                  |
 | `smali_search_strings`   | Search const-string literals by substring                                        |
 | `smali_call_graph`       | Incoming/outgoing call graph for a method                                        |
-| `smali_xref_summary`     | Full cross-reference report (subclasses, implementors, callers, field accessors) |
+| `smali_xref_summary`     | Cross-reference report (subclasses, implementors, callers, accessors, referencing classes) |
 | `smali_type_hierarchy`   | Supertypes and subtypes for a class (inheritance chain)                          |
 
 </details>
@@ -55,7 +55,9 @@ The server communicates over **stdio** in standard LSP protocol — no daemon, n
 java -jar build/libs/smali-lsp-<version>.jar lsp
 ```
 
-Configure your editor's LSP client to launch this command for `.smali` files. The server will automatically index the workspace on startup.
+Configure your editor's LSP client to launch this command for `.smali` files. The server indexes the workspace on startup and watches it for changes.
+
+Warnings go to stderr; `--verbose` logs at INFO and `--log-file <path>` also writes the log to a file.
 
 <details>
 <summary>VS Code (via APKLab)</summary>
@@ -141,26 +143,22 @@ Add to your MCP config (`.vscode/mcp.json`,`claude_desktop_config.json`, Cursor 
 
 ## Performance
 
-Tested on real-world APKs (119K smali files, 118K classes, 560K methods):
+Measured on three apktool projects (Mastodon v2.13.4, ProtonMail 7.11.5 and a 76,532-file production app) on a 12-core Apple Silicon laptop, JDK 21:
 
-| Operation          | Avg Latency | Throughput       |
-| ------------------ | ----------- | ---------------- |
-| Goto Definition    | <1ms        | ~4,000 ops/sec   |
-| Find References    | <1ms        | O(1) reverse index |
-| Hover              | <1ms        | —                |
-| Parsing / Indexing | ~0.3ms/file | ~3,300 files/sec |
-| Symbol Search      | <1s         | —                |
+| | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
+| --- | --- | --- | --- |
+| Index the workspace (parallel, cold) | 1.6 s | 2.7 s | 8.8 s |
+| Heap after indexing (AST + index) | — | 383 MB | 1.3 GB |
+| Re-parse and re-index one file on edit, p95 | — | 0.6 ms | 0.8 ms |
 
-- All queries (definition, references, symbols, hover) return in <1s after indexing
-- 99.7% goto-definition coverage (tested on 300K+ methods)
-- 100% parse success rate on 100K+ real smali files
-- 18 KB memory per indexed file (string-interned)
-- Indexed 119K smali files in ~30–36s (warm), ~40s (cold)
-- Indexed 27K smali files in ~6s
+- Definition, hover, references, rename and code lens are index lookups: well under a millisecond each
+- Every file of all three apps parses with zero syntax errors and no lost members (98,686 files)
+- Every workspace invoke and field access resolves to its declaration, as checked by the fixture-invariant tests
+- Single-thread parse throughput: 0.14 ms per file (ProtonMail, 2.7 s for all files)
 
 ## Building
 
-Requires Java 17+ and Gradle 8.8+.
+Requires Java 17+; the Gradle wrapper (9.6) downloads itself.
 
 ```bash
 ./gradlew shadowJar
@@ -176,22 +174,24 @@ ANTLR4 Grammar → SmaliParser → ASTBuilder → WorkspaceIndex → LSP/MCP Pro
                                     WorkspaceScanner (parallel)
 ```
 
-- **Parser**: ANTLR4 with SLL prediction mode (no ambiguities in smali grammar)
-- **Index**: Thread-safe `ConcurrentHashMap` with O(1) lookups, bidirectional class-URI maps, string literal index
-- **Providers**: Position-aware symbol extraction — correctly resolves which of multiple symbols on a line the cursor targets
-- **Scanner**: Parallel file processing with smart APKTool project detection
+- **Parser**: ANTLR4 with SLL prediction; the AST is built by a parse listener and records the span of every navigable token
+- **Index**: files by canonical URI, class hierarchy sets, and packed usage lists retired per file by a generation counter, so a re-index is O(file)
+- **Providers**: resolve the caret from the AST (`SmaliFile.symbolAt`) and answer from the index; one writer thread applies edits, requests wait for the edits sent before them
+- **Scanner**: one coroutine worker per core
+
+See [DESIGN.md](DESIGN.md) for the measured costs and the reasoning.
 
 ## Running Tests
 
-```bash
-# All tests
-./gradlew test
+Run the categories separately; each test fork holds a parsed app in memory:
 
-# By category
+```bash
 ./gradlew test --tests "*.unit.*"
-./gradlew test --tests "*.integration.*"
 ./gradlew test --tests "*.regression.*"
+./gradlew test --tests "*.integration.*"
 ```
+
+The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise.
 
 ## License
 
