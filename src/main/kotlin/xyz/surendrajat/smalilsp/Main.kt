@@ -190,6 +190,7 @@ class SmaliLanguageServer : LanguageServer {
     }
     
     private var pendingWorkspaceFolders: List<WorkspaceFolder> = emptyList()
+    private var clientSupportsProgress = false
 
     @Volatile
     private var shutdownRequested = false
@@ -204,7 +205,12 @@ class SmaliLanguageServer : LanguageServer {
         logger.info("Client: ${params.clientInfo?.name} ${params.clientInfo?.version}")
         logger.info("Workspace folders: ${params.workspaceFolders?.size ?: 0}")
 
-        pendingWorkspaceFolders = params.workspaceFolders ?: emptyList()
+        // Clients that do not support workspace folders send rootUri (or the older rootPath).
+        pendingWorkspaceFolders = params.workspaceFolders
+            ?: params.rootUri?.let { listOf(WorkspaceFolder(it, "root")) }
+            ?: params.rootPath?.let { listOf(WorkspaceFolder(File(it).toURI().toString(), "root")) }
+            ?: emptyList()
+        clientSupportsProgress = params.capabilities?.window?.workDoneProgress == true
 
         return CompletableFuture.completedFuture(createInitializeResult())
     }
@@ -217,19 +223,24 @@ class SmaliLanguageServer : LanguageServer {
 
         val progressToken = Either.forLeft<String, Int>("smali-indexing-${UUID.randomUUID()}")
 
-        // Create progress on client side
-        client.createProgress(WorkDoneProgressCreateParams().apply {
-            token = progressToken
-        }).get()
-
-        // Begin progress
-        client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
-            WorkDoneProgressBegin().apply {
-                title = "Indexing Smali"
-                percentage = 0
-                cancellable = false
-            }
-        )))
+        // Progress is a courtesy: only for clients that advertise it, and never a reason to
+        // skip indexing — a client that rejects the create request just gets no progress bar.
+        val progress = clientSupportsProgress && try {
+            client.createProgress(WorkDoneProgressCreateParams().apply { token = progressToken }).get()
+            true
+        } catch (e: Exception) {
+            logger.warn("Client rejected progress creation, indexing without progress: ${e.message}")
+            false
+        }
+        if (progress) {
+            client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
+                WorkDoneProgressBegin().apply {
+                    title = "Indexing Smali"
+                    percentage = 0
+                    cancellable = false
+                }
+            )))
+        }
 
         try {
             for (folder in folders) {
@@ -247,12 +258,14 @@ class SmaliLanguageServer : LanguageServer {
                             if (percent > lastReportedPercent || processed == total) {
                                 lastReportedPercent = percent
                                 logger.info("Indexing: $processed/$total ($percent%)")
-                                client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
-                                    WorkDoneProgressReport().apply {
-                                        message = "$processed / $total files"
-                                        percentage = percent
-                                    }
-                                )))
+                                if (progress) {
+                                    client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
+                                        WorkDoneProgressReport().apply {
+                                            message = "$processed / $total files"
+                                            percentage = percent
+                                        }
+                                    )))
+                                }
                             }
                         }
 
@@ -275,11 +288,13 @@ class SmaliLanguageServer : LanguageServer {
             // Always end progress — a dropped End leaves the client's status bar
             // stuck on an indefinite "Indexing…" spinner until the server restarts.
             val stats = index.getStats()
-            client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
-                WorkDoneProgressEnd().apply {
-                    message = "Indexed ${stats.classes} classes, ${stats.methods} methods, ${stats.fields} fields"
-                }
-            )))
+            if (progress) {
+                client.notifyProgress(ProgressParams(progressToken, Either.forLeft(
+                    WorkDoneProgressEnd().apply {
+                        message = "Indexed ${stats.classes} classes, ${stats.methods} methods, ${stats.fields} fields"
+                    }
+                )))
+            }
         }
     }
     

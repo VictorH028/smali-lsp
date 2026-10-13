@@ -71,6 +71,17 @@ class LspStdioTest {
         return init
     }
 
+    /** Poll until the workspace index can answer, for sessions where progress reporting is unavailable. */
+    private fun LspStdioClient.awaitIndexed(timeoutSeconds: Long = 20): Boolean {
+        val deadline = System.nanoTime() + timeoutSeconds * 1_000_000_000L
+        while (System.nanoTime() < deadline) {
+            val found = result("workspace/symbol", mapOf("query" to "Callee")).asJsonArray.any { it.asJsonObject["name"].asString == "Lcom/app/Callee;" }
+            if (found) return true
+            Thread.sleep(100)
+        }
+        return false
+    }
+
     private fun LspStdioClient.open(file: File, text: String) =
         notify("textDocument/didOpen", mapOf("textDocument" to mapOf("uri" to file.toURI().toString(), "languageId" to "smali", "version" to 1, "text" to text)))
 
@@ -127,6 +138,41 @@ class LspStdioTest {
             assertTrue(client.result("shutdown").isJsonNull)
             client.notify("exit")
             assertEquals(0, client.waitForExit(), "exit after shutdown returns 0")
+        }
+    }
+
+    @Test
+    fun `rootUri alone is enough to index the workspace`() {
+        writeWorkspace()
+        LspStdioClient().use { client ->
+            client.result("initialize", initParams(client, workspaceFolders = false, rootUri = true))
+            client.notify("initialized")
+            assertTrue(client.awaitIndexed(), "a client that sends rootUri but no workspaceFolders must still get its workspace indexed")
+            client.result("shutdown"); client.notify("exit")
+        }
+    }
+
+    @Test
+    fun `a rejected progress request does not prevent indexing`() {
+        writeWorkspace()
+        LspStdioClient(rejectProgress = true).use { client ->
+            client.result("initialize", initParams(client))
+            client.notify("initialized")
+            assertTrue(client.awaitIndexed(), "indexing must not depend on window/workDoneProgress/create succeeding")
+            client.result("shutdown"); client.notify("exit")
+        }
+    }
+
+    @Test
+    fun `a client without progress support is not asked to create progress`() {
+        writeWorkspace()
+        LspStdioClient().use { client ->
+            client.result("initialize", initParams(client, progress = false))
+            client.notify("initialized")
+            assertTrue(client.awaitIndexed())
+            client.drain()
+            assertFalse("window/workDoneProgress/create" in client.serverRequests, "server must not send progress requests to a client that did not advertise window.workDoneProgress")
+            client.result("shutdown"); client.notify("exit")
         }
     }
 
