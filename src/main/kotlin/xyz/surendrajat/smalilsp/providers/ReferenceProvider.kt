@@ -6,9 +6,18 @@ import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
+/** One declaration of a member: the file, the name token and the whole declaration. */
+data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val range: Range, val isRoot: Boolean)
+
+/** A member's declarations (the root first, then the overrides of a virtual method) and the sites that bind to them. */
+class MemberFamily(val declarations: List<MemberDeclaration>, val usages: List<Location>) {
+    fun references(includeDeclaration: Boolean): List<Location> =
+        if (includeDeclaration) declarations.filter { it.isRoot }.map { Location(it.file.uri, it.range) } + usages else usages
+}
+
 /**
  * Find references. Classes: subclasses, implementors and every use as a type or owner.
- * Methods: every call site, including calls through subclasses. Fields: every access.
+ * Methods and fields: the declaration and every site that binds to it (see [MemberFamily]).
  * Labels: every reference in the method. All answered from the reverse indexes; the symbol
  * under the caret comes from [SmaliFile.symbolAt].
  */
@@ -28,8 +37,8 @@ class ReferenceProvider(
             // A type inside an invoke's descriptor: the user is on a call, so answer with the call's references
             is Symbol.ClassRef -> symbol.descriptorOf?.let { methodReferences(it, includeDeclaration) }
                 ?: findClassReferences(symbol.className, includeDeclaration)
-            is Symbol.MethodDecl -> findMethodReferences(file.classDefinition.name, symbol.method.name, symbol.method.descriptor, includeDeclaration, symbol.method.range)
-            is Symbol.FieldDecl -> findFieldReferences(file.classDefinition.name, symbol.fieldDef.name, symbol.fieldDef.type, includeDeclaration, symbol.fieldDef.range)
+            is Symbol.MethodDecl -> findMethodReferences(file.classDefinition.name, symbol.method.name, symbol.method.descriptor, includeDeclaration)
+            is Symbol.FieldDecl -> findFieldReferences(file.classDefinition.name, symbol.fieldDef.name, symbol.fieldDef.type, includeDeclaration)
             is Symbol.MethodRef -> methodReferences(symbol.instruction, includeDeclaration)
             is Symbol.FieldRef -> fieldReferences(symbol.instruction, includeDeclaration)
             is Symbol.Primitive -> when (val inside = symbol.inside) {
@@ -78,75 +87,87 @@ class ReferenceProvider(
     private fun fieldReferences(instruction: FieldAccessInstruction, includeDeclaration: Boolean): List<Location> =
         findFieldReferences(instruction.className, instruction.fieldName, instruction.fieldType, includeDeclaration)
 
+    /** References to the method a `className->methodName descriptor` reference resolves to: its declaration (when requested and in the workspace), then every call that binds to it. */
+    fun findMethodReferences(className: String, methodName: String, descriptor: String, includeDeclaration: Boolean): List<Location> =
+        methodFamily(className, methodName, descriptor).references(includeDeclaration)
+
+    /** References to the field a reference resolves to: its declaration (when requested and in the workspace), then every access that binds to it. */
+    fun findFieldReferences(className: String, fieldName: String, fieldType: String, includeDeclaration: Boolean): List<Location> =
+        fieldFamily(className, fieldName, fieldType).references(includeDeclaration)
+
     /**
-     * References to the method a `className->methodName descriptor` reference resolves to: its
-     * declaration (when requested and in the workspace), then every call site on the declaring
-     * class or any of its subclasses and implementors. A call through a subclass is the same
-     * method, so the search starts from the class that declares it.
+     * The method's family: its declaration and every call site that binds to it. A call through a
+     * subclass binds to the inherited method unless the subclass redeclares it; the overrides of a
+     * virtual method belong to the family too, since a call on the subclass dispatches to them.
+     * Constructors and private methods bind to their own class only. A method outside the
+     * workspace has no declaration and only the exact owner's call sites.
      */
-    fun findMethodReferences(className: String, methodName: String, descriptor: String, includeDeclaration: Boolean): List<Location> {
+    fun methodFamily(className: String, methodName: String, descriptor: String): MemberFamily {
         val declaration = workspaceIndex.resolveMethod(className, methodName, descriptor)
-        val root = declaration?.file?.classDefinition?.name ?: className
-        return findMethodReferences(root, methodName, descriptor, includeDeclaration && declaration != null, declaration?.method?.range)
+            ?: return MemberFamily(emptyList(), workspaceIndex.findMethodUsages(className, methodName, descriptor))
+        val method = declaration.method
+        val binding = when {
+            method.isConstructor || "private" in method.modifiers -> Binding.OwnClass
+            "static" in method.modifiers -> Binding.Inherited
+            else -> Binding.Virtual
+        }
+        return family(
+            roots = listOf(MemberDeclaration(declaration.file, method.nameSpan, method.range, isRoot = true)),
+            binding = binding,
+            usagesOf = { owner -> workspaceIndex.findMethodUsages(owner, methodName, descriptor) },
+            bindsTo = { owner -> workspaceIndex.resolveMethod(owner, methodName, descriptor)?.file?.classDefinition?.name },
+            declaredIn = { file -> file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { MemberDeclaration(file, it.nameSpan, it.range, isRoot = false) } }
+        )
     }
 
-    /** References to the field the reference resolves to: its declaration (when requested and in the workspace), then every access. */
-    fun findFieldReferences(className: String, fieldName: String, fieldType: String, includeDeclaration: Boolean): List<Location> {
+    /** The field's family: its declaration and every access that binds to it, including through subclasses that inherit it without redeclaring it. */
+    fun fieldFamily(className: String, fieldName: String, fieldType: String): MemberFamily {
         val declaration = workspaceIndex.resolveField(className, fieldName, fieldType)
-        val root = declaration?.file?.classDefinition?.name ?: className
-        return findFieldReferences(root, fieldName, fieldType, includeDeclaration && declaration != null, declaration?.field?.range)
+            ?: return MemberFamily(emptyList(), workspaceIndex.findFieldUsages(className, fieldName, fieldType))
+        return family(
+            roots = listOf(MemberDeclaration(declaration.file, declaration.field.nameSpan, declaration.field.range, isRoot = true)),
+            binding = Binding.Inherited,
+            usagesOf = { owner -> workspaceIndex.findFieldUsages(owner, fieldName, fieldType) },
+            bindsTo = { owner -> workspaceIndex.resolveField(owner, fieldName, fieldType)?.file?.classDefinition?.name },
+            declaredIn = { null }
+        )
     }
 
-    /**
-     * Direct call sites plus calls through subclasses and implementors. Polymorphic matching
-     * needs the class in the workspace: a bundled `androidx` or `kotlin` class qualifies, a
-     * framework class such as `Ljava/lang/Object;` does not (it would list every `Object.<init>`).
-     */
-    private fun findMethodReferences(
-        className: String,
-        methodName: String,
-        descriptor: String,
-        includeDeclaration: Boolean,
-        declarationRange: Range?
-    ): List<Location> {
-        val locations = mutableListOf<Location>()
-
-        if (includeDeclaration && declarationRange != null) {
-            workspaceIndex.findClass(className)?.let { locations.add(Location(it.uri, declarationRange)) }
-        }
-
-        locations.addAll(workspaceIndex.findMethodUsages(className, methodName, descriptor))
-
-        if (workspaceIndex.hasClass(className)) {
-            for (subClass in workspaceIndex.getAllSubclasses(className)) {
-                locations.addAll(workspaceIndex.findMethodUsages(subClass, methodName, descriptor))
-            }
-        }
-
-        return locations
+    /** How a call `Owner->member` finds its declaration. */
+    private enum class Binding {
+        /** In `Owner` itself: constructors, private methods. */
+        OwnClass,
+        /** In `Owner` or the nearest superclass declaring it, without dispatch: static methods, fields. */
+        Inherited,
+        /** As [Inherited], but a redeclaration in a subclass is an override of the same member. */
+        Virtual
     }
 
-    private fun findFieldReferences(
-        className: String,
-        fieldName: String,
-        fieldType: String,
-        includeDeclaration: Boolean,
-        declarationRange: Range?
-    ): List<Location> {
-        val locations = mutableListOf<Location>()
+    private fun family(
+        roots: List<MemberDeclaration>,
+        binding: Binding,
+        usagesOf: (owner: String) -> List<Location>,
+        bindsTo: (owner: String) -> String?,
+        declaredIn: (SmaliFile) -> MemberDeclaration?
+    ): MemberFamily {
+        val declarations = ArrayList(roots)
+        val usages = ArrayList<Location>()
+        val rootNames = roots.mapTo(HashSet()) { it.file.classDefinition.name }
+        for (root in rootNames) usages.addAll(usagesOf(root))
+        if (binding == Binding.OwnClass) return MemberFamily(declarations, usages)
 
-        if (includeDeclaration && declarationRange != null) {
-            workspaceIndex.findClass(className)?.let { locations.add(Location(it.uri, declarationRange)) }
+        val family = HashSet(rootNames)
+        for (root in rootNames) family.addAll(workspaceIndex.getAllSubclasses(root))
+        for (owner in family) {
+            if (owner in rootNames) continue
+            val file = workspaceIndex.findClass(owner) ?: continue
+            if (binding == Binding.Virtual) declaredIn(file)?.let { declarations.add(it) }
+            val sites = usagesOf(owner)
+            if (sites.isEmpty()) continue
+            val target = bindsTo(owner) ?: continue
+            if (if (binding == Binding.Virtual) target in family else target in rootNames) usages.addAll(sites)
         }
-
-        locations.addAll(workspaceIndex.findFieldUsages(className, fieldName, fieldType))
-        if (workspaceIndex.hasClass(className)) {
-            for (subClass in workspaceIndex.getAllSubclasses(className)) {
-                locations.addAll(workspaceIndex.findFieldUsages(subClass, fieldName, fieldType))
-            }
-        }
-
-        return locations
+        return MemberFamily(declarations, usages)
     }
 
     /** Labels are method-local: the definition (if requested) and every reference in [method]. */

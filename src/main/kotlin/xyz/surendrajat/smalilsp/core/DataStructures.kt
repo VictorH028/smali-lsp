@@ -56,7 +56,10 @@ data class MethodDefinition(
     val descriptorSpan: Span = Span(range.start.line, range.start.character, range.start.character),
     /** Every label reference in the body: jumps, `.catch` blocks, switch tables, `fill-array-data`. */
     val labelRefs: List<LabelRef> = emptyList()
-)
+) {
+    /** `<init>` or `<clinit>`: bound to its own class, never inherited or overridden. */
+    val isConstructor: Boolean get() = name == "<init>" || name == "<clinit>"
+}
 
 data class Parameter(
     val type: String,

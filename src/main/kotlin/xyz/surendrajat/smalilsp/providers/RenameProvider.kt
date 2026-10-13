@@ -12,8 +12,8 @@ import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
- * Rename of methods (declaration, overrides in subclasses and every call site), fields
- * (declaration and every access) and labels (definition and every reference in the method,
+ * Rename of methods (every declaration in the family — overrides included — and every call
+ * site that binds to one of them), fields (declaration and every access) and labels (definition and every reference in the method,
  * including `.catch` blocks and switch tables). Classes are not renamed: that would mean
  * renaming the file and rewriting the package path everywhere. `<init>`/`<clinit>` are fixed
  * names. Members of classes that are not in the workspace are not renamed either, since their
@@ -25,6 +25,7 @@ class RenameProvider(
     private val index: WorkspaceIndex
 ) {
     private val logger = LoggerFactory.getLogger(RenameProvider::class.java)
+    private val references = ReferenceProvider(index)
 
     /** The current name and its range when the symbol at the caret can be renamed; null otherwise. */
     fun prepareRename(uri: String, position: Position): Either<Range, PrepareRenameResult>? {
@@ -83,30 +84,16 @@ class RenameProvider(
     /** A label range covers `:name`; the edit replaces only the name. */
     private fun withoutColon(range: Range) = Range(Position(range.start.line, range.start.character + 1), range.end)
 
-    private fun collectMethodRenameEdits(target: RenameTarget.Method, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) {
-        val classes = listOf(target.className) + if (index.hasClass(target.className)) index.getAllSubclasses(target.className) else emptyList()
-        for (className in classes) {
-            // The declaration in this class, if it has one (subclasses may override)
-            index.findClass(className)?.let { file ->
-                file.methods.find { it.name == target.currentName && it.descriptor == target.descriptor }
-                    ?.let { edits.add(file.uri, TextEdit(it.nameSpan.toRange(), newName)) }
-            }
-            for (usage in index.findMethodUsages(className, target.currentName, target.descriptor)) {
-                addUsageEdit(usage, target.currentName, newName, edits)
-            }
-        }
-    }
+    private fun collectMethodRenameEdits(target: RenameTarget.Method, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) =
+        collectFamilyEdits(references.methodFamily(target.className, target.currentName, target.descriptor), target.currentName, newName, edits)
 
-    private fun collectFieldRenameEdits(target: RenameTarget.Field, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) {
-        index.findClass(target.className)?.let { file ->
-            file.fields.find { it.name == target.currentName && it.type == target.type }?.let { edits.add(file.uri, TextEdit(it.nameSpan.toRange(), newName)) }
-        }
-        val classes = listOf(target.className) + if (index.hasClass(target.className)) index.getAllSubclasses(target.className) else emptyList()
-        for (className in classes) {
-            for (usage in index.findFieldUsages(className, target.currentName, target.type)) {
-                addUsageEdit(usage, target.currentName, newName, edits)
-            }
-        }
+    private fun collectFieldRenameEdits(target: RenameTarget.Field, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) =
+        collectFamilyEdits(references.fieldFamily(target.className, target.currentName, target.type), target.currentName, newName, edits)
+
+    /** Every declaration of the member (overrides included) and every site that binds to one of them. */
+    private fun collectFamilyEdits(family: MemberFamily, name: String, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) {
+        for (declaration in family.declarations) edits.add(declaration.file.uri, TextEdit(declaration.nameSpan.toRange(), newName))
+        for (usage in family.usages) addUsageEdit(usage, name, newName, edits)
     }
 
     /** Usage locations are the member-name tokens; anything else is a reference the AST could not place and is skipped. */
