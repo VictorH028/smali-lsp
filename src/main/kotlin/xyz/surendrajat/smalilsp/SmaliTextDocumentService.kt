@@ -108,58 +108,35 @@ class SmaliTextDocumentService(
 
     override fun didOpen(params: DidOpenTextDocumentParams) {
         val uri = params.textDocument.uri
-        val content = params.textDocument.text
-
         logger.debug("didOpen: $uri")
         openFiles.add(uri)
-        index.setDocumentContent(uri, content)
-
-        try {
-            val parseResult = parser.parseWithErrors(uri, content)
-
-            // Index unless the workspace scan already did
-            val existing = index.findFileByUri(uri)
-            if (existing == null) {
-                parseResult.smaliFile?.let { smaliFile ->
-                    index.indexFile(smaliFile)
-                    logger.debug("Indexed: $uri (${smaliFile.classDefinition.name})")
-                } ?: logger.warn("Failed to parse: $uri")
-            } else {
-                logger.debug("Already indexed: $uri")
-            }
-
-            val diagnostics = if (indexingComplete) {
-                diagnosticProvider.computeDiagnosticsFromParseResult(uri, parseResult)
-            } else {
-                diagnosticProvider.computeSyntaxDiagnosticsFromParseResult(parseResult)
-            }
-            publishDiagnostics(uri, diagnostics)
-        } catch (e: Exception) {
-            logger.error("Error processing didOpen for $uri", e)
-        }
+        // The workspace scan may already have indexed this file from disk
+        update(uri, params.textDocument.text, reindex = index.findFileByUri(uri) == null)
     }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
-        val uri = params.textDocument.uri
-        val changes = params.contentChanges
-
-        if (changes.isEmpty()) return
-
         // Full document sync (TextDocumentSyncKind.Full)
-        val content = changes[0].text
-
+        val content = params.contentChanges.firstOrNull()?.text ?: return
+        val uri = params.textDocument.uri
         logger.debug("didChange: $uri")
-        index.setDocumentContent(uri, content)
+        update(uri, content, reindex = true)
+    }
 
+    /**
+     * Stores the buffer, re-parses, indexes when [reindex] and publishes diagnostics. Semantic
+     * diagnostics wait for workspace indexing to complete; otherwise one keystroke mid-indexing
+     * floods the file with undefined-class warnings that vanish once indexing is done.
+     */
+    private fun update(uri: String, content: String, reindex: Boolean) {
+        index.setDocumentContent(uri, content)
         try {
             val parseResult = parser.parseWithErrors(uri, content)
-            parseResult.smaliFile?.let { smaliFile ->
+            val smaliFile = parseResult.smaliFile
+            if (smaliFile == null) {
+                logger.warn("Failed to parse: $uri")
+            } else if (reindex) {
                 index.indexFile(smaliFile)
-                logger.debug("Re-indexed: $uri")
-            } ?: logger.warn("Failed to re-parse: $uri")
-
-            // Semantic diagnostics stay suppressed during indexing, as in didOpen; otherwise
-            // one keystroke mid-indexing floods the file with undefined-class warnings.
+            }
             val diagnostics = if (indexingComplete) {
                 diagnosticProvider.computeDiagnosticsFromParseResult(uri, parseResult)
             } else {
@@ -167,7 +144,7 @@ class SmaliTextDocumentService(
             }
             publishDiagnostics(uri, diagnostics)
         } catch (e: Exception) {
-            logger.error("Error processing didChange for $uri", e)
+            logger.error("Error updating $uri", e)
         }
     }
 
