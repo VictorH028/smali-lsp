@@ -131,7 +131,7 @@ class HoverProvider(
     }
 
     /** [type] may be an array; the hover describes its element class. */
-    private fun hoverForClassReference(type: String): Hover? {
+    fun hoverForClassReference(type: String): Hover? {
         if (Types.isPrimitive(type)) return hoverForPrimitiveType(type)
         val file = workspaceIndex.findClass(Types.className(type) ?: type)
         if (file != null) return hoverForClass(file.classDefinition)
@@ -147,7 +147,7 @@ class HoverProvider(
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    private fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
+    fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
         workspaceIndex.findClass(className)?.methods
             ?.find { it.name == methodName && it.descriptor == descriptor }
             ?.let { return hoverForMethod(it) }
@@ -164,7 +164,7 @@ class HoverProvider(
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    private fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
+    fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
         workspaceIndex.findClass(className)?.fields
             ?.find { it.name == fieldName }
             ?.let { return hoverForField(it) }

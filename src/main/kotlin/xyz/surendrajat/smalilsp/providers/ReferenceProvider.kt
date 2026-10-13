@@ -50,7 +50,7 @@ class ReferenceProvider(
      * Declaration (if requested), `.super`/`.implements` lines of subclasses and implementors,
      * then every other use: instructions, field types, method signatures.
      */
-    private fun findClassReferences(className: String, includeDeclaration: Boolean): List<Location> {
+    fun findClassReferences(className: String, includeDeclaration: Boolean): List<Location> {
         val locations = mutableListOf<Location>()
 
         if (includeDeclaration) {
@@ -73,16 +73,22 @@ class ReferenceProvider(
         return locations.distinctBy { "${it.uri}:${it.range.start.line}:${it.range.start.character}" }
     }
 
-    /** The call's target: its declaration when the class is in the workspace, then every call site. */
-    private fun methodReferences(instruction: InvokeInstruction, includeDeclaration: Boolean): List<Location> {
-        val declaration = workspaceIndex.findClass(instruction.className)?.methods
-            ?.find { it.name == instruction.methodName && it.descriptor == instruction.descriptor }
-        return findMethodReferences(instruction.className, instruction.methodName, instruction.descriptor, includeDeclaration && declaration != null, declaration?.range)
+    private fun methodReferences(instruction: InvokeInstruction, includeDeclaration: Boolean): List<Location> =
+        findMethodReferences(instruction.className, instruction.methodName, instruction.descriptor, includeDeclaration)
+
+    private fun fieldReferences(instruction: FieldAccessInstruction, includeDeclaration: Boolean): List<Location> =
+        findFieldReferences(instruction.className, instruction.fieldName, instruction.fieldType, includeDeclaration)
+
+    /** The method's declaration when its class is in the workspace, then every call site. */
+    fun findMethodReferences(className: String, methodName: String, descriptor: String, includeDeclaration: Boolean): List<Location> {
+        val declaration = workspaceIndex.findClass(className)?.methods?.find { it.name == methodName && it.descriptor == descriptor }
+        return findMethodReferences(className, methodName, descriptor, includeDeclaration && declaration != null, declaration?.range)
     }
 
-    private fun fieldReferences(instruction: FieldAccessInstruction, includeDeclaration: Boolean): List<Location> {
-        val declaration = workspaceIndex.findClass(instruction.className)?.fields?.find { it.name == instruction.fieldName && it.type == instruction.fieldType }
-        return findFieldReferences(instruction.className, instruction.fieldName, instruction.fieldType, includeDeclaration && declaration != null, declaration?.range)
+    /** The field's declaration when its class is in the workspace, then every access. */
+    fun findFieldReferences(className: String, fieldName: String, fieldType: String, includeDeclaration: Boolean): List<Location> {
+        val declaration = workspaceIndex.findClass(className)?.fields?.find { it.name == fieldName && it.type == fieldType }
+        return findFieldReferences(className, fieldName, fieldType, includeDeclaration && declaration != null, declaration?.range)
     }
 
     /**

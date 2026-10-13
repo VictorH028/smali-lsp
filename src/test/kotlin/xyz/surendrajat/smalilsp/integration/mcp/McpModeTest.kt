@@ -831,6 +831,84 @@ class McpModeTest {
         }
     }
 
+    @Test
+    fun `find references and hover accept a class or member name instead of a position`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 300, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            // The class: its declaration plus the owner tokens of the iput/iget instructions
+            val classRefs = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 301, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;"))
+            )).asJsonObject
+            assertTrue(classRefs.get("count").asInt >= 4, "declaration + 3 owner references, got $classRefs")
+
+            // A field by name: declaration plus every access
+            val fieldRefs = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 302, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "counter"))
+            )).asJsonObject
+            assertEquals(4, fieldRefs.get("count").asInt, "declaration + iput, iget, iput: $fieldRefs")
+            val lines = fieldRefs.getAsJsonArray("results").map { it.asJsonObject.getAsJsonObject("range").getAsJsonObject("start").get("line").asInt }
+            assertEquals(lines.sorted(), lines, "ordered by position")
+
+            // A method by name with no callers: only its declaration
+            val methodRefs = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 303, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "increment", "descriptor" to "()V"))
+            )).asJsonObject
+            assertEquals(1, methodRefs.get("count").asInt, methodRefs.toString())
+
+            // Hover by name
+            val classHover = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 304, "smali_hover", mapOf("class_name" to "Lcom/example/test/MainActivity;"))
+            )).asJsonObject
+            assertTrue(classHover.get("contents").asString.contains("com.example.test.MainActivity"), classHover.toString())
+            val methodHover = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 305, "smali_hover", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "main"))
+            )).asJsonObject
+            assertTrue(methodHover.get("contents").asString.contains("**Method:** `main`"), methodHover.toString())
+            val sdkHover = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 306, "smali_hover", mapOf("class_name" to "Ljava/io/PrintStream;", "member_name" to "println", "descriptor" to "(Ljava/lang/String;)V"))
+            )).asJsonObject
+            assertTrue(sdkHover.get("contents").asString.contains("SDK Method"), sdkHover.toString())
+
+            // Agent-facing errors, not dead JSON-RPC calls
+            val unknownMember = callTool(stdin, stdout, 307, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "nope"))
+            assertTrue(isToolError(unknownMember) && getToolResultText(unknownMember).contains("no member named 'nope'"), getToolResultText(unknownMember))
+            val outside = callTool(stdin, stdout, 308, "smali_find_references", mapOf("class_name" to "Ljava/io/PrintStream;", "member_name" to "println"))
+            assertTrue(isToolError(outside) && getToolResultText(outside).contains("not in the workspace"), getToolResultText(outside))
+            val neither = callTool(stdin, stdout, 309, "smali_hover", mapOf("uri" to smaliFileUri))
+            assertTrue(isToolError(neither) && getToolResultText(neither).contains("class_name"), getToolResultText(neither))
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `xref summary lists the classes that reference a type`() {
+        val root = Files.createTempDirectory("mcp-e2e-xref").toFile()
+        val dir = File(root, "smali/com/x"); dir.mkdirs()
+        File(dir, "Target.smali").writeText(".class public Lcom/x/Target;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n    return-void\n.end method")
+        File(dir, "User.smali").writeText(".class public Lcom/x/User;\n.super Ljava/lang/Object;\n.method public go()V\n    .registers 2\n    new-instance v0, Lcom/x/Target;\n    invoke-virtual {v0}, Lcom/x/Target;->run()V\n    return-void\n.end method")
+        File(dir, "Child.smali").writeText(".class public Lcom/x/Child;\n.super Lcom/x/Target;")
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 310, "smali_index", mapOf("directory" to root.absolutePath))
+            val xref = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 311, "smali_xref_summary", mapOf("class_name" to "Lcom/x/Target;"))
+            )).asJsonObject
+            assertEquals(listOf("Lcom/x/Child;"), xref.getAsJsonArray("subclasses").map { it.asString })
+            assertEquals(listOf("Lcom/x/User;"), xref.getAsJsonArray("type_references").map { it.asString }, "classes that reference the type in instructions: $xref")
+            val callers = xref.getAsJsonArray("method_callers").single().asJsonObject
+            assertEquals("run()V", callers.get("method").asString)
+            assertEquals(listOf("Lcom/x/User;"), callers.getAsJsonArray("callers").map { it.asString })
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
     // --- Helpers ---
 
     private fun startMcpProcess(): Process {
