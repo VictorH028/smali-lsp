@@ -34,6 +34,10 @@ INT_TYPE:                   'I';
 LONG_TYPE:                  'J';
 FLOAT_TYPE:                 'F';
 DOUBLE_TYPE:                'D';
+// Two or more primitive type letters in a row (`IIS`, `ZJ`) — a parameter list, or a member name
+// that happens to be spelled that way (`ID`). Defined after the single-letter types so `I` alone
+// stays INT_TYPE, and before IDENTIFIER so it wins the tie.
+PRIMITIVE_SEQUENCE:         [ZBSCIJFD] [ZBSCIJFD]+;
 
 COMPOUND_METHOD_ARG_LITERAL:
     (

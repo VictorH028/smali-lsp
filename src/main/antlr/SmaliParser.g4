@@ -65,6 +65,7 @@ identifier:
     | STRICTFP
     | SYNCHRONIZED
     | DECLARED_SYNCHRONIZED
+    | PRIMITIVE_SEQUENCE
     | literalKeyword
     | opcodeKeyword
     | DECIMAL_LITERAL
@@ -124,7 +125,7 @@ primitiveType:
     BOOLEAN_TYPE | BYTE_TYPE | SHORT_TYPE | CHAR_TYPE | INT_TYPE | LONG_TYPE | FLOAT_TYPE | DOUBLE_TYPE
     ;
 
-methodParameterLiteral:     (COMPOUND_METHOD_ARG_LITERAL | IDENTIFIER);     // strings like IIS
+methodParameterLiteral:     (COMPOUND_METHOD_ARG_LITERAL | PRIMITIVE_SEQUENCE);     // strings like IIS
 
 arrayType:                  LBRACK (QUALIFIED_TYPE_NAME | primitiveType | arrayType | methodParameterLiteral);
 
