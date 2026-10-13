@@ -25,17 +25,17 @@ class DiagnosticProvider(
     
     /** Every diagnostic for [content]: syntax errors from the parser, then the semantic checks on whatever AST it produced. */
     fun computeDiagnostics(uri: String, content: String): List<Diagnostic> =
-        computeDiagnosticsFromParseResult(uri, parser.parseWithErrors(uri, content))
+        computeDiagnosticsFromParseResult(uri, parser.parseWithErrors(uri, content), content)
 
     /**
      * Compute diagnostics from an already-parsed result.
      * Avoids re-parsing when the caller already has a ParseResult (e.g. didChange).
      */
-    fun computeDiagnosticsFromParseResult(uri: String, parseResult: SmaliParser.ParseResult): List<Diagnostic> {
+    fun computeDiagnosticsFromParseResult(uri: String, parseResult: SmaliParser.ParseResult, content: String? = null): List<Diagnostic> {
         val diagnostics = mutableListOf<Diagnostic>()
         diagnostics.addAll(convertSyntaxErrors(parseResult.syntaxErrors))
         parseResult.smaliFile?.let { file ->
-            diagnostics.addAll(localDiagnostics(file))
+            diagnostics.addAll(localDiagnostics(file, content?.lines()))
             diagnostics.addAll(computeSemanticDiagnostics(uri, file))
         }
         return diagnostics
@@ -45,12 +45,17 @@ class DiagnosticProvider(
      * Syntax errors and the file-local checks only: what can be reported while the workspace is
      * still being indexed, when a check against the index would flag classes not yet seen.
      */
-    fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult): List<Diagnostic> =
-        convertSyntaxErrors(parseResult.syntaxErrors) + (parseResult.smaliFile?.let(::localDiagnostics) ?: emptyList())
+    fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult, content: String? = null): List<Diagnostic> =
+        convertSyntaxErrors(parseResult.syntaxErrors) + (parseResult.smaliFile?.let { localDiagnostics(it, content?.lines()) } ?: emptyList())
 
-    /** Checks that need nothing but the file: a jump to a label the method does not define, a label defined twice. */
-    fun localDiagnostics(file: SmaliFile): List<Diagnostic> {
+    /**
+     * Checks that need nothing but the file: a jump to a label the method does not define, a
+     * label defined twice, and, when the text is at hand, what the assembler would reject
+     * ([AssemblerChecks]).
+     */
+    fun localDiagnostics(file: SmaliFile, lines: List<String>? = null): List<Diagnostic> {
         val diagnostics = mutableListOf<Diagnostic>()
+        if (lines != null) diagnostics.addAll(AssemblerChecks.diagnostics(file, lines))
         for (method in file.methods) {
             for (ref in method.labelRefs) {
                 if (ref.name !in method.labels) {

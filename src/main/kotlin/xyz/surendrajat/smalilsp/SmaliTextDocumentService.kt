@@ -133,9 +133,9 @@ class SmaliTextDocumentService(
                 index.indexFile(smaliFile)
             }
             val diagnostics = if (indexingComplete) {
-                diagnosticProvider.computeDiagnosticsFromParseResult(uri, parseResult)
+                diagnosticProvider.computeDiagnosticsFromParseResult(uri, parseResult, content)
             } else {
-                diagnosticProvider.computeSyntaxDiagnosticsFromParseResult(parseResult)
+                diagnosticProvider.computeSyntaxDiagnosticsFromParseResult(parseResult, content)
             }
             publishDiagnostics(uri, diagnostics)
         } catch (e: Exception) {
