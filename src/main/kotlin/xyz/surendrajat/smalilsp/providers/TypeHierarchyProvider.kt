@@ -3,7 +3,7 @@ package xyz.surendrajat.smalilsp.providers
 import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Provides type hierarchy (supertypes/subtypes) for smali classes.
@@ -139,6 +139,6 @@ class TypeHierarchyProvider(
     }
 
     private fun extractSimpleName(fullName: String): String {
-        return ClassUtils.extractSimpleName(fullName)
+        return Types.simpleName(fullName)
     }
 }

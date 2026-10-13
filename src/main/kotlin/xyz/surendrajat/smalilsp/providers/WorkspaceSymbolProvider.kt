@@ -6,7 +6,7 @@ import org.eclipse.lsp4j.SymbolKind
 import java.util.PriorityQueue
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Provides workspace-wide symbol search.
@@ -289,6 +289,6 @@ class WorkspaceSymbolProvider(
      * - "La/b/c/q;" -> "q"
      */
     private fun extractSimpleName(fullName: String): String {
-        return ClassUtils.extractSimpleName(fullName)
+        return Types.simpleName(fullName)
     }
 }

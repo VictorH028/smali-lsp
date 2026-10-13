@@ -7,7 +7,7 @@ import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.parser.generated.SmaliParserBaseListener
 import xyz.surendrajat.smalilsp.parser.generated.SmaliParser as GeneratedSmaliParser
-import xyz.surendrajat.smalilsp.util.DescriptorParser
+import xyz.surendrajat.smalilsp.util.Types
 import xyz.surendrajat.smalilsp.util.StringPool
 
 /**
@@ -173,12 +173,12 @@ class ASTBuilder(
 
     /**
      * Parse parameter types from descriptor string.
-     * Delegates to DescriptorParser for the core parsing logic,
+     * Delegates to Types for the core parsing logic,
      * then interns strings via StringPool for memory efficiency.
      */
     private fun parseParameters(paramStr: String): List<Parameter> {
         if (paramStr.isEmpty()) return emptyList()
-        return DescriptorParser.parseTypeStrings(paramStr).map { type ->
+        return Types.parseTypeStrings(paramStr).map { type ->
             Parameter(StringPool.intern(type), null)
         }
     }

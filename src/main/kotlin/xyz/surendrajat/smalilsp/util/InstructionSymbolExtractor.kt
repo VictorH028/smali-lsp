@@ -308,7 +308,7 @@ object InstructionSymbolExtractor {
         // For object arrays, extract element class name (for navigation).
         // For primitive arrays, extract the full array type (for hover).
         // Skip standalone primitives (not navigable).
-        return DescriptorParser.parseTypeSequence(descriptor)
+        return Types.parseTypeSequence(descriptor)
             .filter { !it.isPrimitive || it.isArray }
             .map { span ->
                 if (span.isArray && span.className != null) {

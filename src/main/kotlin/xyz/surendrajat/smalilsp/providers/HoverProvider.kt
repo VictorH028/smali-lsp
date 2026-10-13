@@ -4,9 +4,7 @@ import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.data.DalvikOpcodeDatabase
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.resolver.TypeResolver
-import xyz.surendrajat.smalilsp.util.ClassUtils
-import xyz.surendrajat.smalilsp.util.DescriptorParser
+import xyz.surendrajat.smalilsp.util.Types
 import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
 
 /**
@@ -156,20 +154,20 @@ class HoverProvider(
         val file = workspaceIndex.findClass(classDef.name)
         if (file != null) {
             val md = buildString {
-                append("**Class:** `${TypeResolver.toReadableName(file.classDefinition.name)}`\n\n")
+                append("**Class:** `${Types.readableName(file.classDefinition.name)}`\n\n")
                 
                 if (file.classDefinition.modifiers.isNotEmpty()) {
                     append("**Modifiers:** ${file.classDefinition.modifiers.joinToString(", ")}\n\n")
                 }
                 
                 file.classDefinition.superClass?.let {
-                    append("**Extends:** `${TypeResolver.toReadableName(it)}`\n\n")
+                    append("**Extends:** `${Types.readableName(it)}`\n\n")
                 }
                 
                 if (file.classDefinition.interfaces.isNotEmpty()) {
                     append("**Implements:**\n")
                     file.classDefinition.interfaces.forEach { iface ->
-                        append("- `${TypeResolver.toReadableName(iface)}`\n")
+                        append("- `${Types.readableName(iface)}`\n")
                     }
                     append("\n")
                 }
@@ -256,9 +254,9 @@ class HoverProvider(
             }
             
             val params = method.parameters.joinToString(", ") { param ->
-                TypeResolver.toReadableName(param.type)
+                Types.readableName(param.type)
             }
-            val returnType = TypeResolver.toReadableName(method.returnType)
+            val returnType = Types.readableName(method.returnType)
                 
             append("**Signature:** `($params)$returnType`\n\n")
             
@@ -266,7 +264,7 @@ class HoverProvider(
             if (method.parameters.isNotEmpty()) {
                 append("**Parameters:**\n")
                 method.parameters.forEach { param ->
-                    append("- `${TypeResolver.toReadableName(param.type)}`")
+                    append("- `${Types.readableName(param.type)}`")
                     param.name?.let { append(" $it") }
                     append("\n")
                 }
@@ -290,7 +288,7 @@ class HoverProvider(
                 append("**Modifiers:** ${field.modifiers.joinToString(", ")}\n\n")
             }
             
-            append("**Type:** `${TypeResolver.toReadableName(field.type)}`")
+            append("**Type:** `${Types.readableName(field.type)}`")
         }
         
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
@@ -403,8 +401,8 @@ class HoverProvider(
         
         // Class not found - show basic info with SDK indication
         val md = buildString {
-            append("**Class:** `${TypeResolver.toReadableName(className)}`\n\n")
-            if (ClassUtils.isSDKClass(className)) {
+            append("**Class:** `${Types.readableName(className)}`\n\n")
+            if (Types.isSdkClass(className)) {
                 append("*SDK Class* - Part of Android SDK or Java standard library")
             } else {
                 append("*Not found in workspace*")
@@ -482,7 +480,7 @@ class HoverProvider(
         val md = buildString {
             append("**Method:** `${className}.${methodName}`\n\n")
             append("**Descriptor:** `${descriptor}`\n\n")
-            if (ClassUtils.isSDKClass(className)) {
+            if (Types.isSdkClass(className)) {
                 append("*SDK Method* - Part of Android SDK or Java standard library")
             } else {
                 append("*Not found in workspace*")
@@ -507,8 +505,8 @@ class HoverProvider(
         // Field not found - show basic info
         val md = buildString {
             append("**Field:** `${className}.${fieldName}`\n\n")
-            append("**Type:** `${TypeResolver.toReadableName(fieldType)}`\n\n")
-            if (ClassUtils.isSDKClass(className)) {
+            append("**Type:** `${Types.readableName(fieldType)}`\n\n")
+            if (Types.isSdkClass(className)) {
                 append("*SDK Field* - Part of Android SDK or Java standard library")
             } else {
                 append("*Not found in workspace*")
@@ -596,7 +594,7 @@ class HoverProvider(
         
         // Calculate position within descriptor and find type at that offset
         val posInDescriptor = cursorChar - descriptorIndex
-        val span = DescriptorParser.typeAtOffset(descriptor, posInDescriptor) ?: return null
+        val span = Types.typeAtOffset(descriptor, posInDescriptor) ?: return null
 
         // Only return hover for primitive types (object types handled elsewhere)
         return if (span.isPrimitive) {

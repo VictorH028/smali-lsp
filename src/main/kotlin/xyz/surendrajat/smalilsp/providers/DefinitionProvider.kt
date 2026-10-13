@@ -3,7 +3,7 @@ package xyz.surendrajat.smalilsp.providers
 import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.resolver.TypeResolver
+import xyz.surendrajat.smalilsp.util.Types
 import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
 import org.slf4j.LoggerFactory
 
@@ -273,13 +273,13 @@ class DefinitionProvider(
         val line = workspaceIndex.getLineContent(uri, position.line)
         if (line == null) {
             // Fallback for tests: no document content available
-            val returnClassName = TypeResolver.extractClassName(method.returnType)
+            val returnClassName = Types.className(method.returnType)
             if (returnClassName != null && method.returnType.startsWith('L')) {
                 return findClassDefinition(returnClassName)
             }
             for (param in method.parameters) {
                 if (param.type.startsWith('L') || param.type.startsWith('[')) {
-                    val paramClassName = TypeResolver.extractClassName(param.type)
+                    val paramClassName = Types.className(param.type)
                     if (paramClassName != null) {
                         return findClassDefinition(paramClassName)
                     }
@@ -299,7 +299,7 @@ class DefinitionProvider(
         }
 
         // Check return type position
-        val returnClassName = TypeResolver.extractClassName(method.returnType)
+        val returnClassName = Types.className(method.returnType)
         if (returnClassName != null && method.returnType.startsWith('L')) {
             val returnTypeIndex = line.lastIndexOf(method.returnType)
             if (returnTypeIndex >= 0) {
@@ -316,7 +316,7 @@ class DefinitionProvider(
             var searchStart = openParenIndex + 1
             for (param in method.parameters) {
                 if (param.type.startsWith('L') || param.type.startsWith('[')) {
-                    val paramClassName = TypeResolver.extractClassName(param.type)
+                    val paramClassName = Types.className(param.type)
                     if (paramClassName != null) {
                         val paramTypeIndex = line.indexOf(param.type, searchStart)
                         if (paramTypeIndex >= 0 && paramTypeIndex < closeParenIndex) {
@@ -348,7 +348,7 @@ class DefinitionProvider(
         val line = workspaceIndex.getLineContent(uri, position.line)
         if (line == null) {
             // Fallback for tests: no document content available
-            val className = TypeResolver.extractClassName(field.type)
+            val className = Types.className(field.type)
             if (className != null) return findClassDefinition(className)
             return emptyList()
         }
@@ -360,7 +360,7 @@ class DefinitionProvider(
             if (typeIndex >= 0) {
                 val typeEnd = typeIndex + field.type.length
                 if (cursorChar >= typeIndex && cursorChar <= typeEnd) {
-                    val className = TypeResolver.extractClassName(field.type)
+                    val className = Types.className(field.type)
                     if (className != null) return findClassDefinition(className)
                 }
             }

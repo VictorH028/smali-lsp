@@ -2,7 +2,7 @@ package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.SmaliFile
-import xyz.surendrajat.smalilsp.resolver.TypeResolver
+import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Provides document outline/symbols in IDEs.
@@ -23,7 +23,7 @@ class DocumentSymbolProvider {
         val classSymbol = DocumentSymbol()
         
         // Class symbol
-        classSymbol.name = TypeResolver.toReadableName(file.classDefinition.name)
+        classSymbol.name = Types.readableName(file.classDefinition.name)
         classSymbol.kind = SymbolKind.Class
         classSymbol.range = file.classDefinition.range
         classSymbol.selectionRange = file.classDefinition.range
@@ -34,7 +34,7 @@ class DocumentSymbolProvider {
             details.add(file.classDefinition.modifiers.joinToString(" "))
         }
         file.classDefinition.superClass?.let {
-            details.add("extends ${TypeResolver.toReadableName(it)}")
+            details.add("extends ${Types.readableName(it)}")
         }
         if (details.isNotEmpty()) {
             classSymbol.detail = details.joinToString(", ")
@@ -70,9 +70,9 @@ class DocumentSymbolProvider {
             fieldSymbol.selectionRange = field.range
             
             // Detail: type
-            val typeClass = TypeResolver.extractClassName(field.type)
+            val typeClass = Types.className(field.type)
             fieldSymbol.detail = if (typeClass != null) {
-                TypeResolver.toReadableName(typeClass)
+                Types.readableName(typeClass)
             } else {
                 field.type
             }

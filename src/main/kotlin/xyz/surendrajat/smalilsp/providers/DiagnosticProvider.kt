@@ -7,7 +7,7 @@ import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 import org.slf4j.LoggerFactory
 
 /**
@@ -103,7 +103,7 @@ class DiagnosticProvider(
         
         // Check superclass exists
         file.classDefinition.superClass?.let { superClass ->
-            if (!index.hasClass(superClass) && !ClassUtils.isSDKClass(superClass)) {
+            if (!index.hasClass(superClass) && !Types.isSdkClass(superClass)) {
                 diagnostics.add(
                     createDiagnostic(
                         range = Range(
@@ -120,7 +120,7 @@ class DiagnosticProvider(
         
         // Check interfaces exist
         file.classDefinition.interfaces.forEach { interfaceName ->
-            if (!index.hasClass(interfaceName) && !ClassUtils.isSDKClass(interfaceName)) {
+            if (!index.hasClass(interfaceName) && !Types.isSdkClass(interfaceName)) {
                 diagnostics.add(
                     createDiagnostic(
                         range = Range(
@@ -189,7 +189,7 @@ class DiagnosticProvider(
         // Check field references
         file.fields.forEach { field ->
             val typeClass = extractTypeClass(field.type)
-            if (typeClass != null && !index.hasClass(typeClass) && !ClassUtils.isSDKClass(typeClass)) {
+            if (typeClass != null && !index.hasClass(typeClass) && !Types.isSdkClass(typeClass)) {
                 diagnostics.add(
                     createDiagnostic(
                         range = field.range,
@@ -227,7 +227,7 @@ class DiagnosticProvider(
      * (isSDKClass already strips brackets itself).
      */
     private fun isKnownClass(className: String): Boolean {
-        return ClassUtils.isSDKClass(className) || index.hasClass(className.trimStart('['))
+        return Types.isSdkClass(className) || index.hasClass(className.trimStart('['))
     }
 
     private fun createDiagnostic(

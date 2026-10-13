@@ -3,7 +3,7 @@ package xyz.surendrajat.smalilsp.providers
 import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
 
 /**
@@ -214,7 +214,7 @@ class ReferenceProvider(
 
         // Polymorphic call sites (calls through subclasses/implementors)
         // Skip for SDK classes to avoid too many results (e.g., Object.<init>)
-        if (!ClassUtils.isSDKClass(targetClassName)) {
+        if (!Types.isSdkClass(targetClassName)) {
             for (subClass in workspaceIndex.getAllSubclasses(targetClassName)) {
                 locations.addAll(workspaceIndex.findMethodUsages(subClass, methodName, descriptor))
             }

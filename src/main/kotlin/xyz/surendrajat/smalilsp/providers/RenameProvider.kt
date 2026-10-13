@@ -4,7 +4,7 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 import org.slf4j.LoggerFactory
 
 /**
@@ -248,7 +248,7 @@ class RenameProvider(
         renameMethodDeclaration(className, methodName, descriptor, newName, edits)
 
         // 2. Also rename in all subclasses (polymorphic rename)
-        if (!ClassUtils.isSDKClass(className)) {
+        if (!Types.isSdkClass(className)) {
             for (subClass in index.getAllSubclasses(className)) {
                 renameMethodDeclaration(subClass, methodName, descriptor, newName, edits)
             }
@@ -256,7 +256,7 @@ class RenameProvider(
 
         // 3. Rename all call sites
         renameMethodCallSites(className, methodName, descriptor, newName, edits)
-        if (!ClassUtils.isSDKClass(className)) {
+        if (!Types.isSdkClass(className)) {
             for (subClass in index.getAllSubclasses(className)) {
                 renameMethodCallSites(subClass, methodName, descriptor, newName, edits)
             }

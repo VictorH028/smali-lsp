@@ -4,7 +4,7 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import xyz.surendrajat.smalilsp.data.DalvikOpcodeDatabase
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Provides completion suggestions for smali files.
@@ -114,7 +114,7 @@ class CompletionProvider(
         for (className in index.getClassNames()) {
             // Match: partial against full class name or simple name
             val classNameLower = className.lowercase()
-            val simpleName = ClassUtils.extractSimpleName(className)
+            val simpleName = Types.simpleName(className)
             val simpleNameLower = simpleName.lowercase()
 
             val matches = if (hasLPrefix) {

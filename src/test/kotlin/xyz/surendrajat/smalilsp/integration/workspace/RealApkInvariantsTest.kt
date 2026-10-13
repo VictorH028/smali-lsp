@@ -24,7 +24,7 @@ import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
 import xyz.surendrajat.smalilsp.shared.TestUtils
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
 import java.util.Random
 
@@ -310,7 +310,7 @@ class RealApkInvariantsTest {
             checked++
             val h = hover.provideHover(file.uri, Position(cls.range.start.line, classLine.indexOf(cls.name) + 1))
             val text = h?.contents?.right?.value ?: ""
-            if (!text.contains(ClassUtils.extractSimpleName(cls.name))) bad.add("${cls.name}: class hover = ${text.take(60)}")
+            if (!text.contains(Types.simpleName(cls.name))) bad.add("${cls.name}: class hover = ${text.take(60)}")
             file.methods.firstOrNull()?.let { m ->
                 val line = index.getLineContent(file.uri, m.range.start.line) ?: return@let
                 val col = line.indexOf(m.name + m.descriptor); if (col < 0) return@let
@@ -328,7 +328,7 @@ class RealApkInvariantsTest {
                 val col = line.indexOf(ins.className); if (col < 0) continue
                 constClass++; checked++
                 val text = hover.provideHover(file.uri, Position(ins.range.start.line, col + 1))?.contents?.right?.value ?: ""
-                if (!text.contains(ClassUtils.extractSimpleName(ins.className))) bad.add("const-class ${ins.className}: hover = ${text.take(60)}")
+                if (!text.contains(Types.simpleName(ins.className))) bad.add("const-class ${ins.className}: hover = ${text.take(60)}")
                 if (constClass >= 100) break@outer
             }
         }
@@ -340,7 +340,7 @@ class RealApkInvariantsTest {
 
     private fun symbolSearch(fx: Fixture) {
         val search = WorkspaceSymbolProvider(fx.index)
-        val files = fx.files.filter { ClassUtils.extractSimpleName(it.classDefinition.name).length >= 4 }
+        val files = fx.files.filter { Types.simpleName(it.classDefinition.name).length >= 4 }
         assumeTrue(files.isNotEmpty())
         var checked = 0
         val bad = mutableListOf<String>()
