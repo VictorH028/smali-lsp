@@ -353,21 +353,21 @@ class ReferenceProviderMultiSiteTest {
         val test0 = overloadedFile.methods.find { it.name == "test" && it.descriptor == "()V" }!!
         val refs0 = provider.findReferences(
             overloadedUri,
-            Position(test0.range.start.line, 20),
+            Position(test0.nameSpan.line, test0.nameSpan.start + 1),
             includeDeclaration = false
         )
         
         val test1 = overloadedFile.methods.find { it.name == "test" && it.descriptor == "(I)V" }!!
         val refs1 = provider.findReferences(
             overloadedUri,
-            Position(test1.range.start.line, 20),
+            Position(test1.nameSpan.line, test1.nameSpan.start + 1),
             includeDeclaration = false
         )
         
         val test2 = overloadedFile.methods.find { it.name == "test" && it.descriptor == "(Ljava/lang/String;)V" }!!
         val refs2 = provider.findReferences(
             overloadedUri,
-            Position(test2.range.start.line, 20),
+            Position(test2.nameSpan.line, test2.nameSpan.start + 1),
             includeDeclaration = false
         )
         

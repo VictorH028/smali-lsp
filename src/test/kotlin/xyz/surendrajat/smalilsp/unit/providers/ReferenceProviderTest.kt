@@ -104,7 +104,7 @@ class ReferenceProviderTest {
         // Find references to interface
         val references = provider.findReferences(
             uri = workspace.getUri("iface/IClickable.smali"),
-            position = Position(0, 30), // On interface name
+            position = Position(0, 36), // On "IClickable" in .class
             includeDeclaration = true
         )
 
@@ -304,7 +304,7 @@ class ReferenceProviderTest {
         // Find references to doWork from its declaration
         val references = provider.findReferences(
             uri = workspace.getUri("util/Helper.smali"),
-            position = Position(3, 30), // On "doWork" in .method
+            position = Position(3, 24), // On "doWork" in .method
             includeDeclaration = true
         )
 

@@ -59,6 +59,9 @@ object Types {
         return null
     }
 
+    /** [className] with array brackets stripped; `[Lcom/Foo;` → `Lcom/Foo;`, `Lcom/Foo;` unchanged. */
+    fun elementClass(className: String): String = className.trimStart('[')
+
     /** Every class referenced by a type sequence or method descriptor; arrays contribute their element class. */
     fun classNames(sequence: String): Set<String> =
         parseTypeSequence(sequence).mapNotNull { it.className }.toSet()

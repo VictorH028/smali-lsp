@@ -42,8 +42,7 @@ class ReferenceProviderInstructionTest {
         val targetMethod = file.methods.find { it.name == "target" }!!
         
         // Click on the method name in the definition
-        val clickChar = (targetMethod.range.start.character + targetMethod.range.end.character) / 2
-        val refs = provider.findReferences(uri, Position(targetMethod.range.start.line, clickChar), true)
+        val refs = provider.findReferences(uri, Position(targetMethod.nameSpan.line, targetMethod.nameSpan.start + 1), true)
         
         println("=== Find References on Method Definition ===")
         println("Found ${refs.size} references:")
@@ -89,8 +88,7 @@ class ReferenceProviderInstructionTest {
         val counterField = file.fields.find { it.name == "counter" }!!
         
         // Click on the field name in the definition
-        val clickChar = (counterField.range.start.character + counterField.range.end.character) / 2
-        val refs = provider.findReferences(uri, Position(counterField.range.start.line, clickChar), true)
+        val refs = provider.findReferences(uri, Position(counterField.nameSpan.line, counterField.nameSpan.start + 1), true)
         
         println("=== Find References on Field Definition ===")
         println("Found ${refs.size} references:")

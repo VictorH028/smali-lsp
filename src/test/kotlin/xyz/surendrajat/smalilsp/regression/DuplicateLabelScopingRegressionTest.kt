@@ -97,12 +97,12 @@ class DuplicateLabelScopingRegressionTest {
     fun `hover on label counts only jumps within the containing method`() {
         val hoverFirst = hoverProvider.provideHover(uri, Position(7, 6))
         assertNotNull(hoverFirst)
-        assertTrue(hoverFirst!!.contents.right.value.contains("1 jump"),
+        assertTrue(hoverFirst!!.contents.right.value.contains("**References:** 1"),
             "first method has exactly 1 jump to :cond_0, got: ${hoverFirst.contents.right.value}")
 
         val hoverSecond = hoverProvider.provideHover(uri, Position(17, 6))
         assertNotNull(hoverSecond)
-        assertTrue(hoverSecond!!.contents.right.value.contains("2 jumps"),
+        assertTrue(hoverSecond!!.contents.right.value.contains("**References:** 2"),
             "second method has exactly 2 jumps to :cond_0, got: ${hoverSecond.contents.right.value}")
     }
 

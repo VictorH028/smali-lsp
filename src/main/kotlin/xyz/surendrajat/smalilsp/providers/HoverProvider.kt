@@ -1,133 +1,46 @@
 package xyz.surendrajat.smalilsp.providers
 
-import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.Hover
+import org.eclipse.lsp4j.MarkupContent
+import org.eclipse.lsp4j.MarkupKind
+import org.eclipse.lsp4j.Position
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.data.DalvikOpcodeDatabase
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
-import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
 
 /**
- * Provides hover information for Smali symbols.
- * 
- * Shows:
- * - Class hierarchy (superclass, interfaces)
- * - Method signatures
- * - Field types
- * - SDK class information
- * 
- * Format: Markdown for rich display in IDE hovers.
+ * Hover: class hierarchy, member signatures, field types, primitive types, labels, and Dalvik
+ * opcode documentation, as Markdown. The symbol under the caret comes from [SmaliFile.symbolAt];
+ * only the opcode lookup reads the line text, because unmodelled instructions have no AST node.
  */
 class HoverProvider(
     private val workspaceIndex: WorkspaceIndex
 ) {
-    companion object {
-        private val CLASS_REF_PATTERN = Regex("""L[^;\s]+;""")
-    }
 
-
-    
-    /**
-     * Provide hover information at cursor position.
-     * Uses AST directly from WorkspaceIndex (NO regex parsing).
-     */
-    fun provideHover(
-        uri: String,
-        position: Position
-    ): Hover? {
+    fun provideHover(uri: String, position: Position): Hover? {
         val file = workspaceIndex.findFileByUri(uri) ?: return null
-        val node = file.findNodeAt(position)
-        // Read the line once — avoids repeated disk I/O for closed files
-        val lineContent = workspaceIndex.getLineContent(uri, position.line)
-
-        return when {
-            node == null -> {
-                hoverForDirectiveLine(lineContent, position)
-                    ?: lineContent?.let { hoverForOpcodeKeyword(it, position.character) }
-            }
-
-            node.first == NodeType.CLASS -> {
-                hoverForClass(node.second as ClassDefinition)
-            }
-
-            node.first == NodeType.METHOD -> {
-                val method = node.second as MethodDefinition
-                if (position.line == method.range.start.line) {
-                    hoverForMethodDeclaration(file, method, position, lineContent)
-                } else {
-                    // Inside method body but not on an AST-captured instruction.
-                    // Try directives first (.catch, .annotation, etc.) then opcodes.
-                    hoverForDirectiveLine(lineContent, position)
-                        ?: lineContent?.let { hoverForOpcodeKeyword(it, position.character) }
-                }
-            }
-
-            node.first == NodeType.INSTRUCTION -> {
-                hoverForInstruction(node.second as Instruction, uri, position, lineContent)
-            }
-
-            node.first == NodeType.FIELD -> {
-                hoverForFieldNode(file, node.second as FieldDefinition, position, lineContent)
-            }
-
-            node.first == NodeType.LABEL -> {
-                hoverForLabel(node.second as LabelDefinition, uri, position)
-            }
-
-            else -> null
+        return when (val symbol = file.symbolAt(position)) {
+            null -> hoverForOpcodeKeyword(uri, position)
+            is Symbol.ClassDecl -> hoverForClass(symbol.classDef)
+            is Symbol.ClassRef -> hoverForClassReference(symbol.type)
+            is Symbol.MethodDecl -> hoverForMethod(symbol.method)
+            is Symbol.FieldDecl -> hoverForField(symbol.fieldDef)
+            is Symbol.MethodRef -> hoverForMethodReference(symbol.instruction.className, symbol.instruction.methodName, symbol.instruction.descriptor)
+            is Symbol.FieldRef -> hoverForFieldReference(symbol.instruction.className, symbol.instruction.fieldName, symbol.instruction.fieldType)
+            is Symbol.Primitive -> hoverForPrimitiveType(symbol.type)
+            is Symbol.LabelDecl -> hoverForLabel(symbol.label, symbol.method)
+            is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { hoverForLabel(it, symbol.method) }
+                ?: Hover(MarkupContent(MarkupKind.MARKDOWN, "**Jump to label:** `:${symbol.name}`"))
+            is Symbol.OnInstruction -> hoverForOpcodeKeyword(uri, position)
         }
     }
 
-    private fun hoverForMethodDeclaration(file: SmaliFile, method: MethodDefinition, position: Position, lineContent: String?): Hover? {
-        if (lineContent == null || isOnMethodName(lineContent, position)) {
-            return hoverForMethod(method)
-        }
-        // Check class reference in signature
-        extractClassRefAtPosition(lineContent, position.character)?.let {
-            return hoverForClassReference(it)
-        }
-        // Check primitive type in descriptor
-        extractPrimitiveTypeAtPosition(lineContent, position.character, method.descriptor)?.let {
-            return it
-        }
-        return null
-    }
-
-    private fun hoverForFieldNode(file: SmaliFile, field: FieldDefinition, position: Position, lineContent: String?): Hover? {
-        if (lineContent == null || isOnFieldName(lineContent, position)) {
-            return hoverForField(field)
-        }
-        val colonIndex = lineContent.indexOf(':')
-        if (colonIndex < 0 || position.character <= colonIndex) return null
-
-        // Check primitive type first, then class type
-        extractPrimitiveTypeAtPosition(lineContent, position.character, field.type, colonIndex + 1)?.let {
-            return it
-        }
-        if (field.type.startsWith("L") || field.type.startsWith("[")) {
-            return hoverForClassReference(field.type)
-        }
-        return null
-    }
-    
-    /**
-     * Hover on label definition (:cond_0, :goto_1, etc.)
-     */
-    private fun hoverForLabel(labelDef: LabelDefinition, uri: String, position: Position): Hover {
-        val file = workspaceIndex.findFileByUri(uri)
-        // Labels are method-local — count only jumps within the containing method,
-        // otherwise same-named labels in other methods (:cond_0 etc.) inflate the count.
-        val containingMethod = file?.methods?.find { it.range.contains(position) }
-            ?: file?.methods?.find { it.labels[labelDef.name]?.range == labelDef.range }
-        val referenceCount = containingMethod?.instructions?.count { instruction ->
-            instruction is JumpInstruction && instruction.targetLabel == labelDef.name
-        } ?: 0
-        
+    private fun hoverForLabel(labelDef: LabelDefinition, method: MethodDefinition): Hover {
+        val referenceCount = method.labelRefs.count { it.name == labelDef.name }
         val md = buildString {
             append("**Label:** `:${labelDef.name}`\n\n")
-            append("**References:** $referenceCount jump${if (referenceCount != 1) "s" else ""}\n\n")
-            
-            // Try to determine what kind of label it is from the name
+            append("**References:** $referenceCount\n\n")
             val labelType = when {
                 labelDef.name.startsWith("cond_") -> "Conditional branch target"
                 labelDef.name.startsWith("goto_") -> "Unconditional branch target"
@@ -143,124 +56,41 @@ class HoverProvider(
             }
             append("**Type:** $labelType")
         }
-        
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Hover on .class directive - show class info.
-     */
-    private fun hoverForClass(classDef: ClassDefinition): Hover? {
-        val file = workspaceIndex.findClass(classDef.name)
-        if (file != null) {
-            val md = buildString {
-                append("**Class:** `${Types.readableName(file.classDefinition.name)}`\n\n")
-                
-                if (file.classDefinition.modifiers.isNotEmpty()) {
-                    append("**Modifiers:** ${file.classDefinition.modifiers.joinToString(", ")}\n\n")
-                }
-                
-                file.classDefinition.superClass?.let {
-                    append("**Extends:** `${Types.readableName(it)}`\n\n")
-                }
-                
-                if (file.classDefinition.interfaces.isNotEmpty()) {
-                    append("**Implements:**\n")
-                    file.classDefinition.interfaces.forEach { iface ->
-                        append("- `${Types.readableName(iface)}`\n")
-                    }
-                    append("\n")
-                }
-                
-                append("**Methods:** ${file.methods.size}  ")
-                append("**Fields:** ${file.fields.size}")
-            }
-            
-            return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
-        }
-        return null
-    }
-    
 
-    
-    /**
-     * Check if cursor position is on field name (not on modifiers like .field, public, etc.)
-     * 
-     * Example: .field public myField:Ljava/lang/String;
-     *                        ^^^^^^^  <- should hover here
-     *          ^^^^^^ ^^^^^^  <- should NOT hover on these
-     */
-    private fun isOnFieldName(lineContent: String, position: Position): Boolean {
-        // Find field name in line
-        // Field declaration format: .field [modifiers] fieldName:Type
-        // We need to find where fieldName starts
-        
-        // Find the colon (type separator)
-        val colonIndex = lineContent.indexOf(':')
-        if (colonIndex == -1) return false
-        
-        // Find where field name starts (after last space before ':')
-        var fieldNameStart = colonIndex - 1
-        while (fieldNameStart >= 0 && lineContent[fieldNameStart] != ' ') {
-            fieldNameStart--
+    private fun hoverForClass(classDef: ClassDefinition): Hover? {
+        val file = workspaceIndex.findClass(classDef.name) ?: return null
+        val md = buildString {
+            append("**Class:** `${Types.readableName(file.classDefinition.name)}`\n\n")
+            if (file.classDefinition.modifiers.isNotEmpty()) {
+                append("**Modifiers:** ${file.classDefinition.modifiers.joinToString(", ")}\n\n")
+            }
+            file.classDefinition.superClass?.let {
+                append("**Extends:** `${Types.readableName(it)}`\n\n")
+            }
+            if (file.classDefinition.interfaces.isNotEmpty()) {
+                append("**Implements:**\n")
+                file.classDefinition.interfaces.forEach { iface ->
+                    append("- `${Types.readableName(iface)}`\n")
+                }
+                append("\n")
+            }
+            append("**Methods:** ${file.methods.size}  ")
+            append("**Fields:** ${file.fields.size}")
         }
-        fieldNameStart++ // Move to first char of field name
-        
-        val fieldNameEnd = colonIndex
-        
-        // Check if cursor is within field name range
-        return position.character in fieldNameStart until fieldNameEnd
+        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Check if cursor position is on method name (not on modifiers like .method, public, etc.)
-     * 
-     * Example: .method public test()V
-     *                        ^^^^  <- should hover here
-     *          ^^^^^^^ ^^^^^^  <- should NOT hover on these
-     */
-    private fun isOnMethodName(lineContent: String, position: Position): Boolean {
-        // Find method name in line
-        // Method declaration format: .method [modifiers] methodName(descriptor)returnType
-        // We need to find where methodName starts
-        
-        // Find the last occurrence of a space before the method name
-        // Method name is right before the opening parenthesis
-        val openParenIndex = lineContent.indexOf('(')
-        if (openParenIndex == -1) return false
-        
-        // Find where method name starts (after last space before '(')
-        var methodNameStart = openParenIndex - 1
-        while (methodNameStart >= 0 && lineContent[methodNameStart] != ' ') {
-            methodNameStart--
-        }
-        methodNameStart++ // Move to first char of method name
-        
-        val methodNameEnd = openParenIndex
-        
-        // Check if cursor is within method name range
-        return position.character in methodNameStart until methodNameEnd
-    }
-    
-    /**
-     * Hover on .method directive - show method signature.
-     */
-    private fun hoverForMethod(method: MethodDefinition): Hover? {
+
+    private fun hoverForMethod(method: MethodDefinition): Hover {
         val md = buildString {
             append("**Method:** `${method.name}`\n\n")
-            
             if (method.modifiers.isNotEmpty()) {
                 append("**Modifiers:** ${method.modifiers.joinToString(", ")}\n\n")
             }
-            
-            val params = method.parameters.joinToString(", ") { param ->
-                Types.readableName(param.type)
-            }
+            val params = method.parameters.joinToString(", ") { Types.readableName(it.type) }
             val returnType = Types.readableName(method.returnType)
-                
             append("**Signature:** `($params)$returnType`\n\n")
-            
-            // Show parameters
             if (method.parameters.isNotEmpty()) {
                 append("**Parameters:**\n")
                 method.parameters.forEach { param ->
@@ -270,139 +100,45 @@ class HoverProvider(
                 }
                 append("\n")
             }
-            
             append("**Returns:** `$returnType`")
         }
-        
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Hover on .field directive - show field type.
-     */
-    private fun hoverForField(field: FieldDefinition): Hover? {
+
+    private fun hoverForField(field: FieldDefinition): Hover {
         val md = buildString {
             append("**Field:** `${field.name}`\n\n")
-            
             if (field.modifiers.isNotEmpty()) {
                 append("**Modifiers:** ${field.modifiers.joinToString(", ")}\n\n")
             }
-            
             append("**Type:** `${Types.readableName(field.type)}`")
         }
-        
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Hover on instruction - show info for symbol under cursor.
-     * Uses InstructionSymbolExtractor to determine which symbol cursor is on.
-     * Also shows Dalvik opcode documentation when cursor is on the opcode keyword.
-     */
-    private fun hoverForInstruction(instruction: Instruction, uri: String, position: Position, lineContent: String?): Hover? {
-        if (lineContent == null) return null
 
-        // Check if cursor is on the opcode keyword itself
-        val opcodeHover = hoverForOpcodeKeyword(lineContent, position.character)
-        if (opcodeHover != null) return opcodeHover
-
-        // Handle JumpInstruction - show label hover info
-        if (instruction is JumpInstruction) {
-            val file = workspaceIndex.findFileByUri(uri)
-            // Jump targets are method-local — resolve the label in the method
-            // containing the cursor, not the first method with a same-named label
-            val containingMethod = file?.methods?.find { it.range.contains(position) }
-            val labelDef = containingMethod?.labels?.get(instruction.targetLabel)
-            if (labelDef != null) {
-                return hoverForLabel(labelDef, uri, position)
-            }
-            // Label not found in AST - show basic info
-            return Hover(
-                MarkupContent(
-                    MarkupKind.MARKDOWN,
-                    "**Jump to label:** `:${instruction.targetLabel}`\n\n" +
-                    "**Opcode:** ${instruction.opcode}"
-                )
-            )
-        }
-
-        // Extract symbol at cursor position
-        val symbol = InstructionSymbolExtractor.extractSymbol(
-            instruction,
-            lineContent,
-            position.character
-        ) ?: return null
-        
-        // Show hover based on symbol type
-        return when (symbol) {
-            is InstructionSymbolExtractor.Symbol.ClassRef -> {
-                hoverForClassReference(symbol.className)
-            }
-            is InstructionSymbolExtractor.Symbol.MethodRef -> {
-                // Check if cursor is actually on a primitive type in the descriptor
-                // InstructionSymbolExtractor returns MethodRef as fallback for primitives
-                // (for navigation purposes), but for hover we want to show primitive info
-                val primitiveHover = extractPrimitiveTypeAtPosition(
-                    lineContent, 
-                    position.character, 
-                    symbol.descriptor
-                )
-                primitiveHover ?: hoverForMethodReference(symbol.className, symbol.methodName, symbol.descriptor)
-            }
-            is InstructionSymbolExtractor.Symbol.FieldRef -> {
-                hoverForFieldReference(symbol.className, symbol.fieldName, symbol.fieldType)
-            }
-        }
-    }
-
-    /**
-     * Check if cursor is on an opcode keyword and return hover with instruction documentation.
-     * Extracts the opcode token from the line and looks it up in DalvikOpcodeDatabase.
-     */
-    private fun hoverForOpcodeKeyword(lineContent: String, cursorChar: Int): Hover? {
+    /** Opcode documentation when the caret is on the first word of an instruction line. */
+    private fun hoverForOpcodeKeyword(uri: String, position: Position): Hover? {
+        val lineContent = workspaceIndex.getLineContent(uri, position.line) ?: return null
         val trimmed = lineContent.trimStart()
         if (trimmed.isEmpty() || trimmed.startsWith(".") || trimmed.startsWith("#") || trimmed.startsWith(":")) {
             return null
         }
-
-        // Find the opcode token: first whitespace-delimited word on the line
-        val leadingSpaces = lineContent.length - trimmed.length
-        val opcodeEnd = trimmed.indexOf(' ').let { if (it == -1) trimmed.length else it }
-        val opcodeStart = leadingSpaces
-        val opcodeEndInLine = leadingSpaces + opcodeEnd
-
-        // Check if cursor is within the opcode token
-        if (cursorChar < opcodeStart || cursorChar >= opcodeEndInLine) {
-            return null
-        }
-
-        val opcodeName = trimmed.substring(0, opcodeEnd)
-        val info = DalvikOpcodeDatabase.lookup(opcodeName) ?: return null
+        val opcodeStart = lineContent.length - trimmed.length
+        val opcodeEnd = opcodeStart + trimmed.indexOf(' ').let { if (it == -1) trimmed.length else it }
+        if (position.character < opcodeStart || position.character >= opcodeEnd) return null
+        val info = DalvikOpcodeDatabase.lookup(lineContent.substring(opcodeStart, opcodeEnd)) ?: return null
         return Hover(MarkupContent(MarkupKind.MARKDOWN, info.toMarkdown()))
     }
 
-    /**
-     * Hover on class reference in instruction.
-     */
-    private fun hoverForClassReference(className: String): Hover? {
-        // Check if it's a primitive type first
-        if (Types.isPrimitive(className)) {
-            return hoverForPrimitiveType(className)
-        }
-        
-        // For arrays, extract the base element class name (preserves descriptor format)
-        // [La0/a3; -> La0/a3;, [[Ljava/lang/String; -> Ljava/lang/String;
-        val elementClassName = Types.className(className) ?: className
-        
-        val file = workspaceIndex.findClass(elementClassName)
-        if (file != null) {
-            return hoverForClass(file.classDefinition)
-        }
-        
-        // Class not found - show basic info with SDK indication
+    /** [type] may be an array; the hover describes its element class. */
+    private fun hoverForClassReference(type: String): Hover? {
+        if (Types.isPrimitive(type)) return hoverForPrimitiveType(type)
+        val file = workspaceIndex.findClass(Types.className(type) ?: type)
+        if (file != null) return hoverForClass(file.classDefinition)
+
         val md = buildString {
-            append("**Class:** `${Types.readableName(className)}`\n\n")
-            if (Types.isSdkClass(className)) {
+            append("**Class:** `${Types.readableName(type)}`\n\n")
+            if (Types.isSdkClass(type)) {
                 append("*SDK Class* - Part of Android SDK or Java standard library")
             } else {
                 append("*Not found in workspace*")
@@ -410,23 +146,12 @@ class HoverProvider(
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-        
-    /**
-     * Hover on method reference in instruction.
-     */
+
     private fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
-        val file = workspaceIndex.findClass(className)
-        if (file != null) {
-            // Find the specific method
-            val method = file.methods.find { 
-                it.name == methodName && it.descriptor == descriptor 
-            }
-            if (method != null) {
-                return hoverForMethod(method)
-            }
-        }
-        
-        // Method not found - show basic info
+        workspaceIndex.findClass(className)?.methods
+            ?.find { it.name == methodName && it.descriptor == descriptor }
+            ?.let { return hoverForMethod(it) }
+
         val md = buildString {
             append("**Method:** `${className}.${methodName}`\n\n")
             append("**Descriptor:** `${descriptor}`\n\n")
@@ -438,21 +163,12 @@ class HoverProvider(
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Hover on field reference in instruction.
-     */
+
     private fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
-        val file = workspaceIndex.findClass(className)
-        if (file != null) {
-            // Find the specific field
-            val field = file.fields.find { it.name == fieldName }
-            if (field != null) {
-                return hoverForField(field)
-            }
-        }
-        
-        // Field not found - show basic info
+        workspaceIndex.findClass(className)?.fields
+            ?.find { it.name == fieldName }
+            ?.let { return hoverForField(it) }
+
         val md = buildString {
             append("**Field:** `${className}.${fieldName}`\n\n")
             append("**Type:** `${Types.readableName(fieldType)}`\n\n")
@@ -464,17 +180,10 @@ class HoverProvider(
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-        
-    /**
-     * Provide hover information for primitive types.
-     */
+
     private fun hoverForPrimitiveType(type: String): Hover {
-        // Count array dimensions
         val arrayDim = type.takeWhile { it == '[' }.length
-        val baseType = type.trimStart('[')
-        val primitiveChar = baseType[0]
-        
-        val (typeName, description) = when (primitiveChar) {
+        val (typeName, description) = when (type.trimStart('[').firstOrNull()) {
             'I' -> "int" to "32-bit signed integer"
             'J' -> "long" to "64-bit signed integer"
             'Z' -> "boolean" to "true or false"
@@ -486,11 +195,9 @@ class HoverProvider(
             'V' -> "void" to "no return value"
             else -> "unknown" to "unknown primitive type"
         }
-        
         val md = buildString {
             if (arrayDim > 0) {
-                val brackets = "[]".repeat(arrayDim)
-                append("**Primitive Array:** `${typeName}${brackets}`\n\n")
+                append("**Primitive Array:** `${typeName}${"[]".repeat(arrayDim)}`\n\n")
                 append("**Base Type:** `${typeName}` ($description)\n\n")
                 append("**Dimensions:** $arrayDim\n\n")
             } else {
@@ -499,122 +206,6 @@ class HoverProvider(
             }
             append("*Built-in type* - Part of the Dalvik/Java type system")
         }
-        
-        return Hover(MarkupContent("markdown", md))
+        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
-    
-    /**
-     * Extract primitive type at cursor position in a descriptor string.
-     * 
-     * Used for hovering on primitive types in:
-     * - Method descriptors: `.method public test(IJZ)V`
-     * - Field types: `.field private data:I`
-     * 
-     * @param lineContent The full line of text
-     * @param cursorChar Cursor character position in the line (0-indexed)
-     * @param descriptor The descriptor string (e.g., "(IJZ)V" or "I" or "[I")
-     * @param startSearchFrom Optional start position in line to search for descriptor (for field types after colon)
-     * @return Hover for primitive type if cursor is on a primitive, null otherwise
-     */
-    private fun extractPrimitiveTypeAtPosition(
-        lineContent: String,
-        cursorChar: Int,
-        descriptor: String,
-        startSearchFrom: Int = 0
-    ): Hover? {
-        // Find where the descriptor appears in the line
-        val descriptorIndex = lineContent.indexOf(descriptor, startSearchFrom)
-        if (descriptorIndex == -1) return null
-        
-        // Check if cursor is within the descriptor
-        if (cursorChar < descriptorIndex || cursorChar >= descriptorIndex + descriptor.length) {
-            return null
-        }
-        
-        // Calculate position within descriptor and find type at that offset
-        val posInDescriptor = cursorChar - descriptorIndex
-        val span = Types.typeAtOffset(descriptor, posInDescriptor) ?: return null
-
-        // Only return hover for primitive types (object types handled elsewhere)
-        return if (span.isPrimitive) {
-            hoverForPrimitiveType(span.type)
-        } else {
-            null
-        }
-    }
-    
-    /**
-     * Extract class reference at cursor position in a line.
-     * Finds L....; pattern that contains the cursor position.
-     * 
-     * @param lineContent The line text
-     * @param cursorChar Cursor character position (0-indexed)
-     * @return Class reference (e.g., "Lcom/example/Class;") or null if cursor not on a class ref
-     */
-    private fun extractClassRefAtPosition(lineContent: String, cursorChar: Int): String? {
-        // Find all class references in the line
-        for (match in CLASS_REF_PATTERN.findAll(lineContent)) {
-            // Check if cursor is within this class reference
-            if (cursorChar >= match.range.first && cursorChar <= match.range.last) {
-                return match.value
-            }
-        }
-        return null
-    }
-    
-    /**
-     * Hover for directive lines that don't have AST nodes (.super, .implements).
-     * BUG FIX: These directives don't have separate AST nodes, so findNodeAt() returns null.
-     * This fallback reads the line content and provides hover info for class references.
-     */
-    private fun hoverForDirectiveLine(lineContent: String?, position: Position): Hover? {
-        try {
-            val line = lineContent ?: return null
-            val trimmed = line.trim()
-            
-            // Check for .super directive
-            if (trimmed.startsWith(".super ")) {
-                val className = trimmed.substring(7).trim()
-                return hoverForClassReference(className)
-            }
-            
-            // Check for .implements directive
-            if (trimmed.startsWith(".implements ")) {
-                val className = trimmed.substring(12).trim()
-                return hoverForClassReference(className)
-            }
-            
-            // Check for .catch directive
-            // Format: .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
-            // Use original untrimmed line for position comparisons
-            if (trimmed.startsWith(".catch ")) {
-                // Extract class name - find first 'L' and ending ';' in the UNTRIMMED line
-                val catchKeywordIndex = line.indexOf(".catch")
-                val catchClassStart = line.indexOf('L', catchKeywordIndex + 6)
-                if (catchClassStart >= 0) {
-                    val catchClassEnd = line.indexOf(';', catchClassStart)
-                    if (catchClassEnd > catchClassStart) {
-                        val className = line.substring(catchClassStart, catchClassEnd + 1)
-                        // Check if cursor is anywhere on the class reference (untrimmed coordinates)
-                        if (position.character >= catchClassStart && position.character <= catchClassEnd) {
-                            return hoverForClassReference(className)
-                        }
-                    }
-                }
-            }
-            
-            // Fallback: Check for any class reference in the UNTRIMMED line
-            // This handles .annotation, .parameter, and other directives with class references
-            for (match in CLASS_REF_PATTERN.findAll(line)) {
-                if (position.character >= match.range.first && position.character <= match.range.last) {
-                    return hoverForClassReference(match.value)
-                }
-            }
-            
-            return null
-        } catch (e: Exception) {
-            return null
-        }
-    }
-    
 }

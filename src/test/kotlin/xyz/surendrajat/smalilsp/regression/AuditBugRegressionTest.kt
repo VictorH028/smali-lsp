@@ -10,6 +10,8 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.DiagnosticProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
+import xyz.surendrajat.smalilsp.shared.openSource
+import xyz.surendrajat.smalilsp.shared.positionOf
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -21,177 +23,59 @@ import kotlin.test.assertTrue
 class AuditBugRegressionTest {
 
     @Nested
-    @DisplayName("Bug #1: HoverProvider.hoverForDirectiveLine trimmed vs untrimmed position")
-    inner class HoverDirectiveLineTrimBug {
-        private lateinit var index: WorkspaceIndex
-        private lateinit var provider: HoverProvider
+    @DisplayName("Bug #1: hover on indented directives")
+    inner class IndentedDirectiveHover {
+        private val index = WorkspaceIndex()
+        private val provider = HoverProvider(index)
+        private val uri = "file:///Test.smali"
+        private val source = listOf(
+            ".class public Lcom/test/Test;",
+            "    .super Ljava/lang/Object;",
+            "    .implements Lcom/example/MyInterface;",
+            "",
+            "    .annotation system Lcom/example/MyInterface;",
+            "    .end annotation",
+            "",
+            ".method public test()V",
+            "    .registers 1",
+            "    :try_start_0",
+            "    invoke-virtual {p0}, Ljava/lang/Object;->toString()Ljava/lang/String;",
+            "    :try_end_0",
+            "    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0",
+            "    :catch_0",
+            "    return-void",
+            ".end method",
+        ).joinToString("\n")
 
         @BeforeEach
         fun setup() {
-            index = WorkspaceIndex()
-            provider = HoverProvider(index)
-
-            // Index the target class so hover can resolve it
-            index.indexFile(
-                SmaliFile(
-                    uri = "file:///Exception.smali",
-                    classDefinition = ClassDefinition(
-                        name = "Ljava/lang/Exception;",
-                        range = range(0, 0, 1, 0),
-                        modifiers = setOf("public"),
-                        superClass = "Ljava/lang/Throwable;",
-                        interfaces = emptyList()
-                    ),
-                    methods = emptyList(),
-                    fields = emptyList()
-                )
-            )
-            index.indexFile(
-                SmaliFile(
-                    uri = "file:///MyInterface.smali",
-                    classDefinition = ClassDefinition(
-                        name = "Lcom/example/MyInterface;",
-                        range = range(0, 0, 1, 0),
-                        modifiers = setOf("public", "interface"),
-                        superClass = "Ljava/lang/Object;",
-                        interfaces = emptyList()
-                    ),
-                    methods = emptyList(),
-                    fields = emptyList()
-                )
-            )
+            index.openSource("file:///Exception.smali", ".class public Ljava/lang/Exception;\n.super Ljava/lang/Throwable;")
+            index.openSource("file:///MyInterface.smali", ".class public interface Lcom/example/MyInterface;\n.super Ljava/lang/Object;")
+            index.openSource(uri, source)
         }
+
+        private fun hover(marker: String, needle: String, offset: Int): String? =
+            provider.provideHover(uri, source.positionOf(marker, needle, offset))?.contents?.right?.value
 
         @Test
         fun `hover on indented catch directive should work`() {
-            // Indented .catch line (4 spaces) — cursor at position of L in the UNTRIMMED line
-            // .catch is inside a method body, so we need a method range covering this line
-            // and the .catch must NOT be modeled as a separate AST node (it isn't)
-            val uri = "file:///Test.smali"
-            val lines = listOf(
-                ".class public Lcom/test/Test;",       // line 0
-                ".super Ljava/lang/Object;",            // line 1
-                "",                                     // line 2
-                ".method public test()V",               // line 3
-                "    :try_start_0",                     // line 4
-                "    invoke-virtual {p0}, Ljava/lang/Object;->toString()Ljava/lang/String;", // line 5
-                "    :try_end_0",                       // line 6
-                "    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0", // line 7
-                "    :catch_0",                         // line 8
-                "    return-void",                      // line 9
-                ".end method"                           // line 10
-            )
-            val content = lines.joinToString("\n")
-            
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/test/Test;",
-                    range = range(0, 0, 10, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 10, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            index.indexFile(file)
-            index.setDocumentContent(uri, content)
-
-            // Line 7: "    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0"
-            // 'L' starts at char 11, 'E' of Exception at char 27
-            // The method node covers this line, but findNodeAt should return METHOD scope
-            // The hover code checks: if inside method body but not on instruction line → opcodeKeyword fallback
-            // However .catch is not an opcode, so it returns null. The hoverForDirectiveLine is only
-            // called when node==null. This means the bug is that .catch directives inside methods
-            // are NOT handled by the current hover logic at all.
-            // 
-            // For this test, we verify the hoverForDirectiveLine function itself works correctly
-            // with untrimmed coordinates by testing a .catch on a line OUTSIDE any method range
-            val uri2 = "file:///Test_catch.smali"
-            val catchContent = "    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0"
-            val file2 = SmaliFile(
-                uri = uri2,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/test/TestCatch;",
-                    range = range(0, 0, 0, 0),  // class range doesn't cover line 0 cursor position
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = emptyList()
-            )
-            index.indexFile(file2)
-            index.setDocumentContent(uri2, "header\n" + catchContent)
-
-            // Hover on line 1 (the .catch line) at char 12 (on 'L') in the untrimmed line
-            // Line 1: "    .catch Ljava/lang/Exception; ..."
-            //          0123456789012345
-            // L is at position 11
-            val hover = provider.provideHover(uri2, Position(1, 20))
+            val hover = hover(".catch", "Ljava/lang/Exception;", 9)
             assertNotNull(hover, "Hover should work on indented .catch directive class reference")
-            val hoverContent = (hover.contents.right as MarkupContent).value
-            assertTrue(hoverContent.contains("Exception"), "Should show Exception info")
+            assertTrue(hover.contains("java.lang.Exception"), hover)
         }
 
         @Test
         fun `hover on indented implements directive should work`() {
-            val indentedContent = "    .implements Lcom/example/MyInterface;"
-            //                     0123456789...
-            // 'L' starts at char 16 in untrimmed line
-            val uri = "file:///Test2.smali"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/test/Test2;",
-                    range = range(0, 0, 10, 0),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = listOf("Lcom/example/MyInterface;")
-                ),
-                methods = emptyList(),
-                fields = emptyList()
-            )
-            index.indexFile(file)
-            index.setDocumentContent(uri, indentedContent)
-
-            val hover = provider.provideHover(uri, Position(0, 25))
+            val hover = hover(".implements", "Lcom/example/MyInterface;", 9)
             assertNotNull(hover, "Hover should work on indented .implements directive")
+            assertTrue(hover.contains("com.example.MyInterface"), hover)
         }
 
         @Test
-        fun `hover fallback regex on indented annotation should work`() {
-            // The fallback CLASS_REF_PATTERN.findAll(line) also uses trimmed string
-            val indentedContent = "    .annotation Lcom/example/MyInterface;"
-            val uri = "file:///Test3.smali"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/test/Test3;",
-                    range = range(0, 0, 10, 0),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = emptyList()
-            )
-            index.indexFile(file)
-            index.setDocumentContent(uri, indentedContent)
-
-            // Cursor on 'M' of MyInterface at char 28 in untrimmed line
-            val hover = provider.provideHover(uri, Position(0, 28))
-            assertNotNull(hover, "Hover fallback regex should work on indented lines")
+        fun `hover on indented annotation should work`() {
+            val hover = hover(".annotation", "Lcom/example/MyInterface;", 14)
+            assertNotNull(hover, "Hover should work on indented annotation types")
+            assertTrue(hover.contains("com.example.MyInterface"), hover)
         }
     }
 
@@ -263,96 +147,30 @@ class AuditBugRegressionTest {
     }
 
     @Nested
-    @DisplayName("Bug #4: CLASS_REF_PATTERN too restrictive — misses underscores/hyphens")
-    inner class ClassRefPatternBug {
-        private lateinit var index: WorkspaceIndex
-        private lateinit var provider: HoverProvider
+    @DisplayName("Bug #4: class names with underscores and hyphens")
+    inner class UnusualClassNames {
+        private val index = WorkspaceIndex()
+        private val provider = HoverProvider(index)
 
-        @BeforeEach
-        fun setup() {
-            index = WorkspaceIndex()
-            provider = HoverProvider(index)
+        private fun hoverOnAnnotation(className: String): String? {
+            index.openSource("file:///Target.smali", ".class public $className\n.super Ljava/lang/Object;")
+            val source = ".class public Lcom/test/Test;\n.super Ljava/lang/Object;\n\n.annotation system $className\n.end annotation"
+            index.openSource("file:///test.smali", source)
+            return provider.provideHover("file:///test.smali", source.positionOf(".annotation", className, 18))?.contents?.right?.value
         }
 
         @Test
         fun `hover should work on class names with underscores`() {
-            val className = "Lcom/example/My_Class;"
-            index.indexFile(
-                SmaliFile(
-                    uri = "file:///My_Class.smali",
-                    classDefinition = ClassDefinition(
-                        name = className,
-                        range = range(0, 0, 1, 0),
-                        modifiers = setOf("public"),
-                        superClass = "Ljava/lang/Object;",
-                        interfaces = emptyList()
-                    ),
-                    methods = emptyList(),
-                    fields = emptyList()
-                )
-            )
-
-            // Set up a file with an annotation referencing the underscore class
-            val content = ".annotation Lcom/example/My_Class;"
-            val uri = "file:///test.smali"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/test/Test;",
-                    range = range(0, 0, 10, 0),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = emptyList()
-            )
-            index.indexFile(file)
-            index.setDocumentContent(uri, content)
-
-            // Cursor somewhere on the class ref
-            val hover = provider.provideHover(uri, Position(0, 18))
+            val hover = hoverOnAnnotation("Lcom/example/My_Class;")
             assertNotNull(hover, "Hover should work on class names with underscores")
+            assertTrue(hover.contains("com.example.My_Class"), hover)
         }
 
         @Test
         fun `hover should work on class names with hyphens`() {
-            // While hyphens in class names are unusual, they are valid in Smali
-            val className = "Lcom/example/My-Class;"
-            index.indexFile(
-                SmaliFile(
-                    uri = "file:///MyHyphenClass.smali",
-                    classDefinition = ClassDefinition(
-                        name = className,
-                        range = range(0, 0, 1, 0),
-                        modifiers = setOf("public"),
-                        superClass = "Ljava/lang/Object;",
-                        interfaces = emptyList()
-                    ),
-                    methods = emptyList(),
-                    fields = emptyList()
-                )
-            )
-
-            val content = ".annotation Lcom/example/My-Class;"
-            val uri = "file:///test2.smali"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/test/Test2;",
-                    range = range(0, 0, 10, 0),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = emptyList()
-            )
-            index.indexFile(file)
-            index.setDocumentContent(uri, content)
-
-            val hover = provider.provideHover(uri, Position(0, 18))
+            val hover = hoverOnAnnotation("Lcom/example/My-Class;")
             assertNotNull(hover, "Hover should work on class names with hyphens")
+            assertTrue(hover.contains("com.example.My-Class"), hover)
         }
     }
 
@@ -424,45 +242,22 @@ class AuditBugRegressionTest {
     @Nested
     @DisplayName("Bug: HoverProvider mixed MarkupKind.MARKDOWN vs string literal")
     inner class MarkupKindConsistency {
-        private lateinit var index: WorkspaceIndex
-        private lateinit var provider: HoverProvider
-
-        @BeforeEach
-        fun setup() {
-            index = WorkspaceIndex()
-            provider = HoverProvider(index)
-        }
-
         @Test
         fun `all hover results should use MarkupKind MARKDOWN constant`() {
-            // Index a class and get hover — verify it uses proper MarkupKind
-            val file = SmaliFile(
-                uri = "file:///Test.smali",
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 1, 0),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 0),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
+            val index = WorkspaceIndex()
+            val provider = HoverProvider(index)
+            val source = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.field private count:I\n\n.method public test()V\n    .registers 1\n    return-void\n.end method"
+            index.openSource("file:///Test.smali", source)
+            val positions = listOf(
+                source.positionOf(".class", "Lcom/example/Test;", 3),
+                source.positionOf("count:I", "I", after = ":"),
+                source.positionOf(".method", "test", 1),
+                source.positionOf("return-void", "return-void", 2),
             )
-            index.indexFile(file)
-
-            val hover = provider.provideHover("file:///Test.smali", Position(0, 10))
-            if (hover != null) {
-                val markup = hover.contents.right as MarkupContent
-                assertEquals(MarkupKind.MARKDOWN, markup.kind,
+            for (position in positions) {
+                val hover = provider.provideHover("file:///Test.smali", position)
+                assertNotNull(hover, "hover at $position")
+                assertEquals(MarkupKind.MARKDOWN, (hover.contents.right as MarkupContent).kind,
                     "MarkupContent should use MarkupKind.MARKDOWN constant, not string literal")
             }
         }

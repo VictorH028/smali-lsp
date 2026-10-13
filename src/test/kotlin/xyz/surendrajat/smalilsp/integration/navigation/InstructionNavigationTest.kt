@@ -128,7 +128,7 @@ class InstructionNavigationTest {
         index.indexFile(file!!)
         
         // Test iget navigation (line 8) - cursor on field name "myField" (after ->)
-        val igetPosition = Position(8, 35)
+        val igetPosition = Position(8, 38)
         val igetDefs = definitionProvider.findDefinition("file:///Test.smali", igetPosition)
 
         assertEquals(1, igetDefs.size, "Should find field definition from iget")
@@ -139,7 +139,7 @@ class InstructionNavigationTest {
         assertEquals(3, igetDef.range.start.line, "Should navigate to field definition at line 3")
 
         // Test iput navigation (line 15) - cursor on field name "myField" (after ->)
-        val iputPosition = Position(15, 35)
+        val iputPosition = Position(15, 38)
         val iputDefs = definitionProvider.findDefinition("file:///Test.smali", iputPosition)
         
         assertEquals(1, iputDefs.size, "Should find field definition from iput")

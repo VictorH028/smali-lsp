@@ -45,11 +45,8 @@ class RealWorkspaceConcurrentReadTest {
             .take(10)
             .map { file ->
                 Operation("hover ${file.classDefinition.name}") {
-                    val range = file.classDefinition.range
-                    hoverProvider.provideHover(
-                        file.uri,
-                        Position(range.start.line, range.start.character + 5)
-                    ) != null
+                    val name = file.classDefinition.nameSpan
+                    hoverProvider.provideHover(file.uri, Position(name.line, name.start + 1)) != null
                 }
             }
 
@@ -82,13 +79,9 @@ class RealWorkspaceConcurrentReadTest {
             }
             .mapNotNull { className ->
                 val file = index.findClass(className) ?: return@mapNotNull null
-                val range = file.classDefinition.range
+                val name = file.classDefinition.nameSpan
                 Operation("references $className") {
-                    referenceProvider.findReferences(
-                        file.uri,
-                        Position(range.start.line, range.start.character + 5),
-                        includeDeclaration = false
-                    ).isNotEmpty()
+                    referenceProvider.findReferences(file.uri, Position(name.line, name.start + 1), includeDeclaration = false).isNotEmpty()
                 }
             }
             .take(10)
