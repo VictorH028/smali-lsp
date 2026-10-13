@@ -14,8 +14,8 @@ object TestUtils {
     fun getProjectRoot(): File {
         // Start from this class file location and walk up to find project root
         val classFile = File(TestUtils::class.java.protectionDomain.codeSource.location.path)
-        var current = classFile
-        
+        var current: File? = classFile
+
         // Walk up until we find build.gradle.kts
         while (current != null && current.exists()) {
             if (File(current, "build.gradle.kts").exists()) {
@@ -40,33 +40,4 @@ object TestUtils {
         val apkDir = File(testDataDir, name)
         return if (apkDir.exists() && apkDir.isDirectory) apkDir else null
     }
-    
-    /**
-     * Get Mastodon APK directory, or null if not available.
-     */
-    fun getMastodonApk(): File? = getApk("mastodon")
-
-    /**
-     * Require Mastodon APK directory, otherwise skip the current test.
-     */
-    fun requireMastodonApk(): File {
-        val apk = getMastodonApk()
-        assumeTrue(apk?.exists() == true, "Mastodon APK not available — skipping")
-        return apk!!
-    }
-    
-    /**
-     * Get ProtonMail APK directory, or null if not available.
-     */
-    fun getProtonMailApk(): File? = getApk("protonmail")
-
-    /**
-     * Require ProtonMail APK directory, otherwise skip the current test.
-     */
-    fun requireProtonMailApk(): File {
-        val apk = getProtonMailApk()
-        assumeTrue(apk?.exists() == true, "ProtonMail APK not available — skipping")
-        return apk!!
-    }
-
 }

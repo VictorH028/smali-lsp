@@ -2,6 +2,7 @@ package xyz.surendrajat.smalilsp.integration.workspace
 
 import kotlinx.coroutines.runBlocking
 import org.eclipse.lsp4j.Position
+import org.eclipse.lsp4j.SymbolKind
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -24,6 +25,7 @@ import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
 import xyz.surendrajat.smalilsp.shared.TestUtils
+import org.eclipse.lsp4j.Location
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
 import java.util.Random
@@ -86,6 +88,7 @@ class RealApkInvariantsTest {
         dynamicTest("find-references on a class returns its subclasses and implementors") { classReferences(fx) },
         dynamicTest("goto-definition on .super and .implements resolves") { directiveNavigation(fx) },
         dynamicTest("hover works on declarations and const-class operands") { hover(fx) },
+        dynamicTest("concurrent reads give the same answers as sequential ones") { concurrentReads(fx) },
         dynamicTest("workspace symbol search finds classes by simple name") { symbolSearch(fx) },
         dynamicTest("diagnostics report no syntax errors and no undefined workspace classes") { diagnostics(fx) },
         dynamicTest("re-indexing and remove+add are no-ops") { idempotentReindex(fx) },
@@ -353,9 +356,43 @@ class RealApkInvariantsTest {
             if (search.search(query).none { it.name == name }) bad.add("$name (query '$query')")
         }
         assertEquals(emptyList<String>(), bad.take(10), "${fx.dir.name}: ${bad.size} of $checked classes not found by simple name")
+        // An exact name match (a class, or a member such as Kotlin's `Companion` field) outranks everything else
+        val notFirst = sample(50, files.size, 7).map { files[it].classDefinition.name }.filter { name ->
+            val query = Types.simpleName(name)
+            val first = search.search(query).first()
+            val firstName = if (first.kind == SymbolKind.Class) Types.simpleName(first.name) else first.name.substringAfterLast('.')
+            !firstName.equals(query, ignoreCase = true)
+        }
+        assertEquals(emptyList<String>(), notFirst.take(10), "${fx.dir.name}: an exact name match must rank first")
         val all = search.search("")
         assertTrue(all.size <= 500, "empty query must be capped at 500")
         assertEquals(500, all.size, "${fx.dir.name}: empty query should fill the cap on a real app")
+    }
+
+    private fun concurrentReads(fx: Fixture) {
+        val definitions = DefinitionProvider(fx.index)
+        val hovers = HoverProvider(fx.index)
+        val references = ReferenceProvider(fx.index)
+        val probes = sample(60, fx.files.size, 8).mapNotNull { i ->
+            val file = fx.files[i]
+            val call = file.methods.asSequence().flatMap { it.instructions.asSequence() }.filterIsInstance<InvokeInstruction>().firstOrNull { it.nameSpan != null } ?: return@mapNotNull null
+            file.uri to Position(call.targetLine, call.nameSpan!!.start + 1)
+        }
+        assumeTrue(probes.isNotEmpty())
+        fun answer(p: Pair<String, Position>) = Triple(
+            definitions.findDefinition(p.first, p.second),
+            hovers.provideHover(p.first, p.second)?.contents?.right?.value,
+            references.findReferences(p.first, p.second, true).size
+        )
+        val expected = probes.map(::answer)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+        try {
+            val results = (1..4).flatMap { probes.map { p -> pool.submit<Triple<List<Location>, String?, Int>> { answer(p) } } }
+                .map { it.get(60, java.util.concurrent.TimeUnit.SECONDS) }
+            results.chunked(probes.size).forEachIndexed { round, got -> assertEquals(expected, got, "${fx.dir.name}: round $round of concurrent reads differs") }
+        } finally {
+            pool.shutdownNow()
+        }
     }
 
     // ---------- 11. diagnostics ----------
