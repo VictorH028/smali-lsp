@@ -85,6 +85,14 @@ class WorkspaceIndexStorageTest {
     }
 
     @Test
+    fun `a primitive-array owner is not a class reference`() {
+        indexSource("file:///Arr.smali", source("Lcom/Arr;", "invoke-virtual {v0}, [I->clone()Ljava/lang/Object;\n    invoke-virtual {v0}, [Lcom/Elem;->clone()Ljava/lang/Object;"))
+        assertTrue(index.findClassRefLocations("I").isEmpty())
+        assertTrue(index.findClassRefLocations("[I").isEmpty())
+        assertEquals(1, index.findClassRefLocations("Lcom/Elem;").size, "an object-array owner is filed under its element class")
+    }
+
+    @Test
     fun `fields with the same name and different types are distinct`() {
         indexSource("file:///Holder.smali", """
             .class public Lcom/Holder;

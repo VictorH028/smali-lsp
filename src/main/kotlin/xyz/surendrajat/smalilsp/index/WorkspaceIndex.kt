@@ -159,7 +159,7 @@ class WorkspaceIndex {
     /**
      * Every usage a file contributes: call sites, field accesses and class references
      * (owners, type operands, field types, descriptor types), each at its token. Array types are
-     * filed under their element class.
+     * filed under their element class; a primitive-array owner (`[I->clone()`) names no class.
      */
     private inline fun forEachUsage(
         file: SmaliFile,
@@ -170,11 +170,11 @@ class WorkspaceIndex {
                 when (instr) {
                     is InvokeInstruction -> {
                         sink(methodUsages, methodKey(instr.className, instr.methodName, instr.descriptor), instr.nameSpan ?: instr.range.toSpan())
-                        sink(classRefs, Types.elementClass(instr.className), instr.ownerSpan ?: instr.range.toSpan())
+                        Types.className(instr.className)?.let { sink(classRefs, it, instr.ownerSpan ?: instr.range.toSpan()) }
                     }
                     is FieldAccessInstruction -> {
                         sink(fieldUsages, fieldKey(instr.className, instr.fieldName, instr.fieldType), instr.nameSpan ?: instr.range.toSpan())
-                        sink(classRefs, Types.elementClass(instr.className), instr.ownerSpan ?: instr.range.toSpan())
+                        Types.className(instr.className)?.let { sink(classRefs, it, instr.ownerSpan ?: instr.range.toSpan()) }
                         Types.className(instr.fieldType)?.let { sink(classRefs, it, instr.typeSpan ?: instr.range.toSpan()) }
                     }
                     is TypeInstruction -> {
