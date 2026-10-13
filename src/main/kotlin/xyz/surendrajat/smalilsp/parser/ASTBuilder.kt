@@ -121,6 +121,7 @@ class ASTBuilder(
 
     /** > 0 while inside a directive whose class name tokens are recorded as [TypeRef]s. */
     private var typeRefDepth = 0
+    private val blocks = mutableListOf<Block>()
 
     override fun exitClassDirective(ctx: GeneratedSmaliParser.ClassDirectiveContext) {
         className = ctx.className()?.src()?.let { strings.intern(it) }
@@ -273,14 +274,24 @@ class ASTBuilder(
             ),
             methods = methods.toList(),
             fields = fields.toList(),
-            typeRefs = typeRefs.toList()
+            typeRefs = typeRefs.toList(),
+            blocks = blocks.toList()
         )
     }
 
     // ========== Class references in directives ==========
 
     override fun enterAnnotationDirective(ctx: GeneratedSmaliParser.AnnotationDirectiveContext) { typeRefDepth++ }
-    override fun exitAnnotationDirective(ctx: GeneratedSmaliParser.AnnotationDirectiveContext) { typeRefDepth-- }
+    override fun exitAnnotationDirective(ctx: GeneratedSmaliParser.AnnotationDirectiveContext) { typeRefDepth--; addBlock(ctx) }
+    override fun exitPackedSwitchDirective(ctx: GeneratedSmaliParser.PackedSwitchDirectiveContext) = addBlock(ctx)
+    override fun exitSparseSwitchDirective(ctx: GeneratedSmaliParser.SparseSwitchDirectiveContext) = addBlock(ctx)
+    override fun exitArrayDataDirective(ctx: GeneratedSmaliParser.ArrayDataDirectiveContext) = addBlock(ctx)
+
+    /** The lines of a block directive, for folding. */
+    private fun addBlock(ctx: ParserRuleContext) {
+        val stop = ctx.stop ?: return
+        blocks.add(Block(ctx.start.line - 1, stop.line - 1))
+    }
     override fun enterLocalDirective(ctx: GeneratedSmaliParser.LocalDirectiveContext) { typeRefDepth++ }
     override fun exitLocalDirective(ctx: GeneratedSmaliParser.LocalDirectiveContext) { typeRefDepth-- }
     override fun enterMethodProto(ctx: GeneratedSmaliParser.MethodProtoContext) { typeRefDepth++ }

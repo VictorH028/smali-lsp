@@ -24,8 +24,13 @@ data class SmaliFile(
     val fields: List<FieldDefinition>,
     val methods: List<MethodDefinition>,
     /** Class references in directives: annotations, `.catch`, `.local`, method prototypes. */
-    val typeRefs: List<TypeRef> = emptyList()
+    val typeRefs: List<TypeRef> = emptyList(),
+    /** Directive blocks an editor can fold: annotations, switch tables, array data. */
+    val blocks: List<Block> = emptyList()
 )
+
+/** The lines of a directive block, from its opening directive to its `.end`. */
+data class Block(val startLine: Int, val endLine: Int)
 
 data class ClassDefinition(
     val name: String,  // e.g., "Lcom/example/MyClass;"

@@ -236,6 +236,11 @@ class SmaliLanguageServer : LanguageServer {
         // Rename (with prepare support)
         capabilities.setRenameProvider(RenameOptions(true))
 
+        // Implementations, occurrences in the file, foldable regions
+        capabilities.setImplementationProvider(true)
+        capabilities.setDocumentHighlightProvider(true)
+        capabilities.setFoldingRangeProvider(true)
+
         val versionInfo = loadVersionInfo()
         val serverInfo = ServerInfo("Smali Language Server", versionInfo.version)
         return InitializeResult(capabilities, serverInfo)

@@ -9,7 +9,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
 /** One declaration of a member: the file and the name token. */
-data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot: Boolean)
+data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot: Boolean, val modifiers: Set<String> = emptySet())
 
 /** A member's declarations (the root first, then the overrides of a virtual method) and the sites that bind to them. */
 class MemberFamily(val declarations: List<MemberDeclaration>, val usages: List<Location>) {
@@ -124,11 +124,11 @@ class ReferenceProvider(
         }
         val roots = if (climb && binding == Binding.Virtual) workspaceIndex.rootMethodDeclarations(declaration, methodName, descriptor) else listOf(declaration)
         return family(
-            roots = roots.map { MemberDeclaration(it.file, it.method.nameSpan, isRoot = true) },
+            roots = roots.map { MemberDeclaration(it.file, it.method.nameSpan, isRoot = true, modifiers = it.method.modifiers) },
             binding = binding,
             usagesOf = { owner -> workspaceIndex.findMethodUsages(owner, methodName, descriptor) },
             bindsTo = { owner -> workspaceIndex.resolveMethod(owner, methodName, descriptor)?.file?.classDefinition?.name },
-            declaredIn = { file -> file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { MemberDeclaration(file, it.nameSpan, isRoot = false) } }
+            declaredIn = { file -> file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { MemberDeclaration(file, it.nameSpan, isRoot = false, modifiers = it.modifiers) } }
         )
     }
 
@@ -137,7 +137,7 @@ class ReferenceProvider(
         val declaration = workspaceIndex.resolveField(className, fieldName, fieldType)
             ?: return MemberFamily(emptyList(), workspaceIndex.findFieldUsages(className, fieldName, fieldType))
         return family(
-            roots = listOf(MemberDeclaration(declaration.file, declaration.field.nameSpan, isRoot = true)),
+            roots = listOf(MemberDeclaration(declaration.file, declaration.field.nameSpan, isRoot = true, modifiers = declaration.field.modifiers)),
             binding = Binding.Inherited,
             usagesOf = { owner -> workspaceIndex.findFieldUsages(owner, fieldName, fieldType) },
             bindsTo = { owner -> workspaceIndex.resolveField(owner, fieldName, fieldType)?.file?.classDefinition?.name },
