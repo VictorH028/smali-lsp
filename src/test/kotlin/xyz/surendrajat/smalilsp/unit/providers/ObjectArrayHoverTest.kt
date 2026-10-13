@@ -12,7 +12,7 @@ import xyz.surendrajat.smalilsp.shared.TestWorkspace
  * 1. Hover on [ and [[ object arrays shows "not found" instead of array info
  * 2. Position-based find references on declarations doesn't work
  */
-class RemainingIssuesTest {
+class ObjectArrayHoverTest {
 
     @Test
     fun `issue 1 - hover on object array shows array info not not found`() {

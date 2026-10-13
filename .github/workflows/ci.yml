@@ -63,9 +63,6 @@ jobs:
       - name: Regression tests
         run: ./gradlew test --tests "*.regression.*"
 
-      - name: Stress tests
-        run: ./gradlew test --tests "*.stress.*"
-
       - name: Test Report
         uses: dorny/test-reporter@v3
         if: always()

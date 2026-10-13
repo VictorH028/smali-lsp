@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.queries
+package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Test
@@ -23,7 +23,7 @@ import org.junit.jupiter.api.assertDoesNotThrow
  * 
  * Ensures all edge cases are handled gracefully without crashes.
  */
-class EdgeCaseStressTest {
+class SdkTypeEdgeCaseTest {
     
     @Test
     fun `references - SDK array types work correctly`() {

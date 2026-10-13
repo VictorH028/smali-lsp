@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.queries
+package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Test
@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
  * Stress tests to find edge cases and bugs in providers.
  * Tests unusual inputs, boundary conditions, and error scenarios.
  */
-class ProviderStressTest {
+class ProviderEdgeCaseTest {
     
     @Test
     fun `HoverProvider - handles malformed descriptors gracefully`() {

@@ -191,7 +191,6 @@ ANTLR4 Grammar → SmaliParser → ASTBuilder → WorkspaceIndex → LSP/MCP Pro
 ./gradlew test --tests "*.unit.*"
 ./gradlew test --tests "*.integration.*"
 ./gradlew test --tests "*.regression.*"
-./gradlew test --tests "*.stress.*"
 ```
 
 ## License

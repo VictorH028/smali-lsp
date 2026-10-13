@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.parsing
+package xyz.surendrajat.smalilsp.unit.util
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -10,7 +10,7 @@ import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
  * Stress tests for InstructionSymbolExtractor.
  * Tests edge cases, malformed input, extreme cases.
  */
-class InstructionSymbolExtractorStressTest {
+class InstructionSymbolExtractorEdgeCaseTest {
 
     /**
      * Test with 1000+ instruction method to ensure extraction works in large methods

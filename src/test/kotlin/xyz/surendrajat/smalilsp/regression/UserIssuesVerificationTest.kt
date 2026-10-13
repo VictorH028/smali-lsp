@@ -46,13 +46,11 @@ class UserIssuesVerificationTest {
         val file = parser.parse(uri, content)!!
         index.indexFile(file)
         
-        // Cursor on "TAG" - should navigate to String class, not stay on field
+        // Cursor on the field name "TAG": a declaration is its own definition, and the
+        // type (java.lang.String) is not in the workspace, so nothing is returned.
         val locations = definitionProvider.findDefinition(uri, Position(3, 28))
-        
-        // If it goes to String, locations will be empty (String not in index)
-        // But it should attempt to go to String, not return field location
-        println("GoTo Definition on TAG: ${locations.size} locations")
-        // This test documents current behavior
+
+        assertTrue(locations.isEmpty(), "field name is not a navigation target: $locations")
     }
     
     @Test

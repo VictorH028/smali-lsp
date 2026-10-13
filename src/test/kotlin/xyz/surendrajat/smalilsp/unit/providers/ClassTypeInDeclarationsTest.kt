@@ -19,7 +19,7 @@ import xyz.surendrajat.smalilsp.shared.TestWorkspace
  * Example: sget-object v0, La0/a3;->o:[La0/a3;
  * Hover on "[La0/a3;" should show array info, but shows "not found in workspace"
  */
-class UserSpecificIssuesTest {
+class ClassTypeInDeclarationsTest {
 
     @Test
     fun `issue 1 - find references on class type in field declaration`() {

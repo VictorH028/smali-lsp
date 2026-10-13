@@ -18,7 +18,7 @@ import xyz.surendrajat.smalilsp.providers.HoverProvider
  * - Hover #9: Array types [[ hover
  * - Hover #10: Position-based hover on .method/.field for params/return types
  */
-class RemainingHoverIssuesTest {
+class DeclarationTypeHoverTest {
 
     private val parser = SmaliParser()
     private val index = WorkspaceIndex()

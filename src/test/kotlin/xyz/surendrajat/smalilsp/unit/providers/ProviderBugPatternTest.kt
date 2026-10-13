@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.queries
+package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Test
@@ -20,7 +20,7 @@ import kotlin.test.*
  * 6. Diagnostics False Positives (fixed)
  * 7. Feature Not Working At All (3+ instances)
  */
-class ComprehensiveBugPatternStressTest {
+class ProviderBugPatternTest {
     
     // ========== Pattern #1: Position-Based Features ==========
     

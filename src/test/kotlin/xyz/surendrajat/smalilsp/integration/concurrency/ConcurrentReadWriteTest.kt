@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.concurrent
+package xyz.surendrajat.smalilsp.integration.concurrency
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.BeforeEach
@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
  * Verifies that 50 reader threads + 5 writer threads can
  * operate on the index simultaneously without corruption.
  */
-class ConcurrentReadWriteStressTest {
+class ConcurrentReadWriteTest {
 
     private lateinit var index: WorkspaceIndex
     private lateinit var parser: SmaliParser

@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.concurrent
+package xyz.surendrajat.smalilsp.integration.concurrency
 
 import kotlinx.coroutines.runBlocking
 import org.eclipse.lsp4j.Position
@@ -23,10 +23,10 @@ import kotlin.test.assertTrue
  * but this test exercises hover, goto-definition, and find-references concurrently
  * against an actual indexed APK workspace.
  */
-class RealWorkspaceConcurrentReadStressTest {
+class RealWorkspaceConcurrentReadTest {
 
     @Test
-    fun `concurrent provider reads stay stable on Mastodon workspace`() = PerformanceTestLock.withExclusiveLock("RealWorkspaceConcurrentReadStressTest") {
+    fun `concurrent provider reads stay stable on Mastodon workspace`() = PerformanceTestLock.withExclusiveLock("RealWorkspaceConcurrentReadTest") {
         val apkDir = TestUtils.requireMastodonApk()
         val index = WorkspaceIndex()
         val scanner = WorkspaceScanner(index)

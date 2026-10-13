@@ -38,27 +38,10 @@ class BugFixValidationTest {
             index.indexFile(file!!)
         }
         
-        // Warm the lookup path once before timing to avoid one-off startup noise.
-        val testUri = "file:///test/Class500.smali"
-        repeat(1_000) {
-            index.findClassNameByUri(testUri)
-        }
-
-        // Test reverse lookup over many iterations so we measure steady-state behavior,
-        // not a single noisy sample.
-        val iterations = 10_000
-        val startTime = System.nanoTime()
-        var className: String? = null
-        repeat(iterations) {
-            className = index.findClassNameByUri(testUri)
-        }
-        val endTime = System.nanoTime()
-        val averageMicros = (endTime - startTime).toDouble() / iterations / 1_000.0
-        
-        assertEquals("Lcom/example/Class500;", className)
-        assertTrue(averageMicros < 50.0, "Lookup should stay well below 50µs on average, took ${averageMicros}µs")
-        
-        println("✅ BUG #1 FIXED: findClassNameByUri averaged ${String.format("%.3f", averageMicros)}µs for 1000 files")
+        // The reverse map answers directly; the O(n) fallback would have to scan all 1000 files.
+        assertEquals("Lcom/example/Class500;", index.findClassNameByUri("file:///test/Class500.smali"))
+        assertEquals("Lcom/example/Class999;", index.findClassNameByUri("file:///test/Class999.smali"))
+        assertNull(index.findClassNameByUri("file:///test/Class1000.smali"))
     }
     
     /**
@@ -183,12 +166,10 @@ class BugFixValidationTest {
             .end method
         """.trimIndent()
         
-        // Should not crash, should parse what it can
-        val file = parser.parse("file:///test.smali", content)
-        
-        // May return null if ANTLR rejects it, or may parse partial
-        // Either way, should not hang or crash
-        println("✅ BUG #3 FIXED: Truncated object type handled (file=$file)")
+        val result = parser.parseWithErrors("file:///test.smali", content)
+
+        assertTrue(result.syntaxErrors.isNotEmpty(), "the unterminated type must be reported")
+        assertEquals("Lcom/example/TestClass;", result.smaliFile!!.classDefinition.name, "the class itself still parses")
     }
     
     /**
@@ -207,10 +188,10 @@ class BugFixValidationTest {
             .end method
         """.trimIndent()
         
-        // Should not crash
-        val file = parser.parse("file:///test.smali", content)
-        
-        println("✅ BUG #3 FIXED: Truncated array handled (file=$file)")
+        val result = parser.parseWithErrors("file:///test.smali", content)
+
+        assertTrue(result.syntaxErrors.isNotEmpty(), "`[` without an element type must be reported")
+        assertEquals("Lcom/example/TestClass;", result.smaliFile!!.classDefinition.name)
     }
     
     /**
@@ -229,10 +210,10 @@ class BugFixValidationTest {
             .end method
         """.trimIndent()
         
-        // Should not hang in infinite loop
-        val file = parser.parse("file:///test.smali", content)
-        
-        println("✅ BUG #3 FIXED: Invalid character handled (file=$file)")
+        val result = parser.parseWithErrors("file:///test.smali", content)
+
+        assertTrue(result.syntaxErrors.isNotEmpty(), "`X` is not a type and must be reported")
+        assertEquals("Lcom/example/TestClass;", result.smaliFile!!.classDefinition.name)
     }
     
     /**

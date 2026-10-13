@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.queries
+package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Test
@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 /**
  * Test find references on method/field calls in instructions
  */
-class FindRefsInstructionTest {
+class ReferenceProviderInstructionTest {
     
     @Test
     fun `find references - method called in instructions`() {

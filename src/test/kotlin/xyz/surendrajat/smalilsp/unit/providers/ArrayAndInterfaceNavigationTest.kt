@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
  * Coverage gap tests: multi-dimensional arrays, invoke-interface,
  * empty/abstract methods, and edge cases identified in TEST_ANALYSIS.md.
  */
-class CoverageGapTest {
+class ArrayAndInterfaceNavigationTest {
 
     private lateinit var index: WorkspaceIndex
     private lateinit var parser: SmaliParser
@@ -112,8 +112,8 @@ class CoverageGapTest {
         indexContent("file:///test/Data.smali", targetContent)
         indexContent("file:///test/User.smali", userContent)
 
-        val usages = index.findClassUsages("Lcom/example/Data;")
-        // assertTrue(usages.isNotEmpty(), "Should find usages of Data via multi-dimensional array field type")
+        val refs = index.findClassRefLocations("Lcom/example/Data;")
+        assertTrue(refs.any { it.uri == "file:///test/User.smali" }, "the [[Lcom/example/Data; field type must count as a reference to Data")
     }
 
     // --- invoke-interface ---

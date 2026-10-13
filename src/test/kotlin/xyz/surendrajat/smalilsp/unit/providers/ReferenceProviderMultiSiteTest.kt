@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.queries
+package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Test
@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
  * Aggressive stress test for Find References.
  * Tests ACTUAL instruction-level reference finding, not just API calls.
  */
-class FindReferencesStressTest {
+class ReferenceProviderMultiSiteTest {
     
     @Test
     fun `find references - method called from multiple instructions`() {

@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.stress.queries
+package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Test
@@ -21,7 +21,7 @@ import kotlin.test.*
  * 3. Missing classes (typos, etc.)
  * 4. Edge cases (arrays, primitives, etc.)
  */
-class ComprehensiveMissingDefinitionTest {
+class SdkFallbackBehaviorTest {
     
     @Test
     fun `hover - SDK method shows fallback info`() {
