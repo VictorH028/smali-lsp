@@ -298,4 +298,31 @@ class WorkspaceIndexTest {
             modifiers = setOf("private")
         )
     }
+
+    @Test
+    fun `findClassNameByUri names the class of an indexed file and nothing for an unknown one`() {
+        index.indexFile(createTestFile(className = "Lcom/example/Outer\$Inner;", uri = "file:///test/Outer\$Inner.smali"))
+        assertEquals("Lcom/example/Outer\$Inner;", index.findClassNameByUri("file:///test/Outer\$Inner.smali"))
+        assertNull(index.findClassNameByUri("file:///test/Missing.smali"))
+    }
+
+    @Test
+    fun `getAllSubclasses on an inheritance cycle lists each class once and never the root`() {
+        index.indexFile(createTestFile(className = "Lcom/example/A;", uri = "file:///A.smali", superClass = "Lcom/example/B;"))
+        index.indexFile(createTestFile(className = "Lcom/example/B;", uri = "file:///B.smali", superClass = "Lcom/example/A;"))
+        assertEquals(setOf("Lcom/example/B;"), index.getAllSubclasses("Lcom/example/A;"))
+        assertEquals(setOf("Lcom/example/A;"), index.getAllSubclasses("Lcom/example/B;"))
+    }
+
+    @Test
+    fun `getLineContent reads an open document and nothing for a file that is neither open nor on disk`() {
+        val uri = "file:///test/Open.smali"
+        index.setDocumentContent(uri, ".class public LOpen;\n.super Ljava/lang/Object;\n\n.method public run()V\n    return-void\n.end method")
+        assertEquals(".class public LOpen;", index.getLineContent(uri, 0))
+        assertEquals("", index.getLineContent(uri, 2))
+        assertEquals("    return-void", index.getLineContent(uri, 4))
+        assertNull(index.getLineContent(uri, 6))
+        index.removeDocumentContent(uri)
+        assertNull(index.getLineContent(uri, 0), "nothing is open and the file does not exist on disk")
+    }
 }

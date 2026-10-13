@@ -334,4 +334,18 @@ class CompletionProviderTest {
         assertTrue(labels.any { it.startsWith("neg-") }, "Should include neg variants, got: $labels")
         assertTrue(labels.any { it.startsWith("new-") }, "Should include new variants, got: $labels")
     }
+
+    @Test
+    fun `an unfinished L-type in a declaration completes class names`() {
+        indexContent("file:///test/MyClass.smali", ".class public Lcom/example/MyClass;\n.super Ljava/lang/Object;")
+        for (line in listOf(".field public data:Lcom/ex", ".method public run(Lcom/ex")) {
+            val items = provider.provideCompletions("file:///test.smali", Position(3, line.length), line).items
+            val edit = items.single().textEdit.left
+            assertEquals("Lcom/example/MyClass;", edit.newText, line)
+            assertEquals(line.indexOf("Lcom/ex"), edit.range.start.character, line)
+            assertEquals(line.length, edit.range.end.character, line)
+        }
+        val finished = ".field public data:Lcom/example/MyClass;"
+        assertTrue(provider.provideCompletions("file:///test.smali", Position(3, finished.length), finished).items.isEmpty(), "a finished type offers nothing")
+    }
 }

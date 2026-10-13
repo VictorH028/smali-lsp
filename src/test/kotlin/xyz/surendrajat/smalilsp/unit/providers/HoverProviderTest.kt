@@ -1,5 +1,6 @@
 package xyz.surendrajat.smalilsp.unit.providers
 
+import org.eclipse.lsp4j.MarkupKind
 import org.eclipse.lsp4j.Position
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -153,5 +154,73 @@ class HoverProviderTest {
         assertNull(hoverAt(Position(3, 0)))
         assertNull(hoverAt(Position(100, 0)))
         assertNull(provider.provideHover("file:///Missing.smali", Position(0, 0)))
+    }
+
+    private fun hoverIn(fileUri: String, text: String, marker: String, needle: String): String? =
+        provider.provideHover(fileUri, text.positionOf(marker, needle, needle.length / 2))?.contents?.right?.value
+
+    @Test
+    fun `indented directives resolve the class they name`() {
+        index.openSource("file:///Marker.smali", ".class public interface abstract annotation Lcom/app/Marker;\n.super Ljava/lang/Object;")
+        index.openSource("file:///Boom.smali", ".class public Lcom/app/Boom;\n.super Ljava/lang/Exception;")
+        val indented = "file:///Indented.smali"
+        val text = listOf(
+            ".class public Lcom/app/Indented;",
+            "    .super Lcom/app/BaseActivity;",
+            "    .implements Ljava/io/Serializable;",
+            "",
+            "    .annotation system Lcom/app/Marker;",
+            "    .end annotation",
+            "",
+            ".method public run()V",
+            "    .registers 1",
+            "    :try_start_0",
+            "    return-void",
+            "    :try_end_0",
+            "    .catch Lcom/app/Boom; {:try_start_0 .. :try_end_0} :catch_0",
+            "    :catch_0",
+            "    return-void",
+            ".end method",
+        ).joinToString("\n")
+        index.openSource(indented, text)
+        val directives = mapOf(
+            ".super" to "com.app.BaseActivity",
+            ".implements" to "java.io.Serializable",
+            ".annotation" to "com.app.Marker",
+            ".catch" to "com.app.Boom",
+        )
+        for ((directive, readable) in directives) {
+            val hover = hoverIn(indented, text, directive, "L${readable.replace('.', '/')};")
+            assertTrue(hover != null && hover.contains("**Class:** `$readable`"), "$directive: $hover")
+        }
+    }
+
+    @Test
+    fun `class names with underscores and hyphens resolve`() {
+        index.openSource("file:///My_Class.smali", ".class public Lcom/app/My_Class;\n.super Ljava/lang/Object;")
+        index.openSource("file:///My-Class.smali", ".class public Lcom/app/My-Class;\n.super Ljava/lang/Object;")
+        val named = "file:///Named.smali"
+        val text = ".class public Lcom/app/Named;\n.super Lcom/app/My_Class;\n\n.annotation system Lcom/app/My-Class;\n.end annotation"
+        index.openSource(named, text)
+        val underscore = hoverIn(named, text, ".super", "Lcom/app/My_Class;")
+        assertTrue(underscore != null && underscore.contains("**Class:** `com.app.My_Class`"), "underscore: $underscore")
+        val hyphen = hoverIn(named, text, ".annotation", "Lcom/app/My-Class;")
+        assertTrue(hyphen != null && hyphen.contains("**Class:** `com.app.My-Class`"), "hyphen: $hyphen")
+    }
+
+    @Test
+    fun `every hover is markdown`() {
+        val positions = listOf(
+            source.positionOf(".class", "Lcom/app/MyActivity;", 6),
+            source.positionOf(".implements", "Ljava/io/Serializable;", 3),
+            source.positionOf("count:I", "I", after = ":"),
+            source.positionOf(".method", "onClick", 3),
+            source.positionOf("getId", "getId", 2),
+            source.positionOf("return-void", "return-void", 2),
+            source.positionOf("    :cond_0", ":cond_0", 2),
+        )
+        for (position in positions) {
+            assertEquals(MarkupKind.MARKDOWN, provider.provideHover(uri, position)?.contents?.right?.kind, "at $position")
+        }
     }
 }

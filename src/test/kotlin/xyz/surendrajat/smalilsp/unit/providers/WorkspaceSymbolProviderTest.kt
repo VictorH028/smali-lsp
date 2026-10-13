@@ -9,6 +9,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.core.ClassDefinition
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
+import xyz.surendrajat.smalilsp.shared.openSource
 /**
  * Unit tests for WorkspaceSymbolProvider.
  * 
@@ -471,5 +472,15 @@ class WorkspaceSymbolProviderTest {
         val provider = WorkspaceSymbolProvider(index)
         val cancelled = org.eclipse.lsp4j.jsonrpc.CancelChecker { throw java.util.concurrent.CancellationException("superseded") }
         org.junit.jupiter.api.assertThrows<java.util.concurrent.CancellationException> { provider.search("a", cancelled) }
+    }
+
+    @Test
+    fun `an exact method name ranks before a class that merely starts with it`() {
+        val index = WorkspaceIndex()
+        index.openSource("file:///Utils.smali", ".class public Lcom/app/Utils;\n.super Ljava/lang/Object;\n\n.method public getClassLoader()Ljava/lang/ClassLoader;\n    .registers 1\n    const/4 v0, 0x0\n    return-object v0\n.end method")
+        index.openSource("file:///getClassLoaderUtils.smali", ".class public Lcom/app/getClassLoaderUtils;\n.super Ljava/lang/Object;")
+        val results = WorkspaceSymbolProvider(index).search("getClassLoader")
+        assertEquals(listOf("Lcom/app/Utils;.getClassLoader", "Lcom/app/getClassLoaderUtils;"), results.map { it.name })
+        assertEquals(listOf(SymbolKind.Method, SymbolKind.Class), results.map { it.kind })
     }
 }
