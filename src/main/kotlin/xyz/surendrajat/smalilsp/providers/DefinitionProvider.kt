@@ -4,7 +4,6 @@ import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.resolver.TypeResolver
-import xyz.surendrajat.smalilsp.util.ClassUtils
 import xyz.surendrajat.smalilsp.util.InstructionSymbolExtractor
 import org.slf4j.LoggerFactory
 
@@ -244,17 +243,15 @@ class DefinitionProvider(
      * [Ljava/lang/String; → Ljava/lang/String; (then blocked as SDK)
      */
     private fun findClassDefinition(className: String): List<Location> {
-        // BUGFIX: SDK classes should not be navigable
-        // User requirement: "SDK Class should not be clickable or have any definitions"
-        if (ClassUtils.isSDKClass(className)) {
-            return emptyList()
-        }
-        
         // Strip array brackets for lookup (index stores base types only)
         // [[Lt5/d; → Lt5/d;
         // [Lcom/example/MyClass; → Lcom/example/MyClass;
         val baseClassName = className.trimStart('[')
-        
+
+        // Whatever is indexed is navigable, including bundled copies of SDK-prefixed
+        // classes (androidx.*, kotlin.*, desugared java.util.function.*): their smali is
+        // in the workspace and is the code that runs. Classes that are not indexed —
+        // the actual platform SDK — have no source to navigate to.
         val file = workspaceIndex.findClass(baseClassName)
         if (file != null) {
             return listOf(Location(file.uri, file.classDefinition.range))
