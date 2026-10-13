@@ -1,13 +1,17 @@
 package xyz.surendrajat.smalilsp.unit.providers
 
-import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.Position
+import org.eclipse.lsp4j.Range
+import org.eclipse.lsp4j.TextEdit
+import org.eclipse.lsp4j.WorkspaceEdit
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
-import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.providers.RenameProvider
+import xyz.surendrajat.smalilsp.shared.openSource
+import xyz.surendrajat.smalilsp.shared.positionOf
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -24,955 +28,262 @@ class RenameProviderTest {
         provider = RenameProvider(index)
     }
 
-    // --- Helpers ---
+    /** Edits of [edit] in [uri] as (line, startChar, endChar, newText), sorted. */
+    private fun edits(edit: WorkspaceEdit?, uri: String): List<List<Any>> =
+        edit?.changes?.get(uri).orEmpty().map { listOf(it.range.start.line, it.range.start.character, it.range.end.character, it.newText) }.sortedWith(compareBy({ it[0] as Int }, { it[1] as Int }))
 
-    private fun indexFileWithContent(uri: String, file: SmaliFile, content: String) {
-        index.indexFile(file)
-        index.setDocumentContent(uri, content)
+    private fun edit(source: String, marker: String, needle: String, offset: Int, newText: String, after: String? = null): List<Any> {
+        val p = source.positionOf(marker, needle, offset, after)
+        return listOf(p.line, p.character, p.character + needle.length, newText)
     }
 
-    // --- prepareRename tests ---
+    private val target = """
+        .class public Lcom/example/Target;
+        .super Ljava/lang/Object;
+
+        .field public name:Ljava/lang/String;
+        .field public count:I
+
+        .method public constructor <init>()V
+            .registers 1
+            return-void
+        .end method
+
+        .method public doWork(I)V
+            .registers 2
+            return-void
+        .end method
+    """.trimIndent()
+
+    private val caller = """
+        .class public Lcom/example/Caller;
+        .super Ljava/lang/Object;
+
+        .method public test()V
+            .registers 3
+            new-instance v0, Lcom/example/Target;
+            invoke-direct {v0}, Lcom/example/Target;-><init>()V
+            invoke-virtual {v0, v1}, Lcom/example/Target;->doWork(I)V
+            iget-object v1, v0, Lcom/example/Target;->name:Ljava/lang/String;
+            iget v2, v0, Lcom/example/Target;->count:I
+            invoke-virtual {v1}, Ljava/lang/String;->length()I
+            return-void
+        .end method
+    """.trimIndent()
+
+    private val targetUri = "file:///Target.smali"
+    private val callerUri = "file:///Caller.smali"
+
+    private fun openTargetAndCaller() {
+        index.openSource(targetUri, target)
+        index.openSource(callerUri, caller)
+    }
 
     @Nested
     @DisplayName("prepareRename")
     inner class PrepareRenameTests {
 
         @Test
-        fun `returns null for class definition`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 1, 27),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Cursor on class name — should not be renameable
-            val result = provider.prepareRename(uri, Position(0, 20))
-            assertNull(result, "Class rename should not be supported")
+        fun `returns null for class names and constructors`() {
+            openTargetAndCaller()
+            assertNull(provider.prepareRename(targetUri, target.positionOf(".class", "Lcom/example/Target;", 5)), "Class rename should not be supported")
+            assertNull(provider.prepareRename(targetUri, target.positionOf("constructor", "<init>", 2)), "<init> methods should not be renameable")
+            assertNull(provider.prepareRename(callerUri, caller.positionOf("invoke-direct", "<init>", 2)))
+            assertNull(provider.prepareRename(targetUri, target.positionOf(".method public doWork", "public")))
         }
 
         @Test
-        fun `returns null for init methods`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public constructor <init>()V\n    return-void\n.end method"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "<init>",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public", "constructor"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
+        fun `returns the name range of a method, field and label`() {
+            openTargetAndCaller()
+            val method = provider.prepareRename(targetUri, target.positionOf(".method public doWork", "doWork", 3))
+            assertNotNull(method, "Method should be renameable")
+            assertEquals("doWork", method.right.placeholder)
+            assertEquals(Range(target.positionOf(".method public doWork", "doWork"), target.positionOf(".method public doWork", "doWork", 6)), method.right.range)
 
-            val result = provider.prepareRename(uri, Position(3, 30))
-            assertNull(result, "<init> methods should not be renameable")
+            val field = provider.prepareRename(targetUri, target.positionOf("count:I", "count", 2))
+            assertEquals("count", field!!.right.placeholder)
+
+            val source = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public test()V\n    :start\n    return-void\n.end method"
+            index.openSource("file:///Test.smali", source)
+            val label = provider.prepareRename("file:///Test.smali", source.positionOf(":start", ":start", 3))
+            assertEquals("start", label!!.right.placeholder)
+            assertEquals(Range(Position(4, 5), Position(4, 10)), label.right.range, "the colon stays")
         }
 
         @Test
-        fun `returns name range for method definition`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public calculate(I)V\n    return-void\n.end method"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "calculate",
-                        descriptor = "(I)V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = listOf(Parameter("I", null)),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Cursor on "calculate" in ".method public calculate(I)V"
-            val result = provider.prepareRename(uri, Position(3, 18))
-            assertNotNull(result, "Method should be renameable")
-            assertEquals("calculate", result.right.placeholder)
-        }
-
-        @Test
-        fun `returns name range for field definition`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.field private count:I"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 3, 22),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = listOf(
-                    FieldDefinition(
-                        name = "count",
-                        type = "I",
-                        range = range(3, 0, 3, 22),
-                        modifiers = setOf("private")
-                    )
-                )
-            )
-            indexFileWithContent(uri, file, content)
-
-            val result = provider.prepareRename(uri, Position(3, 17))
-            assertNotNull(result, "Field should be renameable")
-            assertEquals("count", result.right.placeholder)
-        }
-
-        @Test
-        fun `returns name range for label definition`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public test()V\n    :start\n    return-void\n.end method"
-            val labelDef = LabelDefinition("start", range(4, 4, 4, 10))
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 6, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 6, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        labels = mapOf("start" to labelDef)
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            val result = provider.prepareRename(uri, Position(4, 6))
-            assertNotNull(result, "Label should be renameable")
-            assertEquals("start", result.right.placeholder)
+        fun `members of classes outside the workspace are not renameable`() {
+            openTargetAndCaller()
+            assertNull(provider.prepareRename(callerUri, caller.positionOf("length", "length", 2)), "String.length is not in the workspace")
         }
     }
-
-    // --- Method rename tests ---
 
     @Nested
     @DisplayName("Method rename")
     inner class MethodRenameTests {
 
         @Test
-        fun `renames method definition and call site`() {
-            val callerUri = "file:///Caller.smali"
-            val targetUri = "file:///Target.smali"
-
-            // Target class with method
-            val targetContent = ".class public Lcom/example/Target;\n.super Ljava/lang/Object;\n\n.method public doWork()V\n    return-void\n.end method"
-            val targetFile = SmaliFile(
-                uri = targetUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Target;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "doWork",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(targetUri, targetFile, targetContent)
-
-            // Caller class calling the method
-            val callerContent = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n\n.method public test()V\n    .registers 2\n    new-instance v0, Lcom/example/Target;\n    invoke-virtual {v0}, Lcom/example/Target;->doWork()V\n    return-void\n.end method"
-            val callerFile = SmaliFile(
-                uri = callerUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Caller;",
-                    range = range(0, 0, 8, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 8, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = listOf(
-                            InvokeInstruction(
-                                opcode = "invoke-virtual",
-                                className = "Lcom/example/Target;",
-                                methodName = "doWork",
-                                descriptor = "()V",
-                                range = range(6, 4, 6, 55)
-                            )
-                        )
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(callerUri, callerFile, callerContent)
-
-            // Rename at definition
-            val edit = provider.rename(targetUri, Position(3, 18), "execute")
-            assertNotNull(edit, "Should produce workspace edit")
-
-            val targetEdits = edit.changes[targetUri]
-            assertNotNull(targetEdits, "Should have edits in target file")
-            assertTrue(targetEdits.any { it.newText == "execute" }, "Should rename declaration")
-
-            val callerEdits = edit.changes[callerUri]
-            assertNotNull(callerEdits, "Should have edits in caller file")
-            assertTrue(callerEdits.any { it.newText == "execute" }, "Should rename call site")
+        fun `renames the declaration and the call site at their name tokens`() {
+            openTargetAndCaller()
+            val edit = provider.rename(targetUri, target.positionOf(".method public doWork", "doWork", 2), "execute")
+            assertEquals(listOf(edit(target, ".method public doWork", "doWork", 0, "execute")), edits(edit, targetUri))
+            assertEquals(listOf(edit(caller, "doWork(I)V", "doWork", 0, "execute")), edits(edit, callerUri))
         }
 
         @Test
-        fun `rename from call site works`() {
-            val targetUri = "file:///Target.smali"
-            val callerUri = "file:///Caller.smali"
-
-            val targetContent = ".class public Lcom/example/Target;\n.super Ljava/lang/Object;\n\n.method public doWork()V\n    return-void\n.end method"
-            val targetFile = SmaliFile(
-                uri = targetUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Target;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "doWork",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(targetUri, targetFile, targetContent)
-
-            val callerContent = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n\n.method public test()V\n    .registers 2\n    new-instance v0, Lcom/example/Target;\n    invoke-virtual {v0}, Lcom/example/Target;->doWork()V\n    return-void\n.end method"
-            val invokeInstr = InvokeInstruction(
-                opcode = "invoke-virtual",
-                className = "Lcom/example/Target;",
-                methodName = "doWork",
-                descriptor = "()V",
-                range = range(6, 4, 6, 55)
-            )
-            val callerFile = SmaliFile(
-                uri = callerUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Caller;",
-                    range = range(0, 0, 8, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 8, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = listOf(invokeInstr)
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(callerUri, callerFile, callerContent)
-
-            // Rename from the call site: position on "doWork" in the invoke line
-            // "    invoke-virtual {v0}, Lcom/example/Target;->doWork()V"
-            //                                                  ^--- position 47
-            val edit = provider.rename(callerUri, Position(6, 47), "execute")
-            assertNotNull(edit, "Should produce workspace edit from call site")
-
-            val targetEdits = edit.changes[targetUri]
-            assertNotNull(targetEdits, "Should rename declaration too")
-
-            val callerEdits = edit.changes[callerUri]
-            assertNotNull(callerEdits, "Should rename call site")
+        fun `rename from the call site reaches the declaration`() {
+            openTargetAndCaller()
+            val edit = provider.rename(callerUri, caller.positionOf("doWork(I)V", "doWork", 4), "execute")
+            assertEquals(listOf(edit(target, ".method public doWork", "doWork", 0, "execute")), edits(edit, targetUri))
+            assertEquals(listOf(edit(caller, "doWork(I)V", "doWork", 0, "execute")), edits(edit, callerUri))
         }
 
         @Test
-        fun `polymorphic rename cascades to subclass methods`() {
-            val baseUri = "file:///Base.smali"
-            val childUri = "file:///Child.smali"
-            val callerUri = "file:///Caller.smali"
+        fun `polymorphic rename cascades to subclass overrides and their call sites`() {
+            val base = ".class public Lcom/example/Base;\n.super Ljava/lang/Object;\n\n.method public run()V\n    return-void\n.end method"
+            val child = ".class public Lcom/example/Child;\n.super Lcom/example/Base;\n\n.method public run()V\n    return-void\n.end method"
+            val calls = ".class public Lcom/example/Calls;\n.super Ljava/lang/Object;\n\n.method public test()V\n    .registers 2\n    invoke-virtual {v0}, Lcom/example/Base;->run()V\n    invoke-virtual {v0}, Lcom/example/Child;->run()V\n    return-void\n.end method"
+            index.openSource("file:///Base.smali", base)
+            index.openSource("file:///Child.smali", child)
+            index.openSource("file:///Calls.smali", calls)
 
-            // Base class
-            val baseContent = ".class public Lcom/example/Base;\n.super Ljava/lang/Object;\n\n.method public run()V\n    return-void\n.end method"
-            val baseFile = SmaliFile(
-                uri = baseUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Base;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "run",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
+            val edit = provider.rename("file:///Base.smali", base.positionOf(".method", "run", 1), "execute")
+            assertEquals(listOf(edit(base, ".method", "run", 0, "execute")), edits(edit, "file:///Base.smali"))
+            assertEquals(listOf(edit(child, ".method", "run", 0, "execute")), edits(edit, "file:///Child.smali"))
+            assertEquals(
+                listOf(edit(calls, "Lcom/example/Base;->run", "run", 0, "execute", after = "->"), edit(calls, "Lcom/example/Child;->run", "run", 0, "execute", after = "->")),
+                edits(edit, "file:///Calls.smali")
             )
-            indexFileWithContent(baseUri, baseFile, baseContent)
+        }
 
-            // Child override
-            val childContent = ".class public Lcom/example/Child;\n.super Lcom/example/Base;\n\n.method public run()V\n    return-void\n.end method"
-            val childFile = SmaliFile(
-                uri = childUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Child;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Lcom/example/Base;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "run",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(childUri, childFile, childContent)
-
-            // Caller calling Base.run
-            val callerContent = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n\n.method public test()V\n    .registers 2\n    invoke-virtual {v0}, Lcom/example/Base;->run()V\n    return-void\n.end method"
-            val callerFile = SmaliFile(
-                uri = callerUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Caller;",
-                    range = range(0, 0, 7, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 7, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = listOf(
-                            InvokeInstruction(
-                                opcode = "invoke-virtual",
-                                className = "Lcom/example/Base;",
-                                methodName = "run",
-                                descriptor = "()V",
-                                range = range(5, 4, 5, 50)
-                            )
-                        )
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(callerUri, callerFile, callerContent)
-
-            // Rename Base.run -> execute
-            val edit = provider.rename(baseUri, Position(3, 17), "execute")
-            assertNotNull(edit)
-
-            // Base declaration should be renamed
-            assertTrue(edit.changes.containsKey(baseUri), "Should edit base file")
-            // Child override should be renamed
-            assertTrue(edit.changes.containsKey(childUri), "Should rename child override too")
-            // Call site should be renamed
-            assertTrue(edit.changes.containsKey(callerUri), "Should rename call site")
+        @Test
+        fun `constructors and members of classes outside the workspace are not renamed`() {
+            openTargetAndCaller()
+            assertNull(provider.rename(callerUri, caller.positionOf("invoke-direct", "<init>", 2), "create"))
+            assertNull(provider.rename(callerUri, caller.positionOf("length", "length", 2), "size"))
         }
     }
-
-    // --- Field rename tests ---
 
     @Nested
     @DisplayName("Field rename")
     inner class FieldRenameTests {
 
         @Test
-        fun `renames field declaration and access sites`() {
-            val targetUri = "file:///Target.smali"
-            val callerUri = "file:///Caller.smali"
-
-            val targetContent = ".class public Lcom/example/Target;\n.super Ljava/lang/Object;\n\n.field public name:Ljava/lang/String;"
-            val targetFile = SmaliFile(
-                uri = targetUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Target;",
-                    range = range(0, 0, 3, 37),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = listOf(
-                    FieldDefinition(
-                        name = "name",
-                        type = "Ljava/lang/String;",
-                        range = range(3, 0, 3, 37),
-                        modifiers = setOf("public")
-                    )
-                )
-            )
-            indexFileWithContent(targetUri, targetFile, targetContent)
-
-            val callerContent = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n\n.method public test()V\n    .registers 2\n    iget-object v0, p0, Lcom/example/Target;->name:Ljava/lang/String;\n    return-void\n.end method"
-            val callerFile = SmaliFile(
-                uri = callerUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Caller;",
-                    range = range(0, 0, 7, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 7, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = listOf(
-                            FieldAccessInstruction(
-                                opcode = "iget-object",
-                                className = "Lcom/example/Target;",
-                                fieldName = "name",
-                                fieldType = "Ljava/lang/String;",
-                                range = range(5, 4, 5, 66)
-                            )
-                        )
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(callerUri, callerFile, callerContent)
-
-            val edit = provider.rename(targetUri, Position(3, 17), "displayName")
-            assertNotNull(edit)
-
-            val targetEdits = edit.changes[targetUri]
-            assertNotNull(targetEdits, "Should edit declaration")
-            assertTrue(targetEdits.any { it.newText == "displayName" })
-
-            val callerEdits = edit.changes[callerUri]
-            assertNotNull(callerEdits, "Should edit access site")
-            assertTrue(callerEdits.any { it.newText == "displayName" })
+        fun `renames the declaration and every access site`() {
+            openTargetAndCaller()
+            val edit = provider.rename(targetUri, target.positionOf("name:", "name", 2), "displayName")
+            assertEquals(listOf(edit(target, "name:", "name", 0, "displayName")), edits(edit, targetUri))
+            assertEquals(listOf(edit(caller, "iget-object", "name", 0, "displayName", after = "->")), edits(edit, callerUri))
         }
 
         @Test
-        fun `rename field from access site`() {
-            val targetUri = "file:///Target.smali"
-            val callerUri = "file:///Caller.smali"
-
-            val targetContent = ".class public Lcom/example/Target;\n.super Ljava/lang/Object;\n\n.field public count:I"
-            val targetFile = SmaliFile(
-                uri = targetUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Target;",
-                    range = range(0, 0, 3, 21),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = listOf(
-                    FieldDefinition(
-                        name = "count",
-                        type = "I",
-                        range = range(3, 0, 3, 21),
-                        modifiers = setOf("public")
-                    )
-                )
-            )
-            indexFileWithContent(targetUri, targetFile, targetContent)
-
-            val callerContent = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n\n.method public test()V\n    .registers 2\n    iget v0, p0, Lcom/example/Target;->count:I\n    return-void\n.end method"
-            val fieldAccess = FieldAccessInstruction(
-                opcode = "iget",
-                className = "Lcom/example/Target;",
-                fieldName = "count",
-                fieldType = "I",
-                range = range(5, 4, 5, 44)
-            )
-            val callerFile = SmaliFile(
-                uri = callerUri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Caller;",
-                    range = range(0, 0, 7, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 7, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = listOf(fieldAccess)
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(callerUri, callerFile, callerContent)
-
-            // Cursor on "count" in the instruction
-            // "    iget v0, p0, Lcom/example/Target;->count:I"
-            //                                          ^--- find "count" after "->"
-            val line = "    iget v0, p0, Lcom/example/Target;->count:I"
-            val countIdx = line.indexOf("count", line.indexOf("->"))
-            val edit = provider.rename(callerUri, Position(5, countIdx), "total")
-            assertNotNull(edit)
-            assertTrue(edit.changes.containsKey(targetUri), "Should edit declaration")
-            assertTrue(edit.changes.containsKey(callerUri), "Should edit access site")
+        fun `rename from an access site`() {
+            openTargetAndCaller()
+            val edit = provider.rename(callerUri, caller.positionOf("iget v2", "count", 1, after = "->"), "total")
+            assertEquals(listOf(edit(target, "count:I", "count", 0, "total")), edits(edit, targetUri))
+            assertEquals(listOf(edit(caller, "iget v2", "count", 0, "total", after = "->")), edits(edit, callerUri))
         }
     }
-
-    // --- Label rename tests ---
 
     @Nested
     @DisplayName("Label rename")
     inner class LabelRenameTests {
 
+        private val uri = "file:///Test.smali"
+        private val source = """
+            .class public Lcom/example/Test;
+            .super Ljava/lang/Object;
+
+            .method public test(I)V
+                .registers 2
+                if-eqz p1, :skip
+                :try_start
+                invoke-virtual {p0}, Lcom/example/Test;->other()V
+                :try_end
+                .catch Ljava/lang/Exception; {:try_start .. :try_end} :skip
+                packed-switch p1, :table
+                :skip
+                return-void
+                :table
+                .packed-switch 0x0
+                    :skip
+                    :try_start
+                .end packed-switch
+            .end method
+
+            .method public other()V
+                .registers 1
+                :skip
+                goto :skip
+            .end method
+        """.trimIndent()
+
+        @BeforeEach
+        fun open() { index.openSource(uri, source) }
+
         @Test
-        fun `renames label definition and all references`() {
-            val uri = "file:///Test.smali"
-            val content = listOf(
-                ".class public Lcom/example/Test;",       // 0
-                ".super Ljava/lang/Object;",               // 1
-                "",                                         // 2
-                ".method public test(I)V",                 // 3
-                "    .registers 2",                        // 4
-                "    if-eqz p1, :skip",                    // 5
-                "    invoke-virtual {p0}, Lcom/example/Test;->other()V",  // 6
-                "    :skip",                               // 7
-                "    return-void",                         // 8
-                ".end method"                              // 9
-            ).joinToString("\n")
-
-            val skipLabel = LabelDefinition("skip", range(7, 4, 7, 9))
-            val jumpInstr = JumpInstruction(
-                opcode = "if-eqz",
-                targetLabel = "skip",
-                range = range(5, 4, 5, 22),
-                labelRange = range(5, 18, 5, 22)
-            )
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 9, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "(I)V",
-                        range = range(3, 0, 9, 11),
-                        modifiers = setOf("public"),
-                        parameters = listOf(Parameter("I", null)),
-                        returnType = "V",
-                        instructions = listOf(jumpInstr),
-                        labels = mapOf("skip" to skipLabel)
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Rename at label definition (:skip on line 7)
-            val edit = provider.rename(uri, Position(7, 6), "done")
-            assertNotNull(edit)
-
-            val edits = edit.changes[uri]
-            assertNotNull(edits)
-            // Should have at least 2 edits: definition + jump reference
-            assertTrue(edits.size >= 2, "Should rename both definition and references, got ${edits.size}")
-            assertTrue(edits.all { it.newText == "done" })
+        fun `renames the definition and every reference, catch and switch table included`() {
+            val edit = provider.rename(uri, source.positionOf("    :skip", ":skip", 2), "done")
+            val expected = listOf(
+                edit(source, "if-eqz", "skip", 0, "done"),
+                edit(source, ".catch", "skip", 0, "done"),
+                edit(source, "    :skip", "skip", 0, "done"),
+                edit(source, "        :skip", "skip", 0, "done"),
+            ).sortedWith(compareBy({ it[0] as Int }, { it[1] as Int }))
+            assertEquals(expected, edits(edit, uri))
+            assertTrue(edits(edit, uri).none { (it[0] as Int) > source.lines().indexOf(".end method") }, "the other method's :skip is untouched")
         }
 
         @Test
-        fun `renames label from jump instruction`() {
-            val uri = "file:///Test.smali"
-            val content = listOf(
-                ".class public Lcom/example/Test;",
-                ".super Ljava/lang/Object;",
-                "",
-                ".method public test()V",
-                "    .registers 1",
-                "    goto :end",
-                "    :end",
-                "    return-void",
-                ".end method"
-            ).joinToString("\n")
-
-            val endLabel = LabelDefinition("end", range(6, 4, 6, 8))
-            val gotoInstr = JumpInstruction(
-                opcode = "goto",
-                targetLabel = "end",
-                range = range(5, 4, 5, 13),
-                labelRange = range(5, 10, 5, 13)
-            )
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 8, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 8, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = listOf(gotoInstr),
-                        labels = mapOf("end" to endLabel)
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Rename from the goto instruction (cursor on "end" in "goto :end")
-            val edit = provider.rename(uri, Position(5, 11), "finish")
-            assertNotNull(edit)
-
-            val edits = edit.changes[uri]
-            assertNotNull(edits)
-            assertTrue(edits.size >= 2, "Should rename definition + reference")
+        fun `rename from a reference in a jump, a catch block or a switch table`() {
+            val fromJump = provider.rename(uri, source.positionOf("if-eqz", ":skip", 3), "done")
+            assertEquals(4, edits(fromJump, uri).size)
+            val fromCatch = provider.rename(uri, source.positionOf(".catch", ":try_end", 4), "try_stop")
+            assertEquals(listOf(edit(source, ".catch", "try_end", 0, "try_stop"), edit(source, "    :try_end", "try_end", 0, "try_stop")).sortedBy { it[0] as Int }, edits(fromCatch, uri))
+            val fromTable = provider.rename(uri, source.positionOf("        :try_start", ":try_start", 4), "begin")
+            assertEquals(3, edits(fromTable, uri).size, "definition, .catch reference and switch entry")
         }
 
         @Test
-        fun `renames label in catch directives`() {
-            val uri = "file:///Test.smali"
-            val content = listOf(
-                ".class public Lcom/example/Test;",       // 0
-                ".super Ljava/lang/Object;",               // 1
-                "",                                         // 2
-                ".method public test()V",                  // 3
-                "    .registers 1",                        // 4
-                "    :try_start",                          // 5
-                "    invoke-virtual {p0}, Lcom/example/Test;->risky()V",  // 6
-                "    :try_end",                            // 7
-                "    .catch Ljava/lang/Exception; {:try_start .. :try_end} :handler", // 8
-                "    :handler",                            // 9
-                "    return-void",                         // 10
-                ".end method"                              // 11
-            ).joinToString("\n")
-
-            val tryStartLabel = LabelDefinition("try_start", range(5, 4, 5, 14))
-            val tryEndLabel = LabelDefinition("try_end", range(7, 4, 7, 12))
-            val handlerLabel = LabelDefinition("handler", range(9, 4, 9, 12))
-
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 11, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 11, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        instructions = emptyList(),
-                        labels = mapOf(
-                            "try_start" to tryStartLabel,
-                            "try_end" to tryEndLabel,
-                            "handler" to handlerLabel
-                        )
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Rename "handler" label from its definition
-            val edit = provider.rename(uri, Position(9, 6), "catch_0")
-            assertNotNull(edit)
-
-            val edits = edit.changes[uri]
-            assertNotNull(edits)
-            // Should rename: definition (:handler) + .catch reference (:handler)
-            assertTrue(edits.size >= 2, "Should rename label def + catch reference, got ${edits.size}")
-            assertTrue(edits.all { it.newText == "catch_0" })
+        fun `label names repeat across methods and stay separate`() {
+            val otherMethod = source.lines().indexOf(".method public other()V")
+            val edit = provider.rename(uri, Position(otherMethod + 3, 10), "loop")
+            assertEquals(listOf(listOf(otherMethod + 2, 5, 9, "loop"), listOf(otherMethod + 3, 10, 14, "loop")), edits(edit, uri))
         }
     }
-
-    // --- Edge case tests ---
 
     @Nested
     @DisplayName("Edge cases")
     inner class EdgeCaseTests {
 
-        @Test
-        fun `rename with blank new name returns null`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public test()V\n    return-void\n.end method"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
+        private val uri = "file:///Test.smali"
+        private val source = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.field public myField:I\n\n.method public test()V\n    :myLabel\n    goto :myLabel\n    return-void\n.end method"
+        private val onMethod = Position(5, 16)
+        private val onField = Position(3, 16)
+        private val onLabel = Position(6, 6)
 
-            val edit = provider.rename(uri, Position(3, 18), "  ")
-            assertNull(edit, "Blank name should return null")
+        @BeforeEach
+        fun open() { index.openSource(uri, source) }
+
+        @Test
+        fun `blank name or unknown file returns null`() {
+            assertNull(provider.rename(uri, onMethod, "  "), "Blank name should return null")
+            assertNull(provider.rename("file:///nonexistent.smali", Position(0, 0), "foo"))
+            assertNull(provider.prepareRename("file:///nonexistent.smali", Position(0, 0)))
         }
 
         @Test
-        fun `rename on unknown URI returns null`() {
-            val edit = provider.rename("file:///nonexistent.smali", Position(0, 0), "foo")
-            assertNull(edit)
+        fun `invalid names are rejected per target kind`() {
+            for (bad in listOf("bad name", "bad/name", "bad(name", "123start")) assertNull(provider.rename(uri, onMethod, bad), bad)
+            for (bad in listOf("bad name", "bad;name")) assertNull(provider.rename(uri, onField, bad), bad)
+            for (bad in listOf("bad-name", "bad name")) assertNull(provider.rename(uri, onLabel, bad), bad)
         }
 
         @Test
-        fun `prepareRename on unknown URI returns null`() {
-            val result = provider.prepareRename("file:///nonexistent.smali", Position(0, 0))
-            assertNull(result)
-        }
-
-        @Test
-        fun `rename method with invalid characters returns null`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public test()V\n    return-void\n.end method"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Names with spaces, slashes, parens, etc. should be rejected
-            assertNull(provider.rename(uri, Position(3, 18), "bad name"), "Spaces not allowed")
-            assertNull(provider.rename(uri, Position(3, 18), "bad/name"), "Slashes not allowed")
-            assertNull(provider.rename(uri, Position(3, 18), "bad(name"), "Parens not allowed")
-            assertNull(provider.rename(uri, Position(3, 18), "123start"), "Cannot start with digit")
-        }
-
-        @Test
-        fun `rename method with valid smali identifiers succeeds`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public test()V\n    return-void\n.end method"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 5, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 5, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V"
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            // Valid Smali names: letters, digits, underscores, dollar signs, hyphens
-            assertNotNull(provider.rename(uri, Position(3, 18), "newName"))
-            assertNotNull(provider.rename(uri, Position(3, 18), "_private"))
-            assertNotNull(provider.rename(uri, Position(3, 18), "\$synthetic"))
-            assertNotNull(provider.rename(uri, Position(3, 18), "name-with-hyphens"))
-        }
-
-        @Test
-        fun `rename field with invalid characters returns null`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.field public myField:I"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 3, 22),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = emptyList(),
-                fields = listOf(
-                    FieldDefinition(
-                        name = "myField",
-                        type = "I",
-                        range = range(3, 0, 3, 22),
-                        modifiers = setOf("public")
-                    )
-                )
-            )
-            indexFileWithContent(uri, file, content)
-
-            assertNull(provider.rename(uri, Position(3, 17), "bad name"), "Spaces not allowed in field name")
-            assertNull(provider.rename(uri, Position(3, 17), "bad;name"), "Semicolons not allowed in field name")
-        }
-
-        @Test
-        fun `rename label with invalid characters returns null`() {
-            val uri = "file:///Test.smali"
-            val content = ".class public Lcom/example/Test;\n.super Ljava/lang/Object;\n\n.method public test()V\n    :myLabel\n    goto :myLabel\n    return-void\n.end method"
-            val file = SmaliFile(
-                uri = uri,
-                classDefinition = ClassDefinition(
-                    name = "Lcom/example/Test;",
-                    range = range(0, 0, 7, 11),
-                    modifiers = setOf("public"),
-                    superClass = "Ljava/lang/Object;",
-                    interfaces = emptyList()
-                ),
-                methods = listOf(
-                    MethodDefinition(
-                        name = "test",
-                        descriptor = "()V",
-                        range = range(3, 0, 7, 11),
-                        modifiers = setOf("public"),
-                        parameters = emptyList(),
-                        returnType = "V",
-                        labels = mapOf("myLabel" to LabelDefinition(
-                            name = "myLabel",
-                            range = range(4, 4, 4, 12)
-                        )),
-                        instructions = listOf(
-                            JumpInstruction(
-                                opcode = "goto",
-                                targetLabel = "myLabel",
-                                range = range(5, 4, 5, 18),
-                                labelRange = range(5, 10, 5, 17)
-                            )
-                        )
-                    )
-                ),
-                fields = emptyList()
-            )
-            indexFileWithContent(uri, file, content)
-
-            assertNull(provider.rename(uri, Position(4, 6), "bad-name"), "Hyphens not allowed in label names")
-            assertNull(provider.rename(uri, Position(4, 6), "bad name"), "Spaces not allowed in label names")
+        fun `valid smali identifiers succeed`() {
+            for (good in listOf("newName", "_private", "\$synthetic", "name-with-hyphens")) assertNotNull(provider.rename(uri, onMethod, good), good)
+            assertNotNull(provider.rename(uri, onLabel, "loop_0"))
         }
     }
-
-    // --- Companion validation tests ---
 
     @Nested
     @DisplayName("Name validation")
@@ -980,39 +291,22 @@ class RenameProviderTest {
 
         @Test
         fun `isValidSmaliIdentifier accepts valid names`() {
-            assertTrue(RenameProvider.isValidSmaliIdentifier("foo"))
-            assertTrue(RenameProvider.isValidSmaliIdentifier("_bar"))
-            assertTrue(RenameProvider.isValidSmaliIdentifier("\$baz"))
-            assertTrue(RenameProvider.isValidSmaliIdentifier("a1"))
-            assertTrue(RenameProvider.isValidSmaliIdentifier("my-method"))
-            assertTrue(RenameProvider.isValidSmaliIdentifier("access\$000"))
+            for (name in listOf("foo", "_bar", "\$baz", "a1", "my-method", "access\$000")) assertTrue(RenameProvider.isValidSmaliIdentifier(name), name)
         }
 
         @Test
         fun `isValidSmaliIdentifier rejects invalid names`() {
-            assertTrue(!RenameProvider.isValidSmaliIdentifier(""))
-            assertTrue(!RenameProvider.isValidSmaliIdentifier("1start"))
-            assertTrue(!RenameProvider.isValidSmaliIdentifier("has space"))
-            assertTrue(!RenameProvider.isValidSmaliIdentifier("has/slash"))
-            assertTrue(!RenameProvider.isValidSmaliIdentifier("has(paren"))
-            assertTrue(!RenameProvider.isValidSmaliIdentifier("has;semi"))
+            for (name in listOf("", "1start", "has space", "has/slash", "has(paren", "has;semi")) assertTrue(!RenameProvider.isValidSmaliIdentifier(name), name)
         }
 
         @Test
         fun `isValidLabelName accepts valid names`() {
-            assertTrue(RenameProvider.isValidLabelName("try_start_0"))
-            assertTrue(RenameProvider.isValidLabelName("catch_0"))
-            assertTrue(RenameProvider.isValidLabelName("_label"))
-            assertTrue(RenameProvider.isValidLabelName("a123"))
+            for (name in listOf("try_start_0", "catch_0", "_label", "a123")) assertTrue(RenameProvider.isValidLabelName(name), name)
         }
 
         @Test
         fun `isValidLabelName rejects invalid names`() {
-            assertTrue(!RenameProvider.isValidLabelName(""))
-            assertTrue(!RenameProvider.isValidLabelName("1start"))
-            assertTrue(!RenameProvider.isValidLabelName("has-hyphen"))
-            assertTrue(!RenameProvider.isValidLabelName("has space"))
-            assertTrue(!RenameProvider.isValidLabelName("has\$dollar"))
+            for (name in listOf("", "1start", "has-hyphen", "has space", "has\$dollar")) assertTrue(!RenameProvider.isValidLabelName(name), name)
         }
     }
 }

@@ -130,59 +130,8 @@ class WorkspaceIndex {
                 .add(className)
         }
 
-        // Build reverse usage indexes from instructions
-        file.methods.forEach { method ->
-            method.instructions.forEach { instr ->
-                when (instr) {
-                    is InvokeInstruction -> {
-                        methodUsages.computeIfAbsent(
-                            methodSignature(instr.className, instr.methodName, instr.descriptor)
-                        ) { ConcurrentHashMap.newKeySet() }.add(Location(file.uri, instr.range))
-                        classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
-                            .add(Location(file.uri, instr.range))
-                    }
-                    is FieldAccessInstruction -> {
-                        fieldUsages.computeIfAbsent(
-                            fieldSignature(instr.className, instr.fieldName)
-                        ) { ConcurrentHashMap.newKeySet() }.add(Location(file.uri, instr.range))
-                        classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
-                            .add(Location(file.uri, instr.range))
-                        Types.className(instr.fieldType)?.let { refClass ->
-                            classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                                .add(Location(file.uri, instr.range))
-                        }
-                    }
-                    is TypeInstruction -> {
-                        classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
-                            .add(Location(file.uri, instr.range))
-                    }
-                    is JumpInstruction, is ConstStringInstruction -> {
-                        // Labels are method-local; strings handled by lazy stringIndex
-                    }
-                }
-            }
-        }
-
-        // Index class references from field types
-        file.fields.forEach { field ->
-            Types.className(field.type)?.let { refClass ->
-                classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                    .add(Location(file.uri, field.range))
-            }
-        }
-
-        // Index class references from method signatures (parameters + return type)
-        file.methods.forEach { method ->
-            Types.className(method.returnType)?.let { refClass ->
-                classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                    .add(Location(file.uri, method.range))
-            }
-            method.parameters.forEach { param ->
-                Types.className(param.type)?.let { refClass ->
-                    classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                        .add(Location(file.uri, method.range))
-                }
-            }
+        forEachUsage(file) { table, key, location ->
+            table.computeIfAbsent(key) { ConcurrentHashMap.newKeySet() }.add(location)
         }
 
         methodCount.addAndGet(file.methods.size)
@@ -252,44 +201,55 @@ class WorkspaceIndex {
             implementorsIndex[iface]?.remove(className)
         }
 
-        // Remove reverse usage entries (instructions + field types + method signatures)
-        oldFile.methods.forEach { method ->
-            method.instructions.forEach { instr ->
+        forEachUsage(oldFile) { table, key, _ ->
+            table[key]?.removeIf { it.uri == uri }
+        }
+    }
+
+    /**
+     * Every reverse-index entry a file contributes: call sites, field accesses and class
+     * references (owners, type operands, field types, descriptor types), each located at
+     * its token. Array types are filed under their element class.
+     */
+    private inline fun forEachUsage(
+        file: SmaliFile,
+        sink: (table: ConcurrentHashMap<String, MutableSet<Location>>, key: String, location: Location) -> Unit
+    ) {
+        val uri = file.uri
+        for (method in file.methods) {
+            for (instr in method.instructions) {
                 when (instr) {
                     is InvokeInstruction -> {
-                        val sig = methodSignature(instr.className, instr.methodName, instr.descriptor)
-                        methodUsages[sig]?.removeIf { it.uri == uri }
-                        classRefLocations[instr.className]?.removeIf { it.uri == uri }
+                        sink(methodUsages, methodSignature(instr.className, instr.methodName, instr.descriptor), Location(uri, instr.nameSpan?.toRange() ?: instr.range))
+                        sink(classRefLocations, Types.elementClass(instr.className), Location(uri, instr.ownerSpan?.toRange() ?: instr.range))
                     }
                     is FieldAccessInstruction -> {
-                        val sig = fieldSignature(instr.className, instr.fieldName)
-                        fieldUsages[sig]?.removeIf { it.uri == uri }
-                        classRefLocations[instr.className]?.removeIf { it.uri == uri }
-                        Types.className(instr.fieldType)?.let { refClass ->
-                            classRefLocations[refClass]?.removeIf { it.uri == uri }
-                        }
+                        sink(fieldUsages, fieldSignature(instr.className, instr.fieldName), Location(uri, instr.nameSpan?.toRange() ?: instr.range))
+                        sink(classRefLocations, Types.elementClass(instr.className), Location(uri, instr.ownerSpan?.toRange() ?: instr.range))
+                        Types.className(instr.fieldType)?.let { sink(classRefLocations, it, Location(uri, instr.typeSpan?.toRange() ?: instr.range)) }
                     }
                     is TypeInstruction -> {
-                        classRefLocations[instr.className]?.removeIf { it.uri == uri }
+                        Types.className(instr.className)?.let { sink(classRefLocations, it, Location(uri, instr.typeSpan?.toRange() ?: instr.range)) }
                     }
-                    else -> {}
+                    is JumpInstruction, is ConstStringInstruction -> {}
+                }
+            }
+            val descriptor = method.descriptorSpan
+            if (descriptor.length == method.descriptor.length) {
+                for (type in Types.parseTypeSequence(method.descriptor)) {
+                    val className = type.className ?: continue
+                    sink(classRefLocations, className, Location(uri, Span(descriptor.line, descriptor.start + type.start, descriptor.start + type.end).toRange()))
+                }
+            } else {
+                // No usable span (a hand-built definition): point at the declaration
+                Types.className(method.returnType)?.let { sink(classRefLocations, it, Location(uri, method.range)) }
+                for (param in method.parameters) {
+                    Types.className(param.type)?.let { sink(classRefLocations, it, Location(uri, method.range)) }
                 }
             }
         }
-        oldFile.fields.forEach { field ->
-            Types.className(field.type)?.let { refClass ->
-                classRefLocations[refClass]?.removeIf { it.uri == uri }
-            }
-        }
-        oldFile.methods.forEach { method ->
-            Types.className(method.returnType)?.let { refClass ->
-                classRefLocations[refClass]?.removeIf { it.uri == uri }
-            }
-            method.parameters.forEach { param ->
-                Types.className(param.type)?.let { refClass ->
-                    classRefLocations[refClass]?.removeIf { it.uri == uri }
-                }
-            }
+        for (field in file.fields) {
+            Types.className(field.type)?.let { sink(classRefLocations, it, Location(uri, field.typeSpan.toRange())) }
         }
     }
 
