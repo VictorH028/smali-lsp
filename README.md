@@ -8,15 +8,16 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 - **Go to Definition** — jump from any instruction to its target (classes, methods, fields, labels)
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching
-- **Hover** — method signatures, field types, class info, SDK class detection
+- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
 - **Code Lens** — inline reference counts on methods and fields
-- **Completion** — class names, method/field members, opcodes
+- **Completion** — class names (ranked), members including inherited ones, opcodes
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors and unresolved class references
+- **Diagnostics** — syntax errors, undefined or duplicate labels, unresolved class references
+- **Implementations, document highlight, folding** — implementors and overrides of a method, occurrences of a symbol in its file (reads and writes apart), foldable methods and directive blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** (224 opcode tokens, including `invoke-custom`, `invoke-polymorphic` and method handles); navigation covers invoke-\*, field access, type operands, labels and strings
 
@@ -28,7 +29,8 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `initialize` / `initialized` / `shutdown` / `exit` | workspace folders, or `rootUri` for older clients; indexing runs after `initialized` with `window/workDoneProgress` when the client supports it |
 | `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer is indexed while open, the disk version again on close |
 | `textDocument/publishDiagnostics` | syntax errors on the offending token; undefined classes once indexing has finished |
-| `textDocument/definition` `hover` `references` | references follow the member family: overrides, calls through subclasses, calls on the supertype |
+| `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow the member family: overrides, calls through subclasses, calls on the supertype |
+| `textDocument/foldingRange` | methods, annotations, switch tables, array data |
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search over classes, methods and fields, best 500 |
 | `textDocument/codeLens` + `codeLens/resolve` | reference counts, resolved lazily |
 | `textDocument/completion` | trigger characters `L`, `>`, `/` |
@@ -36,6 +38,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
 | `textDocument/prepareTypeHierarchy` + `typeHierarchy/supertypes` `subtypes` | |
 | `workspace/didChangeWatchedFiles` | registered dynamically for `**/*.smali`; events for open files are left to the editor |
+| `workspace/didChangeWorkspaceFolders` | added folders are indexed, removed ones dropped |
 | `$/cancelRequest` | honoured by symbol search and reference lists |
 
 URIs are matched by file, so a client that percent-encodes (`Outer%24Inner.smali`) and the scanner agree on one entry.
@@ -52,10 +55,10 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | Tool                     | Description                                                                      |
 | ------------------------ | -------------------------------------------------------------------------------- |
 | `smali_index`            | Index a directory of smali files                                                 |
-| `smali_find_definition`  | Go to definition for a symbol at a position                                      |
+| `smali_find_definition`  | A class by name, the declaration at a position, or a member by class and name    |
 | `smali_search_symbols`   | Fuzzy search across classes, methods, fields                                     |
 | `smali_get_stats`        | Index statistics (class/method/field/string counts)                              |
-| `smali_find_references`  | Find all references to a symbol, by position or by class/member name             |
+| `smali_find_references`  | Find all references to a symbol, by position or by class/member name (bounded by `max_results`, with the total) |
 | `smali_hover`            | Get hover info (signatures, types, class details), by position or by name        |
 | `smali_diagnostics`      | Compute diagnostics for a file                                                   |
 | `smali_document_symbols` | Get document outline (classes, methods, fields)                                  |
@@ -63,6 +66,8 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | `smali_call_graph`       | Incoming/outgoing call graph for a method                                        |
 | `smali_xref_summary`     | Cross-reference report (subclasses, implementors, callers, accessors, referencing classes) |
 | `smali_type_hierarchy`   | Supertypes and subtypes for a class (inheritance chain)                          |
+| `smali_read_method`      | One method's source lines, numbered                                              |
+| `smali_list_package`     | Classes under a package prefix and its sub-packages                              |
 
 </details>
 

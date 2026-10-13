@@ -218,7 +218,9 @@ removed.
 ### 4.3 Workspace
 
 `didChangeWatchedFiles` re-parses created and changed files from disk on the writer and removes
-deleted ones. `workspace/symbol` runs on the common pool after the barrier.
+deleted ones, leaving files that are open in the editor alone. `didChangeWorkspaceFolders`
+drops the files under a closed folder and indexes an opened one like the initial folders.
+`workspace/symbol` runs on the common pool after the barrier.
 
 ---
 
@@ -253,18 +255,32 @@ whose declarations are unreachable.
 
 ### 5.2 Hierarchies, lenses, symbols
 
-- **Call hierarchy**: incoming calls from `methodUsages` grouped by containing method;
-  outgoing calls from the method's invoke instructions, resolved through the class hierarchy.
-- **Type hierarchy**: supertypes from the class definition; subtypes from the subclass and
-  implementor sets.
-- **Code lens**: one lens per method and field, resolved lazily to a usage count.
+- **Call hierarchy**: prepared from the called method when the caret is on a call, else the
+  enclosing method; incoming calls are the member family's call sites grouped by containing
+  method (found by binary search over the file's methods); outgoing calls from the method's
+  invoke instructions, resolved through the class hierarchy.
+- **Type hierarchy**: prepared from any class reference under the caret; supertypes from the
+  class definition; subtypes from the subclass and implementor sets.
+- **Implementation**: the concrete declarations of a method's family other than the one under
+  the caret; for a class, every subclass and implementor.
+- **Document highlight**: the references of the symbol restricted to its file; `iput`/`sput`
+  sites are writes, other field sites reads.
+- **Folding ranges**: multi-line methods and the annotation, switch-table and array-data
+  blocks the builder records.
+- **Code lens**: one lens per method and field on its declaration line, resolved lazily to
+  the count of sites that bind to that declaration (an override counts its own callers).
 - **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
   type as detail, name token as `selectionRange`.
 - **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
   scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
   query over the 76 K-file app's 660 K names.
-- **Diagnostics**: syntax errors, then unresolved classes in `.super`, `.implements`, field
-  types and instruction targets, skipping platform SDK classes.
+- **Completion**: after `->`, the members of the owner and of its workspace supertypes (own
+  members first, overrides hiding what they override); class names ranked by match kind,
+  length and name so the list is stable across keystrokes; opcodes at the start of a line.
+- **Diagnostics**: syntax errors on the offending token and the file-local label checks (a
+  jump to an undefined label, a label defined twice) are published at once; unresolved classes
+  in `.super`, `.implements`, field types and instruction targets wait for indexing to finish
+  and skip platform SDK classes.
 
 ### 5.3 What still reads line text
 
@@ -284,17 +300,23 @@ missing index or argument uniformly, and turns any failure into a tool error.
 | Tool | Answers |
 |------|---------|
 | `smali_index` | scan a directory |
-| `smali_find_definition` | a class by full or simple name |
+| `smali_find_definition` | a class by full or simple name; the declaration at a position; a member by `class_name` + `member_name` |
 | `smali_search_symbols` | fuzzy symbol search |
 | `smali_get_stats` | counts |
-| `smali_find_references` | by position (`uri`, `line`, `character`) or by name (`class_name`, optional `member_name` with `descriptor` or `field_type`) |
+| `smali_find_references` | by position (`uri`, `line`, `character`) or by name (`class_name`, optional `member_name` with `descriptor` or `field_type`); at most `max_results` (default 500, cap 5,000) with the full `total` |
 | `smali_hover` | same two forms |
 | `smali_diagnostics` | diagnostics for given content |
 | `smali_document_symbols` | a file's outline |
-| `smali_search_strings` | `const-string` literals |
+| `smali_search_strings` | `const-string` literals, at most `max_results` (default 100, cap 5,000) |
 | `smali_call_graph` | callers and callees of a method |
 | `smali_xref_summary` | subclasses, implementors, callers, accessors, referencing classes |
 | `smali_type_hierarchy` | supertypes and subtypes |
+| `smali_read_method` | one method's numbered source lines |
+| `smali_list_package` | the classes under a package prefix and its sub-packages |
+
+Arguments are validated by type (a wrongly typed one is a tool error naming it), tool
+handlers run concurrently with the SDK's 0.15 dispatch, and `smali_index` holds a lock so
+only one index is built at a time.
 
 ---
 
@@ -336,7 +358,8 @@ missing index or argument uniformly, and turns any failure into a tool error.
   by default (`-Dsmali.invariants.maxFiles`).
 - Find-references on `Ljava/lang/Object;` answers with every owner, operand and descriptor
   use: 264 K locations on the 76 K-file app, serialized in well under a second but more than
-  an editor can show. There is no cap; a client that wants fewer should pass a narrower symbol.
+  an editor can show. The LSP answer has no cap (a cancelled request stops early); the MCP
+  tool caps its answer and reports the total.
 
 ---
 
