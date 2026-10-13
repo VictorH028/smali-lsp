@@ -84,12 +84,20 @@ data class LabelRef(val name: String, val span: Span) {
 }
 
 /**
- * Instruction-level AST for navigation.
- * Only critical instructions that reference symbols (for goto definition).
+ * Instructions that name a symbol: invoke, field access, type operands, jumps, `const-string`.
+ * Arithmetic, move and return instructions reference registers only and are not kept.
+ *
+ * Every instruction holds its range as four ints and builds the LSP [Range] on demand: a
+ * large app has millions of instructions, and the three objects of a stored `Range` were the
+ * biggest part of the AST after the strings.
  */
-sealed class Instruction(
-    open val range: Range
-)
+sealed class Instruction {
+    abstract val startLine: Int
+    abstract val startChar: Int
+    abstract val endLine: Int
+    abstract val endChar: Int
+    val range: Range get() = range(startLine, startChar, endLine, endChar)
+}
 
 /**
  * Method invocation: invoke-virtual, invoke-static, invoke-direct, invoke-interface
@@ -102,10 +110,16 @@ data class InvokeInstruction(
     val className: String,  // Lcom/example/MyClass;
     val methodName: String,
     val descriptor: String,
-    override val range: Range,
+    override val startLine: Int,
+    override val startChar: Int,
+    override val endLine: Int,
+    override val endChar: Int,
     val targetLine: Int = -1,
     val targetStart: Int = -1
-) : Instruction(range) {
+) : Instruction() {
+    constructor(opcode: String, className: String, methodName: String, descriptor: String, range: Range, targetLine: Int = -1, targetStart: Int = -1) :
+        this(opcode, className, methodName, descriptor, range.start.line, range.start.character, range.end.line, range.end.character, targetLine, targetStart)
+
     val ownerSpan: Span? get() = if (targetStart < 0) null else Span(targetLine, targetStart, targetStart + className.length)
     val nameSpan: Span? get() = ownerSpan?.let { Span(targetLine, it.end + 2, it.end + 2 + methodName.length) }
     val descriptorSpan: Span? get() = nameSpan?.let { Span(targetLine, it.end, it.end + descriptor.length) }
@@ -121,10 +135,16 @@ data class FieldAccessInstruction(
     val className: String,
     val fieldName: String,
     val fieldType: String,
-    override val range: Range,
+    override val startLine: Int,
+    override val startChar: Int,
+    override val endLine: Int,
+    override val endChar: Int,
     val targetLine: Int = -1,
     val targetStart: Int = -1
-) : Instruction(range) {
+) : Instruction() {
+    constructor(opcode: String, className: String, fieldName: String, fieldType: String, range: Range, targetLine: Int = -1, targetStart: Int = -1) :
+        this(opcode, className, fieldName, fieldType, range.start.line, range.start.character, range.end.line, range.end.character, targetLine, targetStart)
+
     val ownerSpan: Span? get() = if (targetStart < 0) null else Span(targetLine, targetStart, targetStart + className.length)
     val nameSpan: Span? get() = ownerSpan?.let { Span(targetLine, it.end + 2, it.end + 2 + fieldName.length) }
     val typeSpan: Span? get() = nameSpan?.let { Span(targetLine, it.end + 1, it.end + 1 + fieldType.length) }
@@ -138,39 +158,66 @@ data class FieldAccessInstruction(
 data class TypeInstruction(
     val opcode: String,  // new-instance, check-cast, instance-of, const-class
     val className: String,
-    override val range: Range,
+    override val startLine: Int,
+    override val startChar: Int,
+    override val endLine: Int,
+    override val endChar: Int,
     val typeLine: Int = -1,
     val typeStart: Int = -1
-) : Instruction(range) {
+) : Instruction() {
+    constructor(opcode: String, className: String, range: Range, typeLine: Int = -1, typeStart: Int = -1) :
+        this(opcode, className, range.start.line, range.start.character, range.end.line, range.end.character, typeLine, typeStart)
+
     val typeSpan: Span? get() = if (typeStart < 0) null else Span(typeLine, typeStart, typeStart + className.length)
 }
 
 /**
  * Jump instruction: goto, if-*, packed-switch, sparse-switch
- * References a label within the same method.
+ * References a label within the same method; [labelRange] is the `:label` token.
  */
 data class JumpInstruction(
     val opcode: String,  // goto, if-eqz, if-nez, if-eq, etc.
     val targetLabel: String,  // Label name without colon (e.g., "cond_0")
-    override val range: Range,
-    val labelRange: Range  // Range of just the label reference for precise navigation
-) : Instruction(range)
+    override val startLine: Int,
+    override val startChar: Int,
+    override val endLine: Int,
+    override val endChar: Int,
+    val labelLine: Int,
+    val labelStart: Int,
+    val labelEnd: Int
+) : Instruction() {
+    constructor(opcode: String, targetLabel: String, range: Range, labelRange: Range) :
+        this(opcode, targetLabel, range.start.line, range.start.character, range.end.line, range.end.character, labelRange.start.line, labelRange.start.character, labelRange.end.character)
+
+    val labelRange: Range get() = range(labelLine, labelStart, labelLine, labelEnd)
+}
 
 /**
  * String constant: const-string, const-string/jumbo
  */
 data class ConstStringInstruction(
     val value: String,   // The string literal value (without surrounding quotes)
-    override val range: Range
-) : Instruction(range)
+    override val startLine: Int,
+    override val startChar: Int,
+    override val endLine: Int,
+    override val endChar: Int
+) : Instruction() {
+    constructor(value: String, range: Range) : this(value, range.start.line, range.start.character, range.end.line, range.end.character)
+}
 
 /**
- * Label definition at a specific position in a method.
+ * Label definition at a specific position in a method; [range] covers `:name`.
  */
 data class LabelDefinition(
     val name: String,  // Without colon (e.g., "cond_0")
-    val range: Range   // Full range including colon (e.g., ":cond_0")
-)
+    val line: Int,
+    val start: Int,
+    val end: Int
+) {
+    constructor(name: String, range: Range) : this(name, range.start.line, range.start.character, range.end.character)
+
+    val range: Range get() = range(line, start, line, end)
+}
 
 /**
  * Helper to create Range objects

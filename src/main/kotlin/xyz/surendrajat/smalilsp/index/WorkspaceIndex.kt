@@ -387,8 +387,8 @@ class WorkspaceIndex {
                 for (method in file.methods) {
                     for (instr in method.instructions) {
                         if (instr is ConstStringInstruction) {
-                            val span = instr.range.toSpan()
-                            fresh.getOrPut(instr.value) { UsageList() }.add(id, gen, span.line, span.start, span.end)
+                            val end = if (instr.endLine == instr.startLine) instr.endChar else instr.startChar
+                            fresh.getOrPut(instr.value) { UsageList() }.add(id, gen, instr.startLine, instr.startChar, end)
                         }
                     }
                 }
