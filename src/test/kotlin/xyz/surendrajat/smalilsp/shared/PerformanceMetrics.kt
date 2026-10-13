@@ -77,10 +77,6 @@ class PerformanceMetrics(val name: String) {
         return sqrt(variance) / 1_000_000.0
     }
     
-    /**
-     * Get operation count.
-     */
-    fun getCount(): Long = count
     
     /**
      * Print summary statistics.
@@ -112,50 +108,5 @@ class PerformanceMetrics(val name: String) {
             "p99_ms" to getP99Ms(),
             "stddev_ms" to getStdDevMs()
         )
-    }
-}
-
-/**
- * Throughput metrics collector.
- */
-class ThroughputMetrics(val name: String) {
-    private var itemsProcessed = 0L
-    private var totalTimeMs = 0L
-    
-    /**
-     * Record a batch of items processed.
-     * @param items Number of items processed
-     * @param timeMs Time taken in milliseconds
-     */
-    fun record(items: Long, timeMs: Long) {
-        itemsProcessed += items
-        totalTimeMs += timeMs
-    }
-    
-    /**
-     * Get items per second.
-     */
-    fun getItemsPerSecond(): Double {
-        return if (totalTimeMs > 0) itemsProcessed.toDouble() / totalTimeMs * 1000.0 else 0.0
-    }
-    
-    /**
-     * Get total items processed.
-     */
-    fun getItemsProcessed(): Long = itemsProcessed
-    
-    /**
-     * Get total time in milliseconds.
-     */
-    fun getTotalTimeMs(): Long = totalTimeMs
-    
-    /**
-     * Print summary.
-     */
-    fun printSummary() {
-        println("$name Throughput:")
-        println("  Items:      $itemsProcessed")
-        println("  Time:       ${totalTimeMs}ms")
-        println("  Throughput: ${"%.1f".format(getItemsPerSecond())} items/sec")
     }
 }

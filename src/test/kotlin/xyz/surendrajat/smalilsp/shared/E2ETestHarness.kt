@@ -5,9 +5,6 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.services.LanguageServer
 import java.util.concurrent.TimeUnit
 
-import xyz.surendrajat.smalilsp.shared.E2ETestHarness
-import xyz.surendrajat.smalilsp.shared.TestLSPClient
-import xyz.surendrajat.smalilsp.shared.TestWorkspace
 /**
  * Test harness for E2E testing of the Smali LSP server.
  * Manages server lifecycle, client connection, and provides convenient methods for common operations.
@@ -109,14 +106,6 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         Thread.sleep(100)
     }
     
-    /**
-     * Close a file
-     */
-    fun closeFile(uri: String) {
-        server.textDocumentService.didClose(DidCloseTextDocumentParams(
-            TextDocumentIdentifier(uri)
-        ))
-    }
     
     // ===== Language Features =====
     
@@ -246,12 +235,6 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         Thread.sleep(seconds * 1000L)
     }
     
-    /**
-     * Get workspace statistics
-     */
-    fun getWorkspaceStats(): TestWorkspace.WorkspaceStats {
-        return workspace.getStats()
-    }
     
     /**
      * Measure operation time
@@ -289,10 +272,6 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         }
     }
     
-    /**
-     * Check if server is initialized
-     */
-    fun checkInitialized(): Boolean = isInitialized
     
     /**
      * Cleanup (shutdown + cleanup workspace if temp)

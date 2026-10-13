@@ -7,7 +7,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-import xyz.surendrajat.smalilsp.shared.TestLSPClient
 /**
  * Test implementation of LSP LanguageClient for E2E testing.
  * Records all notifications and messages received from the server.
@@ -97,29 +96,6 @@ class TestLSPClient : LanguageClient {
     }
     
     /**
-     * Get all log messages at a specific level
-     */
-    fun getLogMessages(type: MessageType): List<String> = 
-        receivedLogMessages
-            .filter { it.type == type }
-            .map { it.message }
-    
-    /**
-     * Get all error log messages
-     */
-    fun getErrorMessages(): List<String> = getLogMessages(MessageType.Error)
-    
-    /**
-     * Get all warning log messages
-     */
-    fun getWarningMessages(): List<String> = getLogMessages(MessageType.Warning)
-    
-    /**
-     * Get all info log messages
-     */
-    fun getInfoMessages(): List<String> = getLogMessages(MessageType.Info)
-    
-    /**
      * Clear all recorded notifications/messages
      */
     fun clearAll() {
@@ -131,40 +107,4 @@ class TestLSPClient : LanguageClient {
         receivedProgress.clear()
     }
     
-    /**
-     * Clear diagnostics for a specific URI
-     */
-    fun clearDiagnostics(uri: String) {
-        receivedDiagnostics.remove(uri)
-    }
-    
-    /**
-     * Get count of all notifications received
-     */
-    fun getNotificationCount(): Int = receivedNotifications.size
-    
-    /**
-     * Get all URIs that have received diagnostics
-     */
-    fun getDiagnosticUris(): Set<String> = receivedDiagnostics.keys.toSet()
-    
-    /**
-     * Check if any errors were logged
-     */
-    fun hasErrors(): Boolean = receivedLogMessages.any { it.type == MessageType.Error }
-    
-    /**
-     * Get summary of all received data (for debugging)
-     */
-    fun getSummary(): String = buildString {
-        appendLine("TestLSPClient Summary:")
-        appendLine("  Total notifications: ${receivedNotifications.size}")
-        appendLine("  Diagnostics for ${receivedDiagnostics.size} files:")
-        receivedDiagnostics.forEach { (uri, diags) ->
-            appendLine("    $uri: ${diags.size} diagnostics")
-        }
-        appendLine("  Log messages: ${receivedLogMessages.size} (${getErrorMessages().size} errors)")
-        appendLine("  Show messages: ${receivedShowMessages.size}")
-        appendLine("  Telemetry events: ${receivedTelemetry.size}")
-    }
 }

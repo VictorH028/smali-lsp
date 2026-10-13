@@ -30,14 +30,6 @@ object TestUtils {
         error("Could not find project root. Please run tests from project directory.")
     }
     
-    /**
-     * Get the test-data directory containing decompiled APKs for testing.
-     */
-    fun getTestDataDir(): File {
-        return File(getProjectRoot(), "test-data").also { dir ->
-            require(dir.exists()) { "test-data directory not found: ${dir.absolutePath}. Run apktool to decompile APKs first." }
-        }
-    }
     
     /**
      * Get a specific APK decompiled directory.
@@ -51,7 +43,7 @@ object TestUtils {
     }
     
     /**
-     * Get Mastodon APK directory (4,415 files), or null if not available.
+     * Get Mastodon APK directory, or null if not available.
      */
     fun getMastodonApk(): File? = getApk("mastodon")
 
@@ -65,7 +57,7 @@ object TestUtils {
     }
     
     /**
-     * Get ProtonMail APK directory (18,249 files), or null if not available.
+     * Get ProtonMail APK directory, or null if not available.
      */
     fun getProtonMailApk(): File? = getApk("protonmail")
 
@@ -89,12 +81,6 @@ object TestUtils {
         return target
     }
 
-    /**
-     * Require a path inside the Mastodon APK, otherwise skip the current test.
-     */
-    fun requireMastodonPath(relativePath: String, description: String = relativePath): File {
-        return requireApkPath(getMastodonApk(), "Mastodon", relativePath, description)
-    }
 
     /**
      * Require a path inside the ProtonMail APK, otherwise skip the current test.
@@ -103,23 +89,5 @@ object TestUtils {
         return requireApkPath(getProtonMailApk(), "ProtonMail", relativePath, description)
     }
     
-    /**
-     * Get all available APK directories for stress testing.
-     * Returns list of available APK directories for testing.
-     */
-    fun getAllApks(): List<File> {
-        return listOfNotNull(
-            getMastodonApk(),
-            getProtonMailApk(),
-        )
-    }
     
-    /**
-     * Get count of smali files in an APK directory.
-     */
-    fun countSmaliFiles(apkDir: File): Int {
-        return apkDir.walkTopDown()
-            .filter { it.extension == "smali" }
-            .count()
-    }
 }

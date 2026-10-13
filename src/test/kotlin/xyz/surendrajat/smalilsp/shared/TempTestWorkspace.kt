@@ -7,7 +7,6 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
-import xyz.surendrajat.smalilsp.shared.TempTestWorkspace
 /**
  * Test utility for creating multi-file workspaces with realistic structure.
  * 
@@ -99,12 +98,6 @@ class TempTestWorkspace {
         return index
     }
     
-    /**
-     * Get workspace root directory.
-     */
-    fun getRootDir(): File {
-        return tempDir.toFile()
-    }
     
     /**
      * Clean up temporary files.
