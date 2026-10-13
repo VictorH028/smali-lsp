@@ -69,12 +69,12 @@ class RenameProvider(
                 .takeUnless { it.name == "<init>" || it.name == "<clinit>" }
                 ?.let { RenameTarget.Method(it.name, symbol.range, file.classDefinition.name, it.descriptor) }
             is Symbol.FieldDecl -> RenameTarget.Field(symbol.fieldDef.name, symbol.range, file.classDefinition.name, symbol.fieldDef.type)
+            // A reference renames the member it resolves to, which may be declared in a superclass
             is Symbol.MethodRef -> symbol.instruction
-                .takeIf { it.methodName != "<init>" && it.methodName != "<clinit>" && index.hasClass(it.className) }
-                ?.let { RenameTarget.Method(it.methodName, symbol.range, it.className, it.descriptor) }
+                .takeIf { it.methodName != "<init>" && it.methodName != "<clinit>" }
+                ?.let { ref -> index.resolveMethod(ref.className, ref.methodName, ref.descriptor)?.let { RenameTarget.Method(ref.methodName, symbol.range, it.file.classDefinition.name, ref.descriptor) } }
             is Symbol.FieldRef -> symbol.instruction
-                .takeIf { index.hasClass(it.className) }
-                ?.let { RenameTarget.Field(it.fieldName, symbol.range, it.className, it.fieldType) }
+                .let { ref -> index.resolveField(ref.className, ref.fieldName, ref.fieldType)?.let { RenameTarget.Field(ref.fieldName, symbol.range, it.file.classDefinition.name, ref.fieldType) } }
             // Labels are method-local; a reference to a label the method does not define is left alone
             is Symbol.LabelDecl -> RenameTarget.Label(symbol.label.name, withoutColon(symbol.label.range), uri, symbol.method)
             is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { RenameTarget.Label(symbol.name, withoutColon(symbol.range), uri, symbol.method) }
@@ -102,8 +102,11 @@ class RenameProvider(
         index.findClass(target.className)?.let { file ->
             file.fields.find { it.name == target.currentName && it.type == target.type }?.let { edits.add(file.uri, TextEdit(it.nameSpan.toRange(), newName)) }
         }
-        for (usage in index.findFieldUsages(target.className, target.currentName, target.type)) {
-            addUsageEdit(usage, target.currentName, newName, edits)
+        val classes = listOf(target.className) + if (Types.isSdkClass(target.className)) emptyList() else index.getAllSubclasses(target.className)
+        for (className in classes) {
+            for (usage in index.findFieldUsages(className, target.currentName, target.type)) {
+                addUsageEdit(usage, target.currentName, newName, edits)
+            }
         }
     }
 

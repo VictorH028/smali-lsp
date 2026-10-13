@@ -148,9 +148,7 @@ class HoverProvider(
     }
 
     fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
-        workspaceIndex.findClass(className)?.methods
-            ?.find { it.name == methodName && it.descriptor == descriptor }
-            ?.let { return hoverForMethod(it) }
+        workspaceIndex.resolveMethod(className, methodName, descriptor)?.let { return hoverForMethod(it.method) }
 
         val md = buildString {
             append("**Method:** `${className}.${methodName}`\n\n")
@@ -165,9 +163,7 @@ class HoverProvider(
     }
 
     fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
-        workspaceIndex.findClass(className)?.fields
-            ?.find { it.name == fieldName }
-            ?.let { return hoverForField(it) }
+        workspaceIndex.resolveField(className, fieldName, fieldType)?.let { return hoverForField(it.field) }
 
         val md = buildString {
             append("**Field:** `${className}.${fieldName}`\n\n")

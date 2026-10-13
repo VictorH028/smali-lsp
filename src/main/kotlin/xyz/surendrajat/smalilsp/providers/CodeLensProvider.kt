@@ -16,6 +16,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 class CodeLensProvider(
     private val index: WorkspaceIndex
 ) {
+    private val references = ReferenceProvider(index)
 
     /**
      * Return unresolved code lenses (cheap — no reference counting yet).
@@ -76,11 +77,10 @@ class CodeLensProvider(
         return lens
     }
 
-    private fun countMethodReferences(className: String, methodName: String, descriptor: String): Int {
-        return index.findMethodUsages(className, methodName, descriptor).size
-    }
+    /** Call sites on the class and on every subclass: a call through a subclass is the same method. */
+    private fun countMethodReferences(className: String, methodName: String, descriptor: String): Int =
+        references.findMethodReferences(className, methodName, descriptor, includeDeclaration = false).size
 
-    private fun countFieldReferences(className: String, fieldName: String, fieldType: String): Int {
-        return index.findFieldUsages(className, fieldName, fieldType).size
-    }
+    private fun countFieldReferences(className: String, fieldName: String, fieldType: String): Int =
+        references.findFieldReferences(className, fieldName, fieldType, includeDeclaration = false).size
 }

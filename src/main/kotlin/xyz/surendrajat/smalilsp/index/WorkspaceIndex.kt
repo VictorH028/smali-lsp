@@ -274,36 +274,52 @@ class WorkspaceIndex {
     // Declarations
     // ======================================================================
 
-    /** Where the method is declared: in [className] or, failing that, up its superclasses and interfaces. */
-    fun findMethod(className: String, methodName: String, descriptor: String): List<Location> =
-        findMethodIn(className, methodName, descriptor, HashSet())
+    /** A method and the file that declares it. */
+    data class MethodMatch(val file: SmaliFile, val method: MethodDefinition)
 
-    private fun findMethodIn(className: String, methodName: String, descriptor: String, visited: MutableSet<String>): List<Location> {
-        if (!visited.add(className)) return emptyList()
-        val file = findClass(className) ?: return emptyList()
-        file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }
-            ?.let { return listOf(Location(file.uri, it.nameSpan.toRange())) }
-        file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" }?.let { superClass ->
-            findMethodIn(superClass, methodName, descriptor, visited).takeIf { it.isNotEmpty() }?.let { return it }
-        }
-        for (iface in file.classDefinition.interfaces) {
-            findMethodIn(iface, methodName, descriptor, visited).takeIf { it.isNotEmpty() }?.let { return it }
-        }
-        return emptyList()
-    }
+    /** A field and the file that declares it. */
+    data class FieldMatch(val file: SmaliFile, val field: FieldDefinition)
 
-    /** Where the field is declared: in [className] or up its superclasses. The type is part of a field's identity. */
-    fun findField(className: String, fieldName: String, fieldType: String): Location? =
-        findFieldIn(className, fieldName, fieldType, HashSet())
+    /**
+     * The declaration a reference `className->methodName descriptor` resolves to: in [className]
+     * itself or, failing that, up its superclasses and interfaces. Null when no workspace class
+     * on that path declares it.
+     */
+    fun resolveMethod(className: String, methodName: String, descriptor: String): MethodMatch? =
+        resolveMethodIn(className, methodName, descriptor, HashSet())
 
-    private fun findFieldIn(className: String, fieldName: String, fieldType: String, visited: MutableSet<String>): Location? {
+    private fun resolveMethodIn(className: String, methodName: String, descriptor: String, visited: MutableSet<String>): MethodMatch? {
         if (!visited.add(className)) return null
         val file = findClass(className) ?: return null
-        file.fields.firstOrNull { it.name == fieldName && it.type == fieldType }
-            ?.let { return Location(file.uri, it.nameSpan.toRange()) }
-        val superClass = file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" } ?: return null
-        return findFieldIn(superClass, fieldName, fieldType, visited)
+        file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { return MethodMatch(file, it) }
+        file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" }?.let { superClass ->
+            resolveMethodIn(superClass, methodName, descriptor, visited)?.let { return it }
+        }
+        for (iface in file.classDefinition.interfaces) {
+            resolveMethodIn(iface, methodName, descriptor, visited)?.let { return it }
+        }
+        return null
     }
+
+    /** Where the method is declared, as a location of its name token. */
+    fun findMethod(className: String, methodName: String, descriptor: String): List<Location> =
+        listOfNotNull(resolveMethod(className, methodName, descriptor)?.let { Location(it.file.uri, it.method.nameSpan.toRange()) })
+
+    /** The declaration a field reference resolves to, in [className] or up its superclasses. The type is part of a field's identity. */
+    fun resolveField(className: String, fieldName: String, fieldType: String): FieldMatch? =
+        resolveFieldIn(className, fieldName, fieldType, HashSet())
+
+    private fun resolveFieldIn(className: String, fieldName: String, fieldType: String, visited: MutableSet<String>): FieldMatch? {
+        if (!visited.add(className)) return null
+        val file = findClass(className) ?: return null
+        file.fields.firstOrNull { it.name == fieldName && it.type == fieldType }?.let { return FieldMatch(file, it) }
+        val superClass = file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" } ?: return null
+        return resolveFieldIn(superClass, fieldName, fieldType, visited)
+    }
+
+    /** Where the field is declared, as a location of its name token. */
+    fun findField(className: String, fieldName: String, fieldType: String): Location? =
+        resolveField(className, fieldName, fieldType)?.let { Location(it.file.uri, it.field.nameSpan.toRange()) }
 
     // ======================================================================
     // Usages

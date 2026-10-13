@@ -79,16 +79,23 @@ class ReferenceProvider(
     private fun fieldReferences(instruction: FieldAccessInstruction, includeDeclaration: Boolean): List<Location> =
         findFieldReferences(instruction.className, instruction.fieldName, instruction.fieldType, includeDeclaration)
 
-    /** The method's declaration when its class is in the workspace, then every call site. */
+    /**
+     * References to the method a `className->methodName descriptor` reference resolves to: its
+     * declaration (when requested and in the workspace), then every call site on the declaring
+     * class or any of its subclasses and implementors. A call through a subclass is the same
+     * method, so the search starts from the class that declares it.
+     */
     fun findMethodReferences(className: String, methodName: String, descriptor: String, includeDeclaration: Boolean): List<Location> {
-        val declaration = workspaceIndex.findClass(className)?.methods?.find { it.name == methodName && it.descriptor == descriptor }
-        return findMethodReferences(className, methodName, descriptor, includeDeclaration && declaration != null, declaration?.range)
+        val declaration = workspaceIndex.resolveMethod(className, methodName, descriptor)
+        val root = declaration?.file?.classDefinition?.name ?: className
+        return findMethodReferences(root, methodName, descriptor, includeDeclaration && declaration != null, declaration?.method?.range)
     }
 
-    /** The field's declaration when its class is in the workspace, then every access. */
+    /** References to the field the reference resolves to: its declaration (when requested and in the workspace), then every access. */
     fun findFieldReferences(className: String, fieldName: String, fieldType: String, includeDeclaration: Boolean): List<Location> {
-        val declaration = workspaceIndex.findClass(className)?.fields?.find { it.name == fieldName && it.type == fieldType }
-        return findFieldReferences(className, fieldName, fieldType, includeDeclaration && declaration != null, declaration?.range)
+        val declaration = workspaceIndex.resolveField(className, fieldName, fieldType)
+        val root = declaration?.file?.classDefinition?.name ?: className
+        return findFieldReferences(root, fieldName, fieldType, includeDeclaration && declaration != null, declaration?.field?.range)
     }
 
     /**
@@ -133,6 +140,11 @@ class ReferenceProvider(
         }
 
         locations.addAll(workspaceIndex.findFieldUsages(className, fieldName, fieldType))
+        if (!Types.isSdkClass(className)) {
+            for (subClass in workspaceIndex.getAllSubclasses(className)) {
+                locations.addAll(workspaceIndex.findFieldUsages(subClass, fieldName, fieldType))
+            }
+        }
 
         return locations
     }
