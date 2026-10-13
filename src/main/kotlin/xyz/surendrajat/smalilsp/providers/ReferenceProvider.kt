@@ -11,9 +11,9 @@ data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot
 
 /** A member's declarations (the root first, then the overrides of a virtual method) and the sites that bind to them. */
 class MemberFamily(val declarations: List<MemberDeclaration>, val usages: List<Location>) {
-    /** The usages, preceded by the root declarations' name tokens when asked — the same spot go-to-definition lands on. */
+    /** The usages, preceded when asked by every declaration's name token (root and overrides: the spots rename edits), where go-to-definition lands. */
     fun references(includeDeclaration: Boolean): List<Location> =
-        if (includeDeclaration) declarations.filter { it.isRoot }.map { Location(it.file.uri, it.nameSpan.toRange()) } + usages else usages
+        if (includeDeclaration) declarations.map { Location(it.file.uri, it.nameSpan.toRange()) } + usages else usages
 }
 
 /**
