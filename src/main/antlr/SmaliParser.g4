@@ -1086,7 +1086,7 @@ annotationField:            fieldName ASSIGN (annotationFieldValue|annotationVal
 
 annotationDirective:        ANNOTATION_DIRECTIVE annotationScope annotationType annotationField* ANNOTATION_END_DIRECTIVE;
 
-locaDirectiveVariableName:  stringLiteral;
+locaDirectiveVariableName:  stringLiteral | nullLiteral;
 
 localDirectiveType:         nonVoidType;
 
@@ -1094,7 +1094,8 @@ localDirectiveGenericHint:  stringLiteral;
 
 localDirectiveRegister:     registerIdentifier;
 
-localDirective:             LOCAL_DIRECTIVE localDirectiveRegister COMMA locaDirectiveVariableName (COLON localDirectiveType)? (COMMA localDirectiveGenericHint)?;
+// `.local v0`, `.local v0, "name":T`, `.local v0, null:T, "signature"`
+localDirective:             LOCAL_DIRECTIVE localDirectiveRegister (COMMA locaDirectiveVariableName (COLON localDirectiveType)? (COMMA localDirectiveGenericHint)?)?;
 
 localEndDirective:          LOCAL_END_DIRECTIVE registerIdentifier;
 
@@ -1142,11 +1143,12 @@ registersDirective:         REGISTERS_DIRECTIVE numericLiteral;
 
 localsDirective:            LOCALS_DIRECTIVE numericLiteral;
 
-simpleParamDirective:       COMMA stringLiteral;
+paramName:                  stringLiteral;
 
-extendedParamDirective:     annotationDirective* PARAM_END_DIRECTIVE;
+paramAnnotations:           annotationDirective* PARAM_END_DIRECTIVE;
 
-paramDirective:             PARAM_DIRECTIVE registerIdentifier (extendedParamDirective | simpleParamDirective);
+// `.param p1`, `.param p1, "name"`, either optionally followed by annotations and `.end param`.
+paramDirective:             PARAM_DIRECTIVE registerIdentifier (COMMA paramName)? paramAnnotations?;
 
 lineDirective:              LINE_DIRECTIVE numericLiteral;
 
