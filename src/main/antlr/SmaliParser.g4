@@ -29,26 +29,7 @@ options {
 // Helpers
 
 stringLiteral:                  STRING_LITERAL;
-negativeNumericLiteral:         SUB positiveNumericLiteral;
-
-decimalNumericLiteral:          DECIMAL_LITERAL;
-hexNumericLiteral:              HEX_LITERAL;
-octNumericLiteral:              OCT_LITERAL;
-binaryNumericLiteral:           BINARY_LITERAL;
-floatNumericLiteral:            FLOAT_LITERAL;
-hexFloatLiteral:                HEX_FLOAT_LITERAL;
-
-positiveNumericLiteral:
-    decimalNumericLiteral
-    | hexNumericLiteral
-    | octNumericLiteral
-    | binaryNumericLiteral
-    | floatNumericLiteral
-    | hexFloatLiteral
-    | FLOAT_SPECIAL
-    ;
-
-numericLiteral:                 negativeNumericLiteral | positiveNumericLiteral;
+numericLiteral:                 SUB? (DECIMAL_LITERAL | HEX_LITERAL | OCT_LITERAL | BINARY_LITERAL | FLOAT_LITERAL | HEX_FLOAT_LITERAL | FLOAT_SPECIAL);
 
 // A member or label name is a single token. DEX SimpleName admits anything the lexer might
 // otherwise classify as a keyword, type, literal or opcode (e.g. Kotlin's `NaN` companion fields,
@@ -139,38 +120,19 @@ opcodeKeyword:
 
 // Types
 referenceType:                  QUALIFIED_TYPE_NAME;
-voidType:                       VOID_TYPE;
-booleanType:                    BOOLEAN_TYPE;
-byteType:                       BYTE_TYPE;
-shortType:                      SHORT_TYPE;
-charType:                       CHAR_TYPE;
-intType:                        INT_TYPE;
-longType:                       LONG_TYPE;
-floatType:                      FLOAT_TYPE;
-doubleType:                     DOUBLE_TYPE;
-
 primitiveType:
-    booleanType
-    | byteType
-    | shortType
-    | charType
-    | intType
-    | longType
-    | floatType
-    | doubleType
+    BOOLEAN_TYPE | BYTE_TYPE | SHORT_TYPE | CHAR_TYPE | INT_TYPE | LONG_TYPE | FLOAT_TYPE | DOUBLE_TYPE
     ;
-
-nonArrayType:               primitiveType | referenceType;
 
 methodParameterLiteral:     (COMPOUND_METHOD_ARG_LITERAL | IDENTIFIER);     // strings like IIS
 
-arrayType:                  LBRACK (nonArrayType | arrayType | methodParameterLiteral);
+arrayType:                  LBRACK (QUALIFIED_TYPE_NAME | primitiveType | arrayType | methodParameterLiteral);
 
-referenceOrArrayType:       referenceType | arrayType;
+referenceOrArrayType:       QUALIFIED_TYPE_NAME | arrayType;
 
-nonVoidType:                nonArrayType | arrayType;
+nonVoidType:                QUALIFIED_TYPE_NAME | primitiveType | arrayType;
 
-anyType:                    nonVoidType | voidType | arrayType;
+anyType:                    nonVoidType | VOID_TYPE;
 
 nullLiteral:                NULL_LITERAL;
 
@@ -224,9 +186,7 @@ fieldModifier:
     | ENUM
     ;
 
-labelName:                      identifier;
-
-label:                          COLON labelName;
+label:                          COLON identifier;
 
 // Instructions
 
@@ -382,19 +342,17 @@ intToCharInstruction:           OP_INT_TO_CHAR IDENTIFIER COMMA IDENTIFIER;
 
 intToShortInstruction:          OP_INT_TO_SHORT IDENTIFIER COMMA IDENTIFIER;
 
-ifLabel:                        label;
+ifEqzInstruction:               OP_IF_EQZ IDENTIFIER COMMA label;
 
-ifEqzInstruction:               OP_IF_EQZ IDENTIFIER COMMA ifLabel;
+ifNezInstruction:               OP_IF_NEZ IDENTIFIER COMMA label;
 
-ifNezInstruction:               OP_IF_NEZ IDENTIFIER COMMA ifLabel;
+ifLtzInstruction:               OP_IF_LTZ IDENTIFIER COMMA label;
 
-ifLtzInstruction:               OP_IF_LTZ IDENTIFIER COMMA ifLabel;
+ifGezInstruction:               OP_IF_GEZ IDENTIFIER COMMA label;
 
-ifGezInstruction:               OP_IF_GEZ IDENTIFIER COMMA ifLabel;
+ifGtzInstruction:               OP_IF_GTZ IDENTIFIER COMMA label;
 
-ifGtzInstruction:               OP_IF_GTZ IDENTIFIER COMMA ifLabel;
-
-ifLezInstruction:               OP_IF_LEZ IDENTIFIER COMMA ifLabel;
+ifLezInstruction:               OP_IF_LEZ IDENTIFIER COMMA label;
 
 negIntInstruction:              OP_NEG_INT IDENTIFIER COMMA IDENTIFIER;
 
@@ -408,17 +366,17 @@ negFloatInstruction:            OP_NEG_FLOAT IDENTIFIER COMMA IDENTIFIER;
 
 negDoubleInstruction:           OP_NEG_DOUBLE IDENTIFIER COMMA IDENTIFIER;
 
-ifEqInstruction:                OP_IF_EQ IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
+ifEqInstruction:                OP_IF_EQ IDENTIFIER COMMA IDENTIFIER COMMA label;
 
-ifNeInstruction:                OP_IF_NE IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
+ifNeInstruction:                OP_IF_NE IDENTIFIER COMMA IDENTIFIER COMMA label;
 
-ifLtInstruction:                OP_IF_LT IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
+ifLtInstruction:                OP_IF_LT IDENTIFIER COMMA IDENTIFIER COMMA label;
 
-ifGeInstruction:                OP_IF_GE IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
+ifGeInstruction:                OP_IF_GE IDENTIFIER COMMA IDENTIFIER COMMA label;
 
-ifGtInstruction:                OP_IF_GT IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
+ifGtInstruction:                OP_IF_GT IDENTIFIER COMMA IDENTIFIER COMMA label;
 
-ifLeInstruction:                OP_IF_LE IDENTIFIER COMMA IDENTIFIER COMMA ifLabel;
+ifLeInstruction:                OP_IF_LE IDENTIFIER COMMA IDENTIFIER COMMA label;
 
 addInt2addrInstruction:         OP_ADD_INT_2ADDR IDENTIFIER COMMA IDENTIFIER;
 
@@ -700,7 +658,7 @@ packedSwitchInstruction:        OP_PACKED_SWITCH IDENTIFIER COMMA packedSwitchLa
 sparseSwitchInstruction:        OP_SPARSE_SWITCH IDENTIFIER COMMA sparseSwitchLabel;
 
 // Method prototype without a name, e.g. `(ILjava/lang/String;)V` (invoke-polymorphic, const-method-type, call sites).
-methodProto:                LPAREN methodArguments? RPAREN methodReturnType;
+methodProto:                LPAREN (nonVoidType | methodParameterLiteral)* RPAREN anyType;
 
 // `invoke-static@Lcom/Foo;->bar()V`, `instance-get@Lcom/Foo;->IDENTIFIER:I`. The kind is one of
 // invoke-static/instance/constructor/direct/interface or static/instance-get/put; all lex as
@@ -748,9 +706,7 @@ fieldInvocationTarget:          referenceOrArrayType ARROW fieldNameAndType;
 
 fieldName:                  SUB? identifier;  // Allow -prefixed IDENTIFIER names
 
-fieldType:                  anyType;
-
-fieldNameAndType:           fieldName COLON fieldType;
+fieldNameAndType:           fieldName COLON anyType;
 
 fieldDirective:             FIELD_DIRECTIVE fieldModifier* fieldNameAndType (ASSIGN assignableValue)? fieldBody? FIELD_END_DIRECTIVE?;
 
@@ -768,15 +724,7 @@ sourceName:                 stringLiteral;
 
 sourceDirective:            SOURCE_DIRECTIVE sourceName;
 
-methodIdentifier:           SUB? identifier | LT identifier GT;  // Allow -deprecated_name style; <init>/<clinit>
-
-methodReturnType:           anyType;
-
-methodParameterType:        (nonVoidType | methodParameterLiteral);
-
-methodArguments:            methodParameterType+;
-
-methodSignature:            methodIdentifier LPAREN methodArguments? RPAREN methodReturnType;
+methodSignature:            (SUB? identifier | LT identifier GT) LPAREN (nonVoidType | methodParameterLiteral)* RPAREN anyType;
 
 methodDeclaration:          methodModifier* methodSignature;
 

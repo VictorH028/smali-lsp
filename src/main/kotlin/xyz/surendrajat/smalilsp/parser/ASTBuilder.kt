@@ -658,7 +658,7 @@ class ASTBuilder(
         if (pendingMethod == null) return
         
         val labelCtx = ctx.label() ?: return
-        val labelName = labelCtx.labelName()?.src() ?: return
+        val labelName = labelCtx.identifier()?.src() ?: return
         
         currentLabels[labelName] = LabelDefinition(
             name = labelName,
@@ -685,54 +685,54 @@ class ASTBuilder(
      * Parse if-*z instructions (single register tests)
      */
     override fun exitIfEqzInstruction(ctx: GeneratedSmaliParser.IfEqzInstructionContext) {
-        parseJumpInstruction("if-eqz", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-eqz", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfNezInstruction(ctx: GeneratedSmaliParser.IfNezInstructionContext) {
-        parseJumpInstruction("if-nez", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-nez", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfLtzInstruction(ctx: GeneratedSmaliParser.IfLtzInstructionContext) {
-        parseJumpInstruction("if-ltz", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-ltz", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfGezInstruction(ctx: GeneratedSmaliParser.IfGezInstructionContext) {
-        parseJumpInstruction("if-gez", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-gez", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfGtzInstruction(ctx: GeneratedSmaliParser.IfGtzInstructionContext) {
-        parseJumpInstruction("if-gtz", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-gtz", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfLezInstruction(ctx: GeneratedSmaliParser.IfLezInstructionContext) {
-        parseJumpInstruction("if-lez", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-lez", ctx.label(), ctx.toRange())
     }
     
     /**
      * Parse if-* instructions (two register comparisons)
      */
     override fun exitIfEqInstruction(ctx: GeneratedSmaliParser.IfEqInstructionContext) {
-        parseJumpInstruction("if-eq", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-eq", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfNeInstruction(ctx: GeneratedSmaliParser.IfNeInstructionContext) {
-        parseJumpInstruction("if-ne", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-ne", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfLtInstruction(ctx: GeneratedSmaliParser.IfLtInstructionContext) {
-        parseJumpInstruction("if-lt", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-lt", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfGeInstruction(ctx: GeneratedSmaliParser.IfGeInstructionContext) {
-        parseJumpInstruction("if-ge", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-ge", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfGtInstruction(ctx: GeneratedSmaliParser.IfGtInstructionContext) {
-        parseJumpInstruction("if-gt", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-gt", ctx.label(), ctx.toRange())
     }
     
     override fun exitIfLeInstruction(ctx: GeneratedSmaliParser.IfLeInstructionContext) {
-        parseJumpInstruction("if-le", ctx.ifLabel()?.label(), ctx.toRange())
+        parseJumpInstruction("if-le", ctx.label(), ctx.toRange())
     }
     
     /**
@@ -745,7 +745,7 @@ class ASTBuilder(
     ) {
         if (pendingMethod == null || labelCtx == null) return
         
-        val labelName = labelCtx.labelName()?.src() ?: return
+        val labelName = labelCtx.identifier()?.src() ?: return
         val labelRange = labelCtx.toRange()
         
         currentInstructions.add(JumpInstruction(
