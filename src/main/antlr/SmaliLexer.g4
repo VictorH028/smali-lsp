@@ -427,7 +427,9 @@ LINE_COMMENT
 // Fragment rules
 // Start with a non-hyphen so a leading SUB token stays separate, and never END with a hyphen so that
 // `[I->clone()` lexes as INT_TYPE ARROW instead of IDENTIFIER("I-") GT (DEX names may still contain "-").
-fragment SimpleName:        LetterNoHyphen (LetterOrDigit* LetterOrDigitNoHyphen)?;
+// May start with a digit (DEX allows `1a`); an all-digit name lexes as a literal, which the
+// parser accepts as an identifier too.
+fragment SimpleName:        LetterOrDigitNoHyphen (LetterOrDigit* LetterOrDigitNoHyphen)?;
 
 // Fragment rules
 

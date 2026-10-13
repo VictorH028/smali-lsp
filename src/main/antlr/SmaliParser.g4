@@ -87,6 +87,10 @@ identifier:
     | DECLARED_SYNCHRONIZED
     | literalKeyword
     | opcodeKeyword
+    | DECIMAL_LITERAL
+    | HEX_LITERAL
+    | OCT_LITERAL
+    | BINARY_LITERAL
     ;
 
 literalKeyword:             FLOAT_SPECIAL | BOOL_LITERAL | NULL_LITERAL;
