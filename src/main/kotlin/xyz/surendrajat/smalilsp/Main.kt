@@ -193,6 +193,9 @@ class SmaliLanguageServer : LanguageServer {
     private var clientSupportsProgress = false
     private var clientSupportsWatcherRegistration = false
 
+    /** Completes once the initial workspace indexing has finished (or was skipped/failed). */
+    val indexingDone: CompletableFuture<Void> = CompletableFuture()
+
     @Volatile
     private var shutdownRequested = false
 
@@ -361,10 +364,13 @@ class SmaliLanguageServer : LanguageServer {
                     logger.error("Failed to index workspace", e)
                     // Mark indexing complete even on failure so diagnostics aren't permanently suppressed
                     textDocumentService.indexingComplete = true
+                } finally {
+                    indexingDone.complete(null)
                 }
             }
         } else {
             textDocumentService.indexingComplete = true
+            indexingDone.complete(null)
         }
     }
     

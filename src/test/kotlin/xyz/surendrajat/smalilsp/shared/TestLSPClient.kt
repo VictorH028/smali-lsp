@@ -60,6 +60,14 @@ class TestLSPClient : LanguageClient {
     override fun notifyProgress(params: ProgressParams) {
         receivedProgress.add(params)
     }
+
+    // Capabilities the server registers dynamically (e.g. the .smali file watcher)
+    val registrations = mutableListOf<RegistrationParams>()
+
+    override fun registerCapability(params: RegistrationParams): CompletableFuture<Void> {
+        registrations.add(params)
+        return CompletableFuture.completedFuture(null)
+    }
     
     // ===== Helper methods for tests =====
     

@@ -52,10 +52,10 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         server.initialized(InitializedParams())
         
         isInitialized = true
-        
-        // Give server time to start indexing
-        Thread.sleep(500)
-        
+
+        // Indexing runs in the background; wait for it so every request sees the full index.
+        server.indexingDone.get(60, TimeUnit.SECONDS)
+
         return this
     }
     
@@ -83,13 +83,11 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         val uri = workspace.getFileUri(relativePath)
         val content = workspace.readFile(relativePath)
         
+        // didOpen parses, indexes and publishes diagnostics synchronously.
         server.textDocumentService.didOpen(DidOpenTextDocumentParams(
             TextDocumentItem(uri, languageId, version, content)
         ))
-        
-        // Give server time to process
-        Thread.sleep(100)
-        
+
         return uri
     }
     
@@ -97,13 +95,11 @@ class E2ETestHarness(val workspace: TestWorkspace) {
      * Change file content
      */
     fun changeFile(uri: String, newContent: String, version: Int) {
+        // didChange re-indexes and publishes diagnostics synchronously.
         server.textDocumentService.didChange(DidChangeTextDocumentParams(
             VersionedTextDocumentIdentifier(uri, version),
             listOf(TextDocumentContentChangeEvent(newContent))
         ))
-        
-        // Give server time to process
-        Thread.sleep(100)
     }
     
     
@@ -229,10 +225,10 @@ class E2ETestHarness(val workspace: TestWorkspace) {
     // ===== Helpers =====
     
     /**
-     * Wait for indexing to complete (simple sleep-based)
+     * Wait for the initial workspace indexing to complete.
      */
     fun waitForIndexing(seconds: Int = 5) {
-        Thread.sleep(seconds * 1000L)
+        server.indexingDone.get(seconds.toLong(), TimeUnit.SECONDS)
     }
     
     
