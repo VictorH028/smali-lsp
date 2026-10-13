@@ -86,12 +86,6 @@ object DalvikOpcodeDatabase {
 
     fun allInstructionNames(): List<String> = cachedInstructionNames
 
-    /**
-     * Get all instructions.
-     */
-    fun allInstructions(): Collection<InstructionInfo> =
-        instructionsByName.values
-
     private fun buildInstructionList(): List<InstructionInfo> = listOf(
         // 0x00 nop
         InstructionInfo("00", "nop", "ØØ|op", "10x", "nop", "",

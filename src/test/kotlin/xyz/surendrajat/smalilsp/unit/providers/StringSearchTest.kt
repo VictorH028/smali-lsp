@@ -115,33 +115,6 @@ class StringSearchTest {
     }
 
     @Test
-    fun `exact string location lookup`() {
-        val content = """
-            .class public Lcom/example/Multi;
-            .super Ljava/lang/Object;
-            .method public constructor <init>()V
-                .registers 1
-                invoke-direct {p0}, Ljava/lang/Object;-><init>()V
-                return-void
-            .end method
-            .method public a()V
-                .registers 2
-                const-string v0, "shared_pref_key"
-                return-void
-            .end method
-            .method public b()V
-                .registers 2
-                const-string v0, "shared_pref_key"
-                return-void
-            .end method
-        """.trimIndent()
-        indexContent("file:///test/Multi.smali", content)
-
-        val locations = index.findStringLocations("shared_pref_key")
-        assertEquals(2, locations.size, "Same string in two methods should have two locations")
-    }
-
-    @Test
     fun `stats include string count`() {
         val content = """
             .class public Lcom/example/Strs;

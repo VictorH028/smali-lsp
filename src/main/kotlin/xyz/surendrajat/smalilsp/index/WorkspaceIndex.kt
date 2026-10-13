@@ -466,14 +466,6 @@ class WorkspaceIndex {
     }
 
     /**
-     * Get all locations of an exact string literal.
-     */
-    fun findStringLocations(value: String): Set<Location> {
-        ensureStringIndex()
-        return stringIndex[value] ?: emptySet()
-    }
-
-    /**
      * Find all files that reference a class (inheritance/interface only).
      */
     fun findClassUsages(className: String): Set<String> {
