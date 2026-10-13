@@ -93,7 +93,7 @@ class SmaliParser {
         val syntaxErrors = mutableListOf<SyntaxError>()
 
         val smaliFile = try {
-            val charStream = CharStreams.fromString(cleanContent)
+            val charStream = StringCharStream(cleanContent, uri)
             val lexer = SmaliLexer(charStream)
             
             // Collect lexer errors
