@@ -216,7 +216,7 @@ class McpModeTest {
     }
 
     @Test
-    fun `test tools list returns all 12 tools`() {
+    fun `test tools list returns all 14 tools`() {
         val process = startMcpProcess()
 
         try {
@@ -229,14 +229,14 @@ class McpModeTest {
             val tools = result.getAsJsonArray("tools")
 
             val toolNames = tools.map { it.asJsonObject.get("name").asString }.toSet()
-            assertEquals(12, toolNames.size, "Expected 12 tools, got: $toolNames")
+            assertEquals(14, toolNames.size, "Expected 14 tools, got: $toolNames")
 
             val expectedTools = setOf(
                 "smali_index", "smali_find_definition", "smali_search_symbols",
                 "smali_get_stats", "smali_find_references", "smali_hover",
                 "smali_diagnostics", "smali_document_symbols",
                 "smali_search_strings", "smali_call_graph", "smali_xref_summary",
-                "smali_type_hierarchy"
+                "smali_type_hierarchy", "smali_read_method", "smali_list_package"
             )
             assertEquals(expectedTools, toolNames)
 
@@ -951,5 +951,57 @@ class McpModeTest {
         sendNotification(stdin, "notifications/initialized")
 
         return Pair(stdin, stdout)
+    }
+
+    @Test
+    fun `definitions by position and by member, bounded references, read_method and list_package`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 400, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+            val lines = smaliFile.readLines()
+
+            // Definition at a position: the iget's field goes to the .field line
+            val igetLine = lines.indexOfFirst { it.contains("iget v0, p0") }
+            val byPosition = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 401, "smali_find_definition", mapOf("uri" to smaliFileUri, "line" to igetLine, "character" to lines[igetLine].indexOf("counter") + 2))
+            )).asJsonObject
+            assertEquals(1, byPosition.get("count").asInt, byPosition.toString())
+            assertEquals(lines.indexOfFirst { it.contains(".field private counter:I") }, byPosition.getAsJsonArray("results")[0].asJsonObject.getAsJsonObject("range").getAsJsonObject("start").get("line").asInt)
+
+            // Definition by member name
+            val byMember = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 402, "smali_find_definition", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "increment"))
+            )).asJsonObject
+            assertEquals(lines.indexOfFirst { it.contains(".method public increment") }, byMember.getAsJsonArray("results")[0].asJsonObject.getAsJsonObject("range").getAsJsonObject("start").get("line").asInt)
+
+            // References are bounded, with the full count alongside
+            val bounded = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 403, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "counter", "max_results" to 2))
+            )).asJsonObject
+            assertEquals(2, bounded.get("count").asInt)
+            assertEquals(4, bounded.get("total").asInt, bounded.toString())
+
+            // A method's source by name, numbered from 1
+            val read = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 404, "smali_read_method", mapOf("class_name" to "Lcom/example/test/MainActivity;", "method_name" to "increment"))
+            )).asJsonObject
+            assertEquals(lines.indexOfFirst { it.contains(".method public increment") } + 1, read.get("start_line").asInt)
+            val source = read.get("source").asString
+            assertTrue(source.startsWith("${read.get("start_line").asInt}: .method public increment()V") && source.trimEnd().endsWith(".end method"), source)
+
+            // Packages
+            val pkg = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 405, "smali_list_package", mapOf("package" to "com.example"))
+            )).asJsonObject
+            assertEquals(listOf("Lcom/example/test/MainActivity;"), pkg.getAsJsonArray("classes").map { it.asJsonObject.get("name").asString })
+            assertEquals(listOf("test"), pkg.getAsJsonArray("subpackages").map { it.asString })
+
+            // A wrongly typed argument is a tool error naming the argument
+            val typed = callTool(stdin, stdout, 406, "smali_find_references", mapOf("class_name" to listOf("not", "a", "string")))
+            assertTrue(isToolError(typed) && getToolResultText(typed).contains("'class_name' must be a string"), getToolResultText(typed))
+        } finally {
+            process.destroyForcibly()
+        }
     }
 }

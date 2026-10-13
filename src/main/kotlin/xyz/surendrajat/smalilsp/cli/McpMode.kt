@@ -15,11 +15,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import org.eclipse.lsp4j.CallHierarchyItem
@@ -35,6 +36,7 @@ import xyz.surendrajat.smalilsp.indexer.WorkspaceScanner
 import xyz.surendrajat.smalilsp.loadVersionInfo
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
+import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.DiagnosticProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
@@ -42,6 +44,7 @@ import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
+import java.net.URI
 
 /**
  * MCP server over stdio: the same index and providers as the LSP, exposed as tools for AI
@@ -58,6 +61,7 @@ class McpMode {
     /** Everything that belongs to one indexed directory. */
     private class Session(val directory: String, val index: WorkspaceIndex) {
         val hover = HoverProvider(index)
+        val definitions = DefinitionProvider(index)
         val references = ReferenceProvider(index)
         val diagnostics = DiagnosticProvider(SmaliParser(index.strings), index)
         val symbols = WorkspaceSymbolProvider(index)
@@ -103,10 +107,13 @@ class McpMode {
     private class MissingArgument(name: String) : ToolError("Missing required argument: '$name'")
 
     private class Args(private val json: JsonObject?) {
-        fun string(name: String): String? = json?.get(name)?.jsonPrimitive?.contentOrNull
-        fun int(name: String): Int? = json?.get(name)?.jsonPrimitive?.intOrNull
+        private fun present(name: String): JsonElement? = json?.get(name)?.takeUnless { it is JsonNull }
+        fun string(name: String): String? = present(name)?.let { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content ?: throw ToolError("'$name' must be a string") }
+        fun int(name: String): Int? = present(name)?.let { (it as? JsonPrimitive)?.intOrNull ?: throw ToolError("'$name' must be a number") }
         fun require(name: String): String = string(name) ?: throw MissingArgument(name)
         fun requireInt(name: String): Int = int(name) ?: throw MissingArgument(name)
+        /** `max_results`, defaulting to [default] and never above [cap], so one answer cannot flood an agent's context. */
+        fun maxResults(default: Int, cap: Int = 5000): Int = (int("max_results") ?: default).coerceIn(1, cap)
     }
 
     /**
@@ -200,29 +207,57 @@ class McpMode {
 
         server.tool(
             "smali_find_definition",
-            "Find the definition of a class. Accepts fully qualified name (e.g., 'Lcom/example/MainActivity;') or simple name (e.g., 'MainActivity'). Returns class info including superclass, interfaces, methods, and fields.",
-            Arg("symbol", "Class name — fully qualified (e.g., 'Lcom/example/MainActivity;') or simple (e.g., 'MainActivity')")
+            "Find a definition. Pass 'symbol' (a class by fully qualified or simple name) for class info; or a position " +
+                "(uri, line, character) for the declaration of whatever is there; or class_name with member_name " +
+                "(plus descriptor / field_type to disambiguate) for a method or field declaration.",
+            Arg("symbol", "Class name — fully qualified (e.g., 'Lcom/example/MainActivity;') or simple (e.g., 'MainActivity')", required = false),
+            *positionArgs, *symbolArgs
         ) { args, s ->
-            val symbol = args.require("symbol")
             val index = s!!.index
-            val matches = index.findClass(symbol)?.let { listOf(it) } ?: index.findClassesBySimpleName(symbol)
-            val results = matches.map { file ->
-                mapOf(
-                    "type" to "class",
-                    "name" to file.classDefinition.name,
-                    "uri" to file.uri,
-                    "superClass" to file.classDefinition.superClass,
-                    "interfaces" to file.classDefinition.interfaces,
-                    "methods" to file.methods.size,
-                    "fields" to file.fields.size
-                )
+            val symbol = args.string("symbol")
+            when {
+                symbol != null -> {
+                    val matches = index.findClass(symbol)?.let { listOf(it) } ?: index.findClassesBySimpleName(symbol)
+                    val results = matches.map { file ->
+                        mapOf(
+                            "type" to "class",
+                            "name" to file.classDefinition.name,
+                            "uri" to file.uri,
+                            "superClass" to file.classDefinition.superClass,
+                            "interfaces" to file.classDefinition.interfaces,
+                            "methods" to file.methods.size,
+                            "fields" to file.fields.size
+                        )
+                    }
+                    json(mapOf("symbol" to symbol, "results" to results, "count" to results.size))
+                }
+                args.string("class_name") != null -> {
+                    val className = args.require("class_name")
+                    val member = args.string("member_name")
+                    val locations = if (member == null) {
+                        listOfNotNull(index.findClass(className)?.let { Location(it.uri, it.classDefinition.nameSpan.toRange()) })
+                    } else {
+                        membersByName(s, args, className, member).flatMap {
+                            when (it) {
+                                is Member.Method -> index.findMethod(it.className, it.name, it.descriptor)
+                                is Member.Field -> listOfNotNull(index.findField(it.className, it.name, it.type))
+                            }
+                        }
+                    }
+                    json(mapOf("class_name" to className, "member_name" to member, "results" to locations.map { location(it) }, "count" to locations.size))
+                }
+                args.string("uri") == null -> throw ToolError("Missing arguments: pass 'symbol', or 'uri' with 'line' and 'character', or 'class_name' (with 'member_name' for a method or field)")
+                else -> {
+                    val (uri, position) = position(args)
+                    val locations = s.definitions.findDefinition(uri, position)
+                    json(mapOf("uri" to uri, "results" to locations.map { location(it) }, "count" to locations.size))
+                }
             }
-            json(mapOf("symbol" to symbol, "results" to results, "count" to results.size))
         }
 
         server.tool(
             "smali_search_symbols",
-            "Search for classes, methods, or fields by name pattern. Returns up to 100 matching symbols.",
+            "Search for classes, methods, or fields by name pattern. Returns the best 500 matches.",
             Arg("pattern", "Search pattern (case-insensitive substring match)")
         ) { args, s ->
             val pattern = args.require("pattern")
@@ -260,8 +295,10 @@ class McpMode {
         server.tool(
             "smali_find_references",
             "Find all references to a symbol, given either a position in a file (uri, line, character) " +
-                "or a name (class_name alone for a class; class_name + member_name for a method or field).",
-            *positionArgs, *symbolArgs
+                "or a name (class_name alone for a class; class_name + member_name for a method or field). " +
+                "'total' is the full count; 'results' holds at most max_results of them.",
+            *positionArgs, *symbolArgs,
+            Arg("max_results", "Most locations to return (default 500, at most 5000)", type = "number", required = false)
         ) { args, s ->
             val references: List<Location>
             val subject: Map<String, Any?>
@@ -273,7 +310,8 @@ class McpMode {
                 references = s!!.references.findReferences(uri, position, true)
                 subject = mapOf("uri" to uri)
             }
-            json(subject + mapOf("results" to references.map { location(it) }, "count" to references.size))
+            val shown = references.take(args.maxResults(default = 500))
+            json(subject + mapOf("results" to shown.map { location(it) }, "count" to shown.size, "total" to references.size))
         }
 
         server.tool(
@@ -335,10 +373,10 @@ class McpMode {
             "Search for string literals (const-string instructions) across all indexed smali files. " +
                 "Useful for finding URLs, API keys, error messages, hardcoded paths, etc.",
             Arg("query", "Substring to search for in string literals (case-insensitive)"),
-            Arg("max_results", "Maximum results to return (default: 100)", type = "number", required = false)
+            Arg("max_results", "Maximum results to return (default 100, at most 5000)", type = "number", required = false)
         ) { args, s ->
             val query = args.require("query")
-            val results = s!!.index.searchStrings(query, args.int("max_results") ?: 100).map { result ->
+            val results = s!!.index.searchStrings(query, args.maxResults(default = 100)).map { result ->
                 mapOf(
                     "value" to result.value,
                     "uri" to result.location.uri,
@@ -434,6 +472,53 @@ class McpMode {
                     "field_accessor_count" to fieldAccessors.values.sumOf { it.size },
                     "type_reference_count" to typeReferences.size
                 )
+            ))
+        }
+
+        server.tool(
+            "smali_read_method",
+            "The source text of one method, with 1-based line numbers, so a method can be read without loading its whole file.",
+            Arg("class_name", "Fully qualified class name (e.g., 'Lcom/example/MyClass;')"),
+            Arg("method_name", "Method name (e.g., 'onCreate')"),
+            Arg("descriptor", "Method descriptor (e.g., '(Landroid/os/Bundle;)V'). If omitted, the first method with that name.", required = false)
+        ) { args, s ->
+            val className = args.require("class_name")
+            val methodName = args.require("method_name")
+            val descriptor = args.string("descriptor")
+            val classFile = s!!.index.findClass(className) ?: throw ToolError("Class not found: $className")
+            val method = classFile.methods.find { it.name == methodName && (descriptor == null || it.descriptor == descriptor) }
+                ?: throw ToolError("Method not found: $className->$methodName${descriptor ?: ""}")
+            val lines = try {
+                File(URI(classFile.uri)).readLines()
+            } catch (e: Exception) {
+                throw ToolError("Cannot read ${classFile.uri}: ${e.message}")
+            }
+            val first = method.range.start.line
+            val last = minOf(method.range.end.line, lines.size - 1)
+            val source = (first..last).joinToString("\n") { i -> "${i + 1}: ${lines[i]}" }
+            json(mapOf("class" to className, "method" to "${method.name}${method.descriptor}", "uri" to classFile.uri, "start_line" to first + 1, "end_line" to last + 1, "source" to source))
+        }
+
+        server.tool(
+            "smali_list_package",
+            "The classes directly or transitively under a package, and its immediate sub-packages.",
+            Arg("package", "Package prefix: 'Lcom/example/', 'com/example' or 'com.example'"),
+            Arg("max_results", "Most classes to return (default 500, at most 5000)", type = "number", required = false)
+        ) { args, s ->
+            val raw = args.require("package").trim().removePrefix("L").replace('.', '/').trimEnd('/')
+            val prefix = if (raw.isEmpty()) "L" else "L$raw/"
+            val classes = s!!.index.getClassNames().filter { it.startsWith(prefix) }.sorted()
+            val subpackages = classes.mapNotNullTo(sortedSetOf()) { name ->
+                val rest = name.removePrefix(prefix)
+                rest.substringBefore('/', "").takeIf { it.isNotEmpty() && rest.contains('/') }
+            }
+            val shown = classes.take(args.maxResults(default = 500))
+            json(mapOf(
+                "package" to prefix,
+                "classes" to shown.map { mapOf("name" to it, "uri" to s.index.getUri(it)) },
+                "count" to shown.size,
+                "total" to classes.size,
+                "subpackages" to subpackages.toList()
             ))
         }
 
