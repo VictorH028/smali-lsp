@@ -216,6 +216,15 @@ class CodeLensProviderTest {
     }
 
     @Test
+    fun `a lens spans its declaration line only`() {
+        val content = ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;\n.field public count:I\n.method public calculate(II)I\n    .registers 4\n    add-int v0, p1, p2\n    return v0\n.end method"
+        indexContent("file:///test/Foo.smali", content)
+        val byName = provider.provideCodeLenses("file:///test/Foo.smali").associateBy { (it.data as JsonObject).get("memberName").asString }
+        assertEquals(Range(Position(3, 0), Position(3, ".method public calculate(II)I".length)), byName["calculate"]!!.range)
+        assertEquals(Range(Position(2, 0), Position(2, ".field public count:I".length)), byName["count"]!!.range)
+    }
+
+    @Test
     fun `returns empty for unknown URI`() {
         val lenses = provider.provideCodeLenses("file:///nonexistent.smali")
         assertTrue(lenses.isEmpty())

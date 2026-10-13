@@ -2,14 +2,16 @@ package xyz.surendrajat.smalilsp.providers
 
 import com.google.gson.JsonObject
 import org.eclipse.lsp4j.*
+import xyz.surendrajat.smalilsp.core.Span
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
  * Provides code lens (inline reference counts) for smali classes.
  *
- * Shows "N references" above each method and field definition.
- * Uses lazy resolution: provideCodeLenses returns unresolved lenses (cheap),
- * resolveCodeLens computes the actual count only when a lens becomes visible.
+ * Shows "N references" above each method and field definition; a lens's range is the
+ * declaration line, as the protocol asks. Uses lazy resolution: provideCodeLenses returns
+ * unresolved lenses (cheap), resolveCodeLens computes the actual count only when a lens
+ * becomes visible.
  *
  * LSP Requests: textDocument/codeLens, codeLens/resolve
  */
@@ -33,7 +35,7 @@ class CodeLensProvider(
             data.addProperty("memberName", method.name)
             data.addProperty("memberType", "method")
             data.addProperty("descriptor", method.descriptor)
-            lenses.add(CodeLens(method.range, null, data))
+            lenses.add(CodeLens(Span(method.range.start.line, method.range.start.character, method.descriptorSpan.end).toRange(), null, data))
         }
 
         for (field in file.fields) {
@@ -42,7 +44,7 @@ class CodeLensProvider(
             data.addProperty("memberName", field.name)
             data.addProperty("memberType", "field")
             data.addProperty("fieldType", field.type)
-            lenses.add(CodeLens(field.range, null, data))
+            lenses.add(CodeLens(Span(field.range.start.line, field.range.start.character, field.typeSpan.end).toRange(), null, data))
         }
 
         return lenses
