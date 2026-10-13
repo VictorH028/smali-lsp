@@ -30,7 +30,7 @@ class ReferenceProvider(
             is Symbol.ClassRef -> symbol.descriptorOf?.let { methodReferences(it, includeDeclaration) }
                 ?: findClassReferences(symbol.className, includeDeclaration)
             is Symbol.MethodDecl -> findMethodReferences(file.classDefinition.name, symbol.method.name, symbol.method.descriptor, includeDeclaration, symbol.method.range)
-            is Symbol.FieldDecl -> findFieldReferences(file.classDefinition.name, symbol.fieldDef.name, includeDeclaration, symbol.fieldDef.range)
+            is Symbol.FieldDecl -> findFieldReferences(file.classDefinition.name, symbol.fieldDef.name, symbol.fieldDef.type, includeDeclaration, symbol.fieldDef.range)
             is Symbol.MethodRef -> methodReferences(symbol.instruction, includeDeclaration)
             is Symbol.FieldRef -> fieldReferences(symbol.instruction, includeDeclaration)
             is Symbol.Primitive -> when (val inside = symbol.inside) {
@@ -81,8 +81,8 @@ class ReferenceProvider(
     }
 
     private fun fieldReferences(instruction: FieldAccessInstruction, includeDeclaration: Boolean): List<Location> {
-        val declaration = workspaceIndex.findClass(instruction.className)?.fields?.find { it.name == instruction.fieldName }
-        return findFieldReferences(instruction.className, instruction.fieldName, includeDeclaration && declaration != null, declaration?.range)
+        val declaration = workspaceIndex.findClass(instruction.className)?.fields?.find { it.name == instruction.fieldName && it.type == instruction.fieldType }
+        return findFieldReferences(instruction.className, instruction.fieldName, instruction.fieldType, includeDeclaration && declaration != null, declaration?.range)
     }
 
     /**
@@ -116,6 +116,7 @@ class ReferenceProvider(
     private fun findFieldReferences(
         className: String,
         fieldName: String,
+        fieldType: String,
         includeDeclaration: Boolean,
         declarationRange: Range?
     ): List<Location> {
@@ -125,7 +126,7 @@ class ReferenceProvider(
             workspaceIndex.findClass(className)?.let { locations.add(Location(it.uri, declarationRange)) }
         }
 
-        locations.addAll(workspaceIndex.findFieldUsages(className, fieldName))
+        locations.addAll(workspaceIndex.findFieldUsages(className, fieldName, fieldType))
 
         return locations
     }

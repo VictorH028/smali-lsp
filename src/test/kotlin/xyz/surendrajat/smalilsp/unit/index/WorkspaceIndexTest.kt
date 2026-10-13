@@ -84,7 +84,7 @@ class WorkspaceIndexTest {
         
         index.indexFile(file)
         
-        val location = index.findField("Lcom/example/Test;", "myField")
+        val location = index.findField("Lcom/example/Test;", "myField", "I")
         assertNotNull(location)
         assertEquals("file:///test/Test.smali", location?.uri)
         assertEquals(5, location?.range?.start?.line)
@@ -245,7 +245,7 @@ class WorkspaceIndexTest {
         assertNull(index.findFileByUri(uri))
         // Method/field entries gone
         assertTrue(index.findMethod(className, "foo", "()V").isEmpty())
-        assertNull(index.findField(className, "bar"))
+        assertNull(index.findField(className, "bar", "I"))
         // Subclass hierarchy still has referrer but no parent entry
         assertTrue(index.getDirectSubclasses(className).contains("Lcom/example/Referrer;"))
     }

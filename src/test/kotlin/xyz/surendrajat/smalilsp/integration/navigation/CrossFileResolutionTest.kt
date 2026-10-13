@@ -145,12 +145,12 @@ class CrossFileResolutionTest {
         scanner.scanDirectory(tempDir)
         
         // Find the field definition
-        val location = index.findField("Lcom/example/Config;", "MAX_VALUE")
+        val location = index.findField("Lcom/example/Config;", "MAX_VALUE", "I")
         assertNotNull(location, "Should find field definition")
         assertTrue(location?.uri?.contains("Config.smali") == true, "Field should be in Config.smali")
         
         // Verify other field is also found
-        val nameLocation = index.findField("Lcom/example/Config;", "name")
+        val nameLocation = index.findField("Lcom/example/Config;", "name", "Ljava/lang/String;")
         assertNotNull(nameLocation, "Should find name field")
     }
     

@@ -19,13 +19,13 @@ class TestWorkspace(val baseDir: File) {
      * Get root URI for LSP initialize
      */
     val rootUri: String
-        get() = baseDir.toURI().toString()
+        get() = baseDir.toPath().toUri().toString()
     
     /**
      * Get file URI for a relative path
      */
     fun getFileUri(relativePath: String): String {
-        return File(baseDir, relativePath).toURI().toString()
+        return File(baseDir, relativePath).toPath().toUri().toString()
     }
     
     /**

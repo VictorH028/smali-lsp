@@ -114,7 +114,7 @@ class WorkspaceScanner(
      * Process a single file: parse and index.
      */
     private fun processFile(file: File) {
-        val uri = file.toURI().toString()
+        val uri = file.toPath().toUri().toString()  // file:///…, the form LSP clients send
         val content = file.readText(Charsets.UTF_8)
         
         val smaliFile = parser.parse(uri, content)

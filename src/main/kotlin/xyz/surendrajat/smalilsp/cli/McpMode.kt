@@ -596,7 +596,7 @@ class McpMode {
             val fieldAccessors = mutableMapOf<String, MutableSet<String>>()
             val classFileFields = classFile?.fields ?: emptyList()
             for (field in classFileFields) {
-                val usages = index!!.findFieldUsages(className, field.name)
+                val usages = index!!.findFieldUsages(className, field.name, field.type)
                 for (loc in usages) {
                     val accessorClass = index!!.findClassNameByUri(loc.uri) ?: continue
                     fieldAccessors.computeIfAbsent(field.name) { mutableSetOf() }.add(accessorClass)

@@ -41,7 +41,7 @@ class RealWorkspaceConcurrentReadTest {
 
         data class Operation(val name: String, val run: () -> Boolean)
 
-        val hoverOps = index.getAllFiles()
+        val hoverOps = index.getFilesView()
             .take(10)
             .map { file ->
                 Operation("hover ${file.classDefinition.name}") {
@@ -50,7 +50,7 @@ class RealWorkspaceConcurrentReadTest {
                 }
             }
 
-        val definitionOps = index.getAllFiles()
+        val definitionOps = index.getFilesView()
             .asSequence()
             .filter { file ->
                 val superClass = file.classDefinition.superClass
@@ -70,7 +70,7 @@ class RealWorkspaceConcurrentReadTest {
             }
             .toList()
 
-        val referenceOps = index.getAllClassNames()
+        val referenceOps = index.getClassNames()
             .asSequence()
             .filter { className ->
                 !className.startsWith("Ljava/") &&

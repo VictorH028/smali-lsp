@@ -40,6 +40,7 @@ class CodeLensProvider(
             data.addProperty("className", className)
             data.addProperty("memberName", field.name)
             data.addProperty("memberType", "field")
+            data.addProperty("fieldType", field.type)
             lenses.add(CodeLens(field.range, null, data))
         }
 
@@ -64,7 +65,7 @@ class CodeLensProvider(
 
         val count = when (memberType) {
             "method" -> countMethodReferences(className, memberName, descriptor)
-            "field" -> countFieldReferences(className, memberName)
+            "field" -> countFieldReferences(className, memberName, data.get("fieldType")?.asString ?: "")
             else -> 0
         }
 
@@ -79,7 +80,7 @@ class CodeLensProvider(
         return index.findMethodUsages(className, methodName, descriptor).size
     }
 
-    private fun countFieldReferences(className: String, fieldName: String): Int {
-        return index.findFieldUsages(className, fieldName).size
+    private fun countFieldReferences(className: String, fieldName: String, fieldType: String): Int {
+        return index.findFieldUsages(className, fieldName, fieldType).size
     }
 }

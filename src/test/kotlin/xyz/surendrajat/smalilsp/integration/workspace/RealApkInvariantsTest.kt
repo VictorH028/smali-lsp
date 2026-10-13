@@ -154,7 +154,7 @@ class RealApkInvariantsTest {
                 }
                 is FieldAccessInstruction -> if (index.hasClass(ins.className)) {
                     fields++
-                    if (index.findField(ins.className, ins.fieldName) == null) missing.add("${ins.className}->${ins.fieldName}")
+                    if (index.findField(ins.className, ins.fieldName, ins.fieldType) == null) missing.add("${ins.className}->${ins.fieldName}")
                 }
                 else -> {}
             }
@@ -187,7 +187,7 @@ class RealApkInvariantsTest {
                 }
             }
             for (f in file.fields.take(3)) {
-                for (loc in index.findFieldUsages(file.classDefinition.name, f.name).take(5)) {
+                for (loc in index.findFieldUsages(file.classDefinition.name, f.name, f.type).take(5)) {
                     checkedLocations++
                     val line = index.getLineContent(loc.uri, loc.range.start.line)
                     if (line == null || !line.contains("->${f.name}:")) bad.add("${loc.uri.substringAfterLast('/')}:${loc.range.start.line + 1} does not access ${f.name}")

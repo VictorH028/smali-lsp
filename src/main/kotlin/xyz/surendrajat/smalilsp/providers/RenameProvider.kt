@@ -59,7 +59,7 @@ class RenameProvider(
 
     private sealed class RenameTarget(val currentName: String, val range: Range) {
         class Method(name: String, range: Range, val className: String, val descriptor: String) : RenameTarget(name, range)
-        class Field(name: String, range: Range, val className: String) : RenameTarget(name, range)
+        class Field(name: String, range: Range, val className: String, val type: String) : RenameTarget(name, range)
         class Label(name: String, range: Range, val uri: String, val method: MethodDefinition) : RenameTarget(name, range)
     }
 
@@ -68,13 +68,13 @@ class RenameProvider(
             is Symbol.MethodDecl -> symbol.method
                 .takeUnless { it.name == "<init>" || it.name == "<clinit>" }
                 ?.let { RenameTarget.Method(it.name, symbol.range, file.classDefinition.name, it.descriptor) }
-            is Symbol.FieldDecl -> RenameTarget.Field(symbol.fieldDef.name, symbol.range, file.classDefinition.name)
+            is Symbol.FieldDecl -> RenameTarget.Field(symbol.fieldDef.name, symbol.range, file.classDefinition.name, symbol.fieldDef.type)
             is Symbol.MethodRef -> symbol.instruction
                 .takeIf { it.methodName != "<init>" && it.methodName != "<clinit>" && index.hasClass(it.className) }
                 ?.let { RenameTarget.Method(it.methodName, symbol.range, it.className, it.descriptor) }
             is Symbol.FieldRef -> symbol.instruction
                 .takeIf { index.hasClass(it.className) }
-                ?.let { RenameTarget.Field(it.fieldName, symbol.range, it.className) }
+                ?.let { RenameTarget.Field(it.fieldName, symbol.range, it.className, it.fieldType) }
             // Labels are method-local; a reference to a label the method does not define is left alone
             is Symbol.LabelDecl -> RenameTarget.Label(symbol.label.name, withoutColon(symbol.label.range), uri, symbol.method)
             is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { RenameTarget.Label(symbol.name, withoutColon(symbol.range), uri, symbol.method) }
@@ -100,9 +100,9 @@ class RenameProvider(
 
     private fun collectFieldRenameEdits(target: RenameTarget.Field, newName: String, edits: MutableMap<String, MutableList<TextEdit>>) {
         index.findClass(target.className)?.let { file ->
-            file.fields.find { it.name == target.currentName }?.let { edits.add(file.uri, TextEdit(it.nameSpan.toRange(), newName)) }
+            file.fields.find { it.name == target.currentName && it.type == target.type }?.let { edits.add(file.uri, TextEdit(it.nameSpan.toRange(), newName)) }
         }
-        for (usage in index.findFieldUsages(target.className, target.currentName)) {
+        for (usage in index.findFieldUsages(target.className, target.currentName, target.type)) {
             addUsageEdit(usage, target.currentName, newName, edits)
         }
     }

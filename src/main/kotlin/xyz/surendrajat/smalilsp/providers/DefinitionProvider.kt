@@ -60,7 +60,7 @@ class DefinitionProvider(
         workspaceIndex.findMethod(instruction.className, instruction.methodName, instruction.descriptor).toList()
 
     private fun fieldDefinition(instruction: FieldAccessInstruction): List<Location> =
-        listOfNotNull(workspaceIndex.findField(instruction.className, instruction.fieldName))
+        listOfNotNull(workspaceIndex.findField(instruction.className, instruction.fieldName, instruction.fieldType))
 
     /** Labels are method-local and names repeat across methods (`:cond_0` is in nearly every one). */
     private fun labelDefinition(method: MethodDefinition, name: String, uri: String): List<Location> =

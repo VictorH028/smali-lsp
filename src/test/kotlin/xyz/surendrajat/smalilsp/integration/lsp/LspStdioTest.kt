@@ -84,13 +84,13 @@ class LspStdioTest {
     }
 
     private fun LspStdioClient.open(file: File, text: String) =
-        notify("textDocument/didOpen", mapOf("textDocument" to mapOf("uri" to file.toURI().toString(), "languageId" to "smali", "version" to 1, "text" to text)))
+        notify("textDocument/didOpen", mapOf("textDocument" to mapOf("uri" to file.toPath().toUri().toString(), "languageId" to "smali", "version" to 1, "text" to text)))
 
     @Test
     fun `full workflow over stdio`() {
         val (callee, caller) = writeWorkspace()
-        val calleeUri = callee.toURI().toString()
-        val callerUri = caller.toURI().toString()
+        val calleeUri = callee.toPath().toUri().toString()
+        val callerUri = caller.toPath().toUri().toString()
         LspStdioClient().use { client ->
             val init = client.initializeAndIndex(initParams(client))
             val caps = init.getAsJsonObject("capabilities")
