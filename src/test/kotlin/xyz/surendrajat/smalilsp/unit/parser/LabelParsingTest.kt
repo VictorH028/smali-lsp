@@ -196,8 +196,10 @@ class LabelParsingTest {
         val label = method.labels["my_label"]
         
         assertNotNull(label)
-        // Label range should start at position of ':'
-        assertTrue(label!!.range.start.character >= 0)
+        // The range covers ":my_label" starting at the colon (indented by 4)
+        assertEquals(6, label!!.range.start.line)
+        assertEquals(4, label.range.start.character)
+        assertEquals(4 + ":my_label".length, label.range.end.character)
     }
     
     @Test

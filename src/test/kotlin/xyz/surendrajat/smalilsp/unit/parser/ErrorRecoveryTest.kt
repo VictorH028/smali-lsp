@@ -49,15 +49,14 @@ class ErrorRecoveryTest {
     @Test
     fun `parse malformed class directive`() {
         val parser = SmaliParser()
-        val result = parser.parse("file:///malformed.smali", """
+        val result = parser.parseWithErrors("file:///malformed.smali", """
             .class public LBroken
             .super Ljava/lang/Object;
         """.trimIndent())
-        
-        // Parser should either return null or partial parse (depends on ANTLR error recovery)
-        // Main point: shouldn't crash
-        assertTrue(result == null || result.classDefinition.name.isNotEmpty(), 
-            "Should handle malformed class directive gracefully")
+
+        // `LBroken` (no ';') is not a type: the directive is reported, nothing crashes
+        assertTrue(result.syntaxErrors.isNotEmpty(), "unterminated class name must be reported")
+        assertEquals(1, result.syntaxErrors.first().line)
     }
     
     @Test
@@ -66,11 +65,11 @@ class ErrorRecoveryTest {
         val result = parser.parse("file:///missing-super.smali", """
             .class public Ltest/NoSuper;
         """.trimIndent())
-        
-        // Should parse class even without .super
-        // Main point: shouldn't crash
-        assertTrue(result == null || result.classDefinition.name.isNotEmpty(),
-            "Should handle missing super directive")
+
+        // .super is optional (java.lang.Object itself has none)
+        assertNotNull(result)
+        assertEquals("Ltest/NoSuper;", result!!.classDefinition.name)
+        assertNull(result.classDefinition.superClass)
     }
     
     @Test
@@ -109,13 +108,12 @@ class ErrorRecoveryTest {
         
         val provider = HoverProvider(index)
         val hover = provider.provideHover(
-            uri = workspace.getUri("test/Invalid.smali"),
-            position = Position(3, 15)
+            uri = workspace.getUri("test/Missing.smali"),
+            position = Position(1, 15) // on Lnonexistent/Gone;
         )
-        
-        // Should handle malformed method gracefully
-        // HoverProvider may show "class not found" info which is helpful
-        assertTrue(hover == null || hover.contents != null, "Should handle missing class gracefully")
+
+        assertNotNull(hover, "hover on an unresolved superclass still shows the reference")
+        assertTrue(hover!!.contents.right.value.contains("Not found in workspace"), hover.contents.right.value)
         
         workspace.cleanup()
     }
@@ -199,9 +197,9 @@ class ErrorRecoveryTest {
             position = Position(1, 15)
         )
         
-        // Should not stack overflow - either returns info or null (both acceptable)
-        // Main point: no crash or infinite loop
-        assertTrue(hover == null || hover.contents != null, "Should handle circular reference without crashing")
+        // No stack overflow, and the (cyclic) superclass is still described
+        assertNotNull(hover)
+        assertTrue(hover!!.contents.right.value.contains("cycle.B"), hover.contents.right.value)
         
         workspace.cleanup()
     }
@@ -256,11 +254,7 @@ class ErrorRecoveryTest {
         
         try {
             val file = workspace.parseFile("test/Unicode.smali")
-            // Should handle unicode (or fail gracefully)
-            assertTrue(file.classDefinition.name.isNotEmpty() || true, "Should handle unicode")
-        } catch (e: Exception) {
-            // If it throws, verify exception is reasonable
-            assertTrue(e is IllegalStateException || e.message != null, "Should fail gracefully")
+            assertEquals("Ltest/日本語;", file.classDefinition.name)
         } finally {
             workspace.cleanup()
         }
@@ -285,8 +279,7 @@ class ErrorRecoveryTest {
             position = Position(1, 100) // Way past line end
         )
         
-        // Should not crash - may return empty or find something
-        assertTrue(locations.size >= 0, "Should handle position beyond line end without crashing")
+        assertEquals(emptyList<org.eclipse.lsp4j.Location>(), locations, "a position past the end of the line is on nothing")
         
         workspace.cleanup()
     }
@@ -344,12 +337,9 @@ class ErrorRecoveryTest {
         """.trimIndent())
         
         try {
-            val file = workspace.parseFile("test/BadMethod.smali")
-            // Parser may return null or partial parse
-            assertTrue(file.classDefinition.name.isNotEmpty() || true, "Should handle malformed method")
-        } catch (e: Exception) {
-            // If exception, verify it's reasonable
-            assertTrue(e is IllegalStateException || e.message != null, "Should fail gracefully")
+            val result = SmaliParser().parseWithErrors(workspace.getUri("test/BadMethod.smali"), workspace.getContent("test/BadMethod.smali"))
+            assertTrue(result.syntaxErrors.isNotEmpty(), "the unterminated signature must be reported")
+            assertNotNull(result.smaliFile, "the class itself still parses")
         } finally {
             workspace.cleanup()
         }

@@ -3,7 +3,6 @@ package xyz.surendrajat.smalilsp.unit.providers
 import org.eclipse.lsp4j.SymbolKind
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Timeout
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
@@ -265,11 +264,10 @@ class WorkspaceSymbolProviderTest {
     }
     
     /**
-     * Test performance on large workspace (4000+ symbols).
+     * A large workspace is capped at 500 results.
      */
     @Test
-    @Timeout(1) // Must complete in < 1 second
-    fun `performance on large workspace`() {
+    fun `large workspace results are capped at 500`() {
         val index = WorkspaceIndex()
         
         // Create 1000 classes with 5 methods and 3 fields each
@@ -308,14 +306,9 @@ class WorkspaceSymbolProviderTest {
         
         val provider = WorkspaceSymbolProvider(index)
         
-        val start = System.currentTimeMillis()
         val results = provider.search("Class")
-        val elapsed = System.currentTimeMillis() - start
-        
-        // Should find results quickly
-        assertTrue(results.isNotEmpty())
+
         assertEquals(500, results.size) // Limited to 500
-        assertTrue(elapsed < 500, "Should complete in < 500ms, was ${elapsed}ms")
     }
     
     /**

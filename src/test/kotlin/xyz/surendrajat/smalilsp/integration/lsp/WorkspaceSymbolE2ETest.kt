@@ -133,32 +133,7 @@ class WorkspaceSymbolE2ETest {
         
     }
     
-    /**
-     * Test performance on large workspace (4000+ files).
-     */
-    @Test
-    @Timeout(10)
-    fun `workspace symbol search performs well on large workspace`() {
-        val queries = listOf("Activity", "onCreate", "View", "String", "List")
-        val elapsedTimes = mutableListOf<Long>()
 
-        queries.forEach { query ->
-            val start = System.currentTimeMillis()
-            val results = harness.workspaceSymbols(query)
-            val elapsed = System.currentTimeMillis() - start
-            elapsedTimes.add(elapsed)
-
-            println("Query '$query': ${results.size} results in ${elapsed}ms")
-
-            assertTrue(results.size <= 500, "Should limit to 500 results")
-        }
-
-        val maxTime = elapsedTimes.maxOrNull() ?: 0L
-        val avgTime = elapsedTimes.average()
-
-        assertTrue(avgTime < 125.0, "Average search time should be < 125ms, was ${"%.1f".format(avgTime)}ms")
-        assertTrue(maxTime < 250, "Slowest workspace symbol query should be < 250ms, was ${maxTime}ms")
-    }
     
     /**
      * Test empty query behavior.

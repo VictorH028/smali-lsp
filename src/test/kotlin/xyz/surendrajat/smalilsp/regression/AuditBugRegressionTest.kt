@@ -366,14 +366,11 @@ class AuditBugRegressionTest {
             val props = java.util.Properties()
             val stream = Class.forName("xyz.surendrajat.smalilsp.SmaliLanguageServer")
                 .getResourceAsStream("/version.properties")
-            if (stream != null) {
-                stream.use { props.load(it) }
-                val version = props.getProperty("version", "unknown")
-                // Version should NOT be "1.0.0" — it should match build.gradle.kts (1.3.0)
-                assertTrue(version != "1.0.0" || version == "unknown",
-                    "version.properties should reflect actual project version, not 1.0.0")
-            }
-            // If stream is null (no resource generated yet), that's expected in unit test
+            assertNotNull(stream, "version.properties must be generated into the main resources")
+            stream!!.use { props.load(it) }
+            val buildFile = java.io.File(xyz.surendrajat.smalilsp.shared.TestUtils.getProjectRoot(), "build.gradle.kts").readText()
+            val expected = Regex("""^version = "([^"]+)"""", RegexOption.MULTILINE).find(buildFile)!!.groupValues[1]
+            assertEquals(expected, props.getProperty("version"), "version.properties must carry the project version from build.gradle.kts")
         }
     }
 

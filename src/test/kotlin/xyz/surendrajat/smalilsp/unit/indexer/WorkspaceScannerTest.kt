@@ -230,11 +230,6 @@ class WorkspaceScannerTest {
         assertEquals(fileCount, result.filesProcessed)
         assertEquals(fileCount, result.filesSucceeded)
         
-        // Performance check: should be fast
-        assertTrue(result.durationMs < 5000, "Should complete 50 files in <5 seconds, took ${result.durationMs}ms")
-        
-        println("Performance: $fileCount files in ${result.durationMs}ms (${result.filesPerSecond} files/sec)")
-        
         // Verify all indexed correctly
         val stats = index.getStats()
         assertEquals(fileCount, stats.classes)

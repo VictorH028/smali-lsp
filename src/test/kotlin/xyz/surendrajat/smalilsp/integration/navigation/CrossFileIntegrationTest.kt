@@ -360,8 +360,7 @@ class CrossFileIntegrationTest {
             position = Position(3, 35) // On "AnotherMissing"
         )
         
-        // Either null or shows "not found" - both acceptable
-        // Main point: shouldn't crash
-        assertTrue(hover == null || (hover.contents.right as MarkupContent).value.isNotEmpty())
+        assertNotNull(hover, "hover on an unresolved field type still shows the reference")
+        assertTrue((hover!!.contents.right as MarkupContent).value.contains("Not found in workspace"))
     }
 }

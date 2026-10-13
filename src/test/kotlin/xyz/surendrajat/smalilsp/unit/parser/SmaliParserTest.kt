@@ -156,14 +156,21 @@ class SmaliParserTest {
     }
     
     @Test
-    fun `parse returns null for invalid smali`() {
-        val invalidSmali = "this is not valid smali code at all"
-        
-        val result = parser.parse("file:///invalid.smali", invalidSmali)
-        
-        // Parser should handle errors gracefully
-        // May return null or empty structure depending on error handling
-        // The key is it doesn't crash
+    fun `parse returns null for content without a class directive`() {
+        val result = parser.parseWithErrors("file:///invalid.smali", "this is not valid smali code at all")
+
+        // Fast-rejected before the parser runs: no AST and no syntax errors.
+        assertNull(result.smaliFile)
+        assertEquals(emptyList<SmaliParser.SyntaxError>(), result.syntaxErrors)
+    }
+
+    @Test
+    fun `parse reports syntax errors for garbage after a class directive`() {
+        val result = parser.parseWithErrors("file:///garbage.smali", ".class public Lcom/example/G;\nthis is not valid smali code at all\n")
+
+        assertNotNull(result.smaliFile, "the class directive still yields an AST")
+        assertEquals("Lcom/example/G;", result.smaliFile!!.classDefinition.name)
+        assertTrue(result.syntaxErrors.isNotEmpty(), "garbage must be reported")
     }
     
     @Test

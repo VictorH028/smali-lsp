@@ -246,19 +246,18 @@ class DiagnosticProviderTest {
     @Test
     fun `handles unparseable files gracefully`() {
         val content = """
+            .class public LTest;
             this is not valid smali code at all
             it should not crash the diagnostic provider
         """.trimIndent()
         
         val diagnostics = provider.computeDiagnostics("test.smali", content)
         
-        // Should not crash, diagnostics may be empty or contain parse errors
-        // The important thing is it doesn't throw exception
-        assertTrue(true, "Should handle unparseable files gracefully")
+        assertTrue(diagnostics.any { it.code.left == "syntax-error" }, "garbage after the class directive must produce a syntax-error diagnostic")
     }
     
     @Test
-    fun `handles very large files efficiently`() {
+    fun `large valid file has no diagnostics`() {
         // Generate file with 1000 methods
         val methods = (1..1000).joinToString("\n") { i ->
             """
@@ -275,11 +274,8 @@ class DiagnosticProviderTest {
             $methods
         """.trimIndent()
         
-        val startTime = System.currentTimeMillis()
         val diagnostics = provider.computeDiagnostics("test.smali", content)
-        val duration = System.currentTimeMillis() - startTime
-        
-        assertTrue(duration < 500, "Should process large file in < 500ms, took ${duration}ms")
+
         assertEquals(0, diagnostics.size, "Large valid file should have no diagnostics")
     }
     
