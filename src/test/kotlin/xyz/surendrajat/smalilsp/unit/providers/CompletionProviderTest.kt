@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.CompletionProvider
+import xyz.surendrajat.smalilsp.shared.openSource
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -347,5 +348,26 @@ class CompletionProviderTest {
         }
         val finished = ".field public data:Lcom/example/MyClass;"
         assertTrue(provider.provideCompletions("file:///test.smali", Position(3, finished.length), finished).items.isEmpty(), "a finished type offers nothing")
+    }
+
+    @Test
+    fun `members inherited from the workspace hierarchy complete after the arrow, own members first`() {
+        val index = WorkspaceIndex()
+        index.openSource("file:///Base.smali", ".class public Lcom/Base;\n.super Ljava/lang/Object;\n.field public baseField:I\n.method public baseMethod()V\n    .registers 1\n    return-void\n.end method\n.method private hidden()V\n    .registers 1\n    return-void\n.end method\n.method public shared()V\n    .registers 1\n    return-void\n.end method")
+        index.openSource("file:///Child.smali", ".class public Lcom/Child;\n.super Lcom/Base;\n.method public shared()V\n    .registers 1\n    return-void\n.end method")
+        val line = "    invoke-virtual {p0}, Lcom/Child;->"
+        val items = CompletionProvider(index).provideCompletions("file:///Any.smali", Position(0, line.length), line).items
+        assertEquals(listOf("shared()V" to "Lcom/Child;", "baseMethod()V" to "Lcom/Base;", "baseField:I" to "Lcom/Base;"), items.map { it.label to it.detail }, "the override hides Base.shared, the private method is not inherited")
+        assertEquals(items.map { it.sortText }.sorted(), items.map { it.sortText }, "sort order keeps own members first")
+    }
+
+    @Test
+    fun `class completion ranks shorter names first and keeps a stable order`() {
+        val index = WorkspaceIndex()
+        for (name in listOf("Lcom/app/ui/Zebra;", "Lcom/app/A;", "Lcom/app/B;", "Lcom/app/ui/Apple;")) index.openSource("file:///${name.hashCode()}.smali", ".class public $name\n.super Ljava/lang/Object;")
+        val line = "    new-instance v0, Lcom/app"
+        val items = CompletionProvider(index).provideCompletions("file:///Any.smali", Position(0, line.length), line).items
+        assertEquals(listOf("com/app/A", "com/app/B", "com/app/ui/Apple", "com/app/ui/Zebra"), items.map { it.label })
+        assertEquals(listOf("000", "001", "002", "003"), items.map { it.sortText })
     }
 }

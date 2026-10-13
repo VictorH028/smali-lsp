@@ -20,6 +20,10 @@ import xyz.surendrajat.smalilsp.util.Types
 class CompletionProvider(
     private val index: WorkspaceIndex
 ) {
+    private companion object {
+        val CLASS_REFERENCE = Regex("""(L[\w/$]+;)""")
+        const val MAX_CLASS_ITEMS = 50
+    }
 
     /**
      * Provide completion items at the given position.
@@ -63,81 +67,90 @@ class CompletionProvider(
         val beforeArrow = textBeforeCursor.substring(0, arrowIndex)
 
         // Extract class name (last L...;  before ->)
-        val classNameMatch = Regex("""(L[\w/$]+;)""").findAll(beforeArrow).lastOrNull()
-            ?: return CompletionList(false, emptyList())
-        val className = classNameMatch.value
-
-        val file = index.findClass(className) ?: return CompletionList(false, emptyList())
+        val className = CLASS_REFERENCE.findAll(beforeArrow).lastOrNull()?.value ?: return CompletionList(false, emptyList())
+        if (!index.hasClass(className)) return CompletionList(false, emptyList())
         val items = mutableListOf<CompletionItem>()
         val replaceRange = Range(
             Position(position.line, position.character - prefix.length),
             position
         )
 
-        // Complete methods
-        for (method in file.methods) {
-            if (method.name.startsWith(prefix, ignoreCase = true)) {
+        // The class's own members, then the inherited ones up the hierarchy; an override hides what it overrides
+        val seen = HashSet<String>()
+        val visited = HashSet<String>()
+        val pending = ArrayDeque<String>().apply { add(className) }
+        while (pending.isNotEmpty()) {
+            val current = pending.removeFirst()
+            if (!visited.add(current)) continue
+            val file = index.findClass(current) ?: continue
+            for (method in file.methods) {
+                if (!method.name.startsWith(prefix, ignoreCase = true)) continue
+                if (current != className && (method.isConstructor || "private" in method.modifiers)) continue
                 val text = "${method.name}${method.descriptor}"
-                val item = CompletionItem(text)
-                item.kind = CompletionItemKind.Method
-                item.detail = className
-                item.textEdit = Either.forLeft(TextEdit(replaceRange, text))
-                items.add(item)
+                if (!seen.add(text)) continue
+                items.add(CompletionItem(text).apply {
+                    kind = CompletionItemKind.Method
+                    detail = current
+                    textEdit = Either.forLeft(TextEdit(replaceRange, text))
+                    sortText = "%s%03d".format(if (current == className) "0" else "1", items.size)
+                })
             }
-        }
-
-        // Complete fields
-        for (field in file.fields) {
-            if (field.name.startsWith(prefix, ignoreCase = true)) {
+            for (field in file.fields) {
+                if (!field.name.startsWith(prefix, ignoreCase = true)) continue
+                if (current != className && "private" in field.modifiers) continue
                 val text = "${field.name}:${field.type}"
-                val item = CompletionItem(text)
-                item.kind = CompletionItemKind.Field
-                item.detail = className
-                item.textEdit = Either.forLeft(TextEdit(replaceRange, text))
-                items.add(item)
+                if (!seen.add(text)) continue
+                items.add(CompletionItem(text).apply {
+                    kind = CompletionItemKind.Field
+                    detail = current
+                    textEdit = Either.forLeft(TextEdit(replaceRange, text))
+                    sortText = "%s%03d".format(if (current == className) "0" else "1", items.size)
+                })
             }
+            file.classDefinition.superClass?.let { pending.add(it) }
+            pending.addAll(file.classDefinition.interfaces)
         }
 
         return CompletionList(false, items)
     }
 
+    /**
+     * Class names matching what was typed, best first: with an `L` the typed text is a prefix of
+     * the full name; in a directive it may also be a prefix of the simple name or appear in the
+     * path. Shorter names rank higher, then alphabetical, so the answer is the same on every
+     * keystroke instead of whatever the index iterates first.
+     */
     private fun completeClassNames(partial: String, position: Position): CompletionList {
-        val items = mutableListOf<CompletionItem>()
-        // Determine if partial includes the 'L' prefix (from extractPartialClassName)
         val hasLPrefix = partial.startsWith("L")
-        val normalizedPartial = partial.lowercase()
         val replaceRange = Range(
             Position(position.line, position.character - partial.length),
             position
         )
 
+        val matches = ArrayList<Pair<Int, String>>()   // (rank, class name): lower is better
         for (className in index.getClassNames()) {
-            // Match: partial against full class name or simple name (no per-class lowercasing)
-            val matches = if (hasLPrefix) {
-                // L-prefix: match against full class name (e.g., "Lcom/" matches "Lcom/example/Foo;")
-                className.startsWith(normalizedPartial, ignoreCase = true)
-            } else {
-                // Directive context (.super etc): match partial against simple name or path
-                Types.simpleName(className).startsWith(normalizedPartial, ignoreCase = true) ||
-                    className.contains(normalizedPartial, ignoreCase = true)
+            val rank = when {
+                hasLPrefix -> if (className.startsWith(partial, ignoreCase = true)) 0 else continue
+                Types.simpleName(className).startsWith(partial, ignoreCase = true) -> 0
+                className.contains(partial, ignoreCase = true) -> 1
+                else -> continue
             }
+            matches.add(rank to className)
+        }
+        matches.sortWith(compareBy({ it.first }, { it.second.length }, { it.second }))
 
-            if (matches) {
-                val simpleName = Types.simpleName(className)
-                // Strip L prefix and ; suffix for display: "com/example/MyClass"
-                val readablePath = className.removePrefix("L").removeSuffix(";")
-                val item = CompletionItem(readablePath)
-                item.kind = CompletionItemKind.Class
-                item.detail = simpleName
-                // Insert the full class name; replaceRange covers the partial already typed
-                item.textEdit = Either.forLeft(TextEdit(replaceRange, className))
-                item.filterText = "$readablePath $simpleName"
-                items.add(item)
-                if (items.size >= 50) break
+        val items = matches.take(MAX_CLASS_ITEMS).mapIndexed { i, (_, className) ->
+            val simpleName = Types.simpleName(className)
+            val readablePath = className.removePrefix("L").removeSuffix(";")
+            CompletionItem(readablePath).apply {
+                kind = CompletionItemKind.Class
+                detail = simpleName
+                textEdit = Either.forLeft(TextEdit(replaceRange, className))
+                filterText = "$readablePath $simpleName"
+                sortText = "%03d".format(i)
             }
         }
-
-        return CompletionList(items.size >= 50, items)
+        return CompletionList(matches.size > MAX_CLASS_ITEMS, items)
     }
 
     private fun completeOpcodes(partial: String, position: Position): CompletionList {
