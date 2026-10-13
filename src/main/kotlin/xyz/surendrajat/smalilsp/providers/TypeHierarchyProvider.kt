@@ -2,6 +2,8 @@ package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.SmaliFile
+import xyz.surendrajat.smalilsp.core.Symbol
+import xyz.surendrajat.smalilsp.core.symbolAt
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
@@ -18,43 +20,13 @@ class TypeHierarchyProvider(
 ) {
 
     /**
-     * Prepare type hierarchy at the given position.
-     * Identifies the class at cursor and returns a TypeHierarchyItem for it.
+     * The class under the caret: any class reference that is in the workspace (`.super`,
+     * `.implements`, an owner, a type operand, a descriptor type), else the file's own class.
      */
     fun prepare(uri: String, position: Position): List<TypeHierarchyItem> {
         val file = index.findFileByUri(uri) ?: return emptyList()
-
-        // Check if cursor is on the class definition line
-        val classDef = file.classDefinition
-        if (classDef.range.start.line == position.line) {
-            return listOf(createItem(file))
-        }
-
-        // Check if cursor is on a .super directive
-        if (classDef.superClassRange != null && classDef.superClassRange.start.line == position.line) {
-            val superFile = classDef.superClass?.let { index.findClass(it) }
-            return if (superFile != null) {
-                listOf(createItem(superFile))
-            } else {
-                // Super class not in workspace — return current class so user can still navigate
-                listOf(createItem(file))
-            }
-        }
-
-        // Check if cursor is on an .implements directive
-        for ((ifaceName, ifaceRange) in classDef.interfaceRanges) {
-            if (ifaceRange.start.line == position.line) {
-                val ifaceFile = index.findClass(ifaceName)
-                return if (ifaceFile != null) {
-                    listOf(createItem(ifaceFile))
-                } else {
-                    listOf(createItem(file))
-                }
-            }
-        }
-
-        // Default: return the class for this file
-        return listOf(createItem(file))
+        val referenced = (file.symbolAt(position) as? Symbol.ClassRef)?.let { index.findClass(it.className) }
+        return listOf(createItem(referenced ?: file))
     }
 
     /**

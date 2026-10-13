@@ -263,4 +263,15 @@ class CallHierarchyProviderTest {
         val incoming = provider.incomingCalls(items[0])
         assertTrue(incoming.isEmpty())
     }
+
+    @Test
+    fun `prepare on a call site is the called method`() {
+        indexContent("file:///test/Target.smali", ".class public Lcom/example/Target;\n.super Ljava/lang/Object;\n.method public doWork()V\n    .registers 1\n    return-void\n.end method")
+        val caller = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n.method public go()V\n    .registers 1\n    invoke-virtual {p0}, Lcom/example/Target;->doWork()V\n    return-void\n.end method"
+        indexContent("file:///test/Caller.smali", caller)
+        val item = provider.prepare("file:///test/Caller.smali", Position(4, caller.lines()[4].indexOf("doWork") + 2)).single()
+        assertEquals("doWork()V", item.name)
+        assertEquals("Lcom/example/Target;", item.detail)
+        assertEquals("file:///test/Target.smali", item.uri)
+    }
 }

@@ -4,6 +4,8 @@ import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.InvokeInstruction
 import xyz.surendrajat.smalilsp.core.MethodDefinition
 import xyz.surendrajat.smalilsp.core.SmaliFile
+import xyz.surendrajat.smalilsp.core.Symbol
+import xyz.surendrajat.smalilsp.core.symbolAt
 import xyz.surendrajat.smalilsp.core.methodAt
 import xyz.surendrajat.smalilsp.core.touches
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -22,14 +24,16 @@ class CallHierarchyProvider(
     private val references = ReferenceProvider(index)
 
     /**
-     * Prepare call hierarchy at the given position.
-     * Identifies the method at cursor and returns a CallHierarchyItem for it.
+     * The method under the caret: the declaration a call resolves to when the caret is on a
+     * call (as an IDE shows the hierarchy of the called method), else the method containing the
+     * caret.
      */
     fun prepare(uri: String, position: Position): List<CallHierarchyItem> {
         val file = index.findFileByUri(uri) ?: return emptyList()
-
+        val called = (file.symbolAt(position) as? Symbol.MethodRef)?.instruction
+            ?.let { index.resolveMethod(it.className, it.methodName, it.descriptor) }
+        if (called != null) return listOf(createItem(called.file, called.method))
         val method = file.methods.find { it.range.touches(position) } ?: return emptyList()
-
         return listOf(createItem(file, method))
     }
 
