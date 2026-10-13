@@ -1,6 +1,7 @@
 package xyz.surendrajat.smalilsp.integration.lsp
 
 import com.google.gson.JsonObject
+import org.eclipse.lsp4j.SymbolKind
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -14,7 +15,7 @@ import java.nio.file.Path
 /**
  * Drives the server binary over stdio with real JSON-RPC, the way an editor does.
  * Covers the handshake, workspace indexing with progress, didOpen/didChange/didClose,
- * definition, hover, references, workspace symbols, and the shutdown/exit lifecycle.
+ * definition, hover, references, document and workspace symbols, and the shutdown/exit lifecycle.
  */
 class LspStdioTest {
 
@@ -105,6 +106,17 @@ class LspStdioTest {
             client.open(caller, callerSmali)
             val diagnostics = client.awaitNotification("textDocument/publishDiagnostics") { it.getAsJsonObject("params")["uri"].asString == callerUri }
             assertEquals(0, diagnostics.getAsJsonObject("params").getAsJsonArray("diagnostics").size(), "valid file has no diagnostics")
+
+            // outline of the open file
+            val outline = client.result("textDocument/documentSymbol", mapOf("textDocument" to client.textDocument(callerUri))).asJsonArray
+            val classSymbol = outline.single().asJsonObject
+            assertEquals("com.app.Caller", classSymbol["name"].asString)
+            assertEquals(SymbolKind.Class.value, classSymbol["kind"].asInt)
+            assertEquals("public, extends java.lang.Object", classSymbol["detail"].asString)
+            val runSymbol = classSymbol.getAsJsonArray("children").single().asJsonObject
+            assertEquals("run", runSymbol["name"].asString)
+            assertEquals("()V", runSymbol["detail"].asString)
+            assertEquals(SymbolKind.Method.value, runSymbol["kind"].asInt)
 
             // definition: from the invoke's method name to the declaration in the other file
             val invokeLine = callerSmali.lines().indexOfFirst { it.contains("invoke-static") }
