@@ -1,12 +1,13 @@
 package xyz.surendrajat.smalilsp.unit.core
 
 import org.eclipse.lsp4j.Position
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.parser.SmaliParser
+import xyz.surendrajat.smalilsp.shared.positionOf
 
 /** [symbolAt] resolves the caret to the token under it, for every kind of token the providers act on. */
 class SymbolAtTest {
@@ -45,13 +46,7 @@ class SymbolAtTest {
     private val lines = source.lines()
     private val file = SmaliParser().parse("file:///Sample.smali", source)!!
 
-    /** Position of the character at [offset] into [needle] on the line containing [marker], searching after [after]. */
-    private fun at(marker: String, needle: String, offset: Int = 0, after: String? = null): Position {
-        val line = lines.indexOfFirst { it.contains(marker) }
-        val from = lines[line].indexOf(needle, if (after == null) 0 else lines[line].indexOf(after) + after.length)
-        require(line >= 0 && from >= 0) { "$needle not found on the line containing $marker" }
-        return Position(line, from + offset)
-    }
+    private fun at(marker: String, needle: String, offset: Int = 0, after: String? = null): Position = source.positionOf(marker, needle, offset, after)
 
     private fun classRef(p: Position) = file.symbolAt(p) as Symbol.ClassRef
 

@@ -8,58 +8,28 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 /**
- * Test implementation of LSP LanguageClient for E2E testing.
- * Records all notifications and messages received from the server.
+ * In-process LanguageClient that keeps the diagnostics and capability registrations the server sends.
  */
 class TestLSPClient : LanguageClient {
-    
-    // All notifications received (for inspection)
-    private val receivedNotifications = mutableListOf<Any>()
-    
-    // Diagnostics by URI
+
+    /** The last diagnostics published for each URI. */
     private val receivedDiagnostics = ConcurrentHashMap<String, List<Diagnostic>>()
-    
-    // Log messages
-    private val receivedLogMessages = mutableListOf<MessageParams>()
-    
-    // Show messages
-    private val receivedShowMessages = mutableListOf<MessageParams>()
-    
-    // Telemetry events
-    private val receivedTelemetry = mutableListOf<Any>()
-    
-    // Progress notifications
-    private val receivedProgress = mutableListOf<ProgressParams>()
-    
+
     override fun publishDiagnostics(params: PublishDiagnosticsParams) {
-        receivedNotifications.add(params)
         receivedDiagnostics[params.uri] = params.diagnostics
     }
-    
-    override fun logMessage(params: MessageParams) {
-        receivedLogMessages.add(params)
-    }
-    
-    override fun showMessage(params: MessageParams) {
-        receivedShowMessages.add(params)
-    }
-    
-    override fun showMessageRequest(params: ShowMessageRequestParams): CompletableFuture<MessageActionItem> {
-        receivedShowMessages.add(MessageParams(params.type, params.message))
-        return CompletableFuture.completedFuture(null)
-    }
-    
-    override fun telemetryEvent(obj: Any) {
-        receivedTelemetry.add(obj)
-    }
-    
-    override fun createProgress(params: WorkDoneProgressCreateParams): CompletableFuture<Void> {
-        return CompletableFuture.completedFuture(null)
-    }
-    
-    override fun notifyProgress(params: ProgressParams) {
-        receivedProgress.add(params)
-    }
+
+    override fun logMessage(params: MessageParams) {}
+
+    override fun showMessage(params: MessageParams) {}
+
+    override fun showMessageRequest(params: ShowMessageRequestParams): CompletableFuture<MessageActionItem> = CompletableFuture.completedFuture(null)
+
+    override fun telemetryEvent(obj: Any) {}
+
+    override fun createProgress(params: WorkDoneProgressCreateParams): CompletableFuture<Void> = CompletableFuture.completedFuture(null)
+
+    override fun notifyProgress(params: ProgressParams) {}
 
     // Capabilities the server registers dynamically (e.g. the .smali file watcher)
     val registrations = mutableListOf<RegistrationParams>()
@@ -74,6 +44,9 @@ class TestLSPClient : LanguageClient {
     /**
      * Get diagnostics for a URI (returns empty list if none)
      */
+    /** Forgets every published diagnostic, so a later publish can be told from an earlier one. */
+    fun clearAll() = receivedDiagnostics.clear()
+
     fun getDiagnostics(uri: String): List<Diagnostic> = 
         receivedDiagnostics[uri] ?: emptyList()
     
@@ -102,17 +75,4 @@ class TestLSPClient : LanguageClient {
         }
         throw TimeoutException("Diagnostics not cleared for $uri within ${timeoutMs}ms")
     }
-    
-    /**
-     * Clear all recorded notifications/messages
-     */
-    fun clearAll() {
-        receivedNotifications.clear()
-        receivedDiagnostics.clear()
-        receivedLogMessages.clear()
-        receivedShowMessages.clear()
-        receivedTelemetry.clear()
-        receivedProgress.clear()
-    }
-    
 }

@@ -1,6 +1,8 @@
 package xyz.surendrajat.smalilsp.unit.parser
 
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.core.JumpInstruction
 import xyz.surendrajat.smalilsp.parser.SmaliParser
@@ -36,7 +38,7 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        assertEquals(1, file!!.methods.size)
+        assertEquals(1, file.methods.size)
         
         val method = file.methods[0]
         assertTrue(method.labels.containsKey("cond_0"), "Should parse cond_0 label")
@@ -62,7 +64,7 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        val method = file!!.methods[0]
+        val method = file.methods[0]
         
         // Should have a JumpInstruction
         val jumpInstructions = method.instructions.filterIsInstance<JumpInstruction>()
@@ -93,7 +95,7 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        val method = file!!.methods[0]
+        val method = file.methods[0]
         
         val jumpInstructions = method.instructions.filterIsInstance<JumpInstruction>()
         assertEquals(1, jumpInstructions.size)
@@ -124,7 +126,7 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        val method = file!!.methods[0]
+        val method = file.methods[0]
         
         val jumpInstructions = method.instructions.filterIsInstance<JumpInstruction>()
         assertEquals(1, jumpInstructions.size)
@@ -162,7 +164,7 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        val method = file!!.methods[0]
+        val method = file.methods[0]
         
         // Should have 3 labels
         assertEquals(3, method.labels.size, "Should have 3 labels")
@@ -192,12 +194,12 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        val method = file!!.methods[0]
+        val method = file.methods[0]
         val label = method.labels["my_label"]
         
         assertNotNull(label)
         // The range covers ":my_label" starting at the colon (indented by 4)
-        assertEquals(6, label!!.range.start.line)
+        assertEquals(6, label.range.start.line)
         assertEquals(4, label.range.start.character)
         assertEquals(4 + ":my_label".length, label.range.end.character)
     }
@@ -230,17 +232,14 @@ class LabelParsingTest {
         val file = parser.parse("test://test.smali", content)
         
         assertNotNull(file)
-        val method = file!!.methods[0]
+        val method = file.methods[0]
         
         // Check labels
         assertTrue(method.labels.containsKey("exit"), "Should parse exit label")
         
         // Should have 7 jump instructions
         val jumpInstructions = method.instructions.filterIsInstance<JumpInstruction>()
-        
-        println("Jump instructions found: ${jumpInstructions.size}")
         for (jump in jumpInstructions) {
-            println("  - ${jump.opcode} -> ${jump.targetLabel}")
         }
         
         assertEquals(7, jumpInstructions.size, "Should have 7 jump instructions")

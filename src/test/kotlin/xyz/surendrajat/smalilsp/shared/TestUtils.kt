@@ -30,14 +30,7 @@ object TestUtils {
         error("Could not find project root. Please run tests from project directory.")
     }
 
-    /**
-     * Get a specific APK decompiled directory.
-     * Returns null if the APK or test-data directory doesn't exist (allows tests to skip gracefully).
-     */
-    fun getApk(name: String): File? {
-        val testDataDir = File(getProjectRoot(), "test-data")
-        if (!testDataDir.exists()) return null
-        val apkDir = File(testDataDir, name)
-        return if (apkDir.exists() && apkDir.isDirectory) apkDir else null
-    }
+    /** The decompiled apps under `test-data/`, by name; empty when none is checked out. */
+    fun fixtureDirs(): List<File> =
+        File(getProjectRoot(), "test-data").listFiles { f -> f.isDirectory }?.sortedBy { it.name } ?: emptyList()
 }

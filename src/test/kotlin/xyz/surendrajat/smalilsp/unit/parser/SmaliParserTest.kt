@@ -1,7 +1,10 @@
 package xyz.surendrajat.smalilsp.unit.parser
 
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 /**
@@ -51,7 +54,7 @@ class SmaliParserTest {
         val result = parser.parse("file:///PathMotion.smali", smali)
         
         assertNotNull(result, "Parser should successfully parse the file")
-        result!!
+        result
         
         // Verify class
         assertEquals("Landroidx/transition/PathMotion;", result.classDefinition.name)
@@ -65,7 +68,7 @@ class SmaliParserTest {
         // First constructor
         val constructor1 = result.methods.find { it.name == "<init>" && it.descriptor == "()V" }
         assertNotNull(constructor1, "Should find first constructor")
-        assertTrue(constructor1!!.modifiers.contains("public"))
+        assertTrue(constructor1.modifiers.contains("public"))
         assertEquals(0, constructor1.parameters.size)
         assertEquals("V", constructor1.returnType)
         
@@ -74,12 +77,12 @@ class SmaliParserTest {
             it.name == "<init>" && it.descriptor.startsWith("(Landroid/content/Context;")
         }
         assertNotNull(constructor2, "Should find second constructor")
-        assertEquals(2, constructor2!!.parameters.size)
+        assertEquals(2, constructor2.parameters.size)
         
         // Abstract method
         val getPath = result.methods.find { it.name == "getPath" }
         assertNotNull(getPath, "Should find getPath method")
-        assertTrue(getPath!!.modifiers.contains("public"))
+        assertTrue(getPath.modifiers.contains("public"))
         assertTrue(getPath.modifiers.contains("abstract"))
         assertEquals(4, getPath.parameters.size, "getPath takes 4 float parameters")
     }
@@ -101,7 +104,7 @@ class SmaliParserTest {
         val result = parser.parse("file:///Test.smali", smali)
         
         assertNotNull(result)
-        result!!
+        result
         
         assertEquals("Lcom/example/Test;", result.classDefinition.name)
         
@@ -110,17 +113,17 @@ class SmaliParserTest {
         
         val nameField = result.fields.find { it.name == "name" }
         assertNotNull(nameField)
-        assertEquals("Ljava/lang/String;", nameField!!.type)
+        assertEquals("Ljava/lang/String;", nameField.type)
         assertTrue(nameField.modifiers.contains("private"))
         
         val ageField = result.fields.find { it.name == "age" }
         assertNotNull(ageField)
-        assertEquals("I", ageField!!.type)
+        assertEquals("I", ageField.type)
         assertTrue(ageField.modifiers.contains("public"))
         
         val counterField = result.fields.find { it.name == "counter" }
         assertNotNull(counterField)
-        assertEquals("J", counterField!!.type)
+        assertEquals("J", counterField.type)
         assertTrue(counterField.modifiers.contains("protected"))
         assertTrue(counterField.modifiers.contains("static"))
     }
@@ -144,7 +147,7 @@ class SmaliParserTest {
         val result = parser.parse("file:///MyRunnable.smali", smali)
         
         assertNotNull(result)
-        result!!
+        result
         
         assertEquals(2, result.classDefinition.interfaces.size)
         assertTrue(result.classDefinition.interfaces.contains("Ljava/lang/Runnable;"))
@@ -152,7 +155,7 @@ class SmaliParserTest {
         
         val runMethod = result.methods.find { it.name == "run" }
         assertNotNull(runMethod)
-        assertEquals("()V", runMethod!!.descriptor)
+        assertEquals("()V", runMethod.descriptor)
     }
     
     @Test
@@ -169,7 +172,7 @@ class SmaliParserTest {
         val result = parser.parseWithErrors("file:///garbage.smali", ".class public Lcom/example/G;\nthis is not valid smali code at all\n")
 
         assertNotNull(result.smaliFile, "the class directive still yields an AST")
-        assertEquals("Lcom/example/G;", result.smaliFile!!.classDefinition.name)
+        assertEquals("Lcom/example/G;", result.smaliFile.classDefinition.name)
         assertTrue(result.syntaxErrors.isNotEmpty(), "garbage must be reported")
     }
     
@@ -183,7 +186,7 @@ class SmaliParserTest {
         val result = parser.parse("file:///Empty.smali", smali)
         
         assertNotNull(result)
-        result!!
+        result
         
         assertEquals("Lcom/example/Empty;", result.classDefinition.name)
         assertEquals("Ljava/lang/Object;", result.classDefinition.superClass)
@@ -215,7 +218,7 @@ class SmaliParserTest {
         val result = parser.parse("file:///PrologueTest.smali", smali)
         
         assertNotNull(result, "Parser should handle .prologue and .epilogue directives")
-        result!!
+        result
         
         assertEquals("Lcom/example/PrologueTest;", result.classDefinition.name)
         assertEquals(1, result.methods.size)

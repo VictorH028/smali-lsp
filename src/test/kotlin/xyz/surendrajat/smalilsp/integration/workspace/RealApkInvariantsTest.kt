@@ -3,9 +3,9 @@ package xyz.surendrajat.smalilsp.integration.workspace
 import kotlinx.coroutines.runBlocking
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.SymbolKind
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.DynamicContainer
 import org.junit.jupiter.api.DynamicNode
@@ -57,8 +57,7 @@ class RealApkInvariantsTest {
     }
 
     private fun fixtures(): List<Fixture> {
-        val root = File(TestUtils.getProjectRoot(), "test-data")
-        return (root.listFiles { f -> f.isDirectory }?.sortedBy { it.name } ?: emptyList()).map { dir ->
+        return TestUtils.fixtureDirs().map { dir ->
             Fixture(dir, dir.walkTopDown().filter { it.isFile && it.extension == "smali" }.sortedBy { it.path }.toList())
         }
     }
@@ -167,7 +166,6 @@ class RealApkInvariantsTest {
         // Bundled stub classes (android.*/androidx.* copies shipped in the APK) can lack the
         // referenced member; that is the only legitimate miss, and it is rare.
         val missRate = missing.size.toDouble() / total
-        println("[invariants] ${fx.dir.name}: $invokes invokes + $fields field accesses on workspace classes, ${missing.size} unresolved (${"%.4f".format(missRate * 100)}%)")
         assertTrue(missRate <= 0.001, "${fx.dir.name}: ${missing.size}/$total workspace member references unresolved; first: ${missing.take(10)}")
     }
 

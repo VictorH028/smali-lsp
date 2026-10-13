@@ -1,7 +1,9 @@
 package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.SymbolKind
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -386,7 +388,7 @@ class WorkspaceSymbolProviderTest {
         assertTrue(results.isNotEmpty())
         val methodSymbol = results.find { it.kind == SymbolKind.Method }
         assertNotNull(methodSymbol)
-        assertEquals("file:///test/MyClass.smali", methodSymbol!!.location.uri)
+        assertEquals("file:///test/MyClass.smali", methodSymbol.location.uri)
         assertEquals(10, methodSymbol.location.range.start.line)
         assertEquals(4, methodSymbol.location.range.start.character)
     }
@@ -403,7 +405,7 @@ class WorkspaceSymbolProviderTest {
         
         val methodSymbol = results.find { it.kind == SymbolKind.Method }
         assertNotNull(methodSymbol)
-        assertNotNull(methodSymbol!!.containerName)
+        assertNotNull(methodSymbol.containerName)
         assertTrue(methodSymbol.containerName.contains("MainActivity"))
     }
     

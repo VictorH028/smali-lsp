@@ -4,7 +4,11 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.junit.jupiter.api.*
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import java.io.*
 import java.nio.file.Files
 import java.nio.file.Path
@@ -922,7 +926,7 @@ class McpModeTest {
         assertNotNull(stream, "version.properties must be present on the test runtime classpath")
 
         val props = Properties()
-        stream!!.use { props.load(it) }
+        stream.use { props.load(it) }
         return props.getProperty("version", "unknown")
     }
 

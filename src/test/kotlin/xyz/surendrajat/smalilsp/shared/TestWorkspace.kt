@@ -5,8 +5,7 @@ import java.nio.file.Files
 import org.eclipse.lsp4j.Position
 
 /**
- * Represents a test workspace with Smali files for E2E testing.
- * Wraps a real directory or a temporary one.
+ * A directory of smali files for the in-process server tests: a temporary one, deleted on cleanup.
  */
 class TestWorkspace(val baseDir: File) {
     
@@ -44,30 +43,6 @@ class TestWorkspace(val baseDir: File) {
         val file = File(baseDir, relativePath)
         file.parentFile?.mkdirs()
         file.writeText(content)
-    }
-    
-    /**
-     * Find position of first occurrence of pattern in file
-     * Throws if not found
-     */
-    fun findPosition(relativePath: String, pattern: String): Position {
-        val lines = readFile(relativePath).lines()
-        lines.forEachIndexed { lineIndex, line ->
-            val charIndex = line.indexOf(pattern)
-            if (charIndex != -1) {
-                return Position(lineIndex, charIndex)
-            }
-        }
-        throw IllegalArgumentException("Pattern '$pattern' not found in $relativePath")
-    }
-    
-    
-    /**
-     * Get line content (0-indexed)
-     */
-    fun getLine(relativePath: String, lineNumber: Int): String {
-        val lines = readFile(relativePath).lines()
-        return lines.getOrNull(lineNumber) ?: ""
     }
     
     companion object {

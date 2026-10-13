@@ -1,6 +1,6 @@
 package xyz.surendrajat.smalilsp.integration
 
-import org.junit.jupiter.api.Assertions.assertEquals
+import kotlin.test.assertEquals
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
@@ -24,14 +24,9 @@ class GrammarCorpusTest {
     private val methodDirective = Regex("""^\.method\b""", RegexOption.MULTILINE)
     private val fieldDirective = Regex("""^\.field\b""", RegexOption.MULTILINE)
 
-    private fun fixtureDirs(): List<File> {
-        val root = File(TestUtils.getProjectRoot(), "test-data")
-        return root.listFiles { f -> f.isDirectory }?.sortedBy { it.name } ?: emptyList()
-    }
-
     @TestFactory
     fun `every file in the corpus parses completely and without syntax errors`(): List<DynamicTest> {
-        val dirs = fixtureDirs()
+        val dirs = TestUtils.fixtureDirs()
         assumeTrue(dirs.isNotEmpty(), "no decompiled APKs under test-data/ — skipping corpus check")
 
         return dirs.map { dir ->

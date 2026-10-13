@@ -1,85 +1,55 @@
 package xyz.surendrajat.smalilsp.unit.providers
 
-import org.eclipse.lsp4j.Position
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
-import xyz.surendrajat.smalilsp.shared.TempTestWorkspace
+import xyz.surendrajat.smalilsp.shared.openSource
+import xyz.surendrajat.smalilsp.shared.positionOf
+import kotlin.test.assertEquals
 
 /**
- * APKs bundle classes under "SDK" prefixes (androidx.*, kotlin.*, desugared java.util.function.*).
- * When such a class is in the workspace its definition must be navigable like any other;
- * the SDK prefix only means "no source" for classes that are *not* indexed.
- *
- * On a real app half of all `.super`/`.implements` navigations hit this.
+ * APKs bundle classes under SDK-looking prefixes (androidx, kotlin, desugared java.util.function);
+ * when such a class is indexed it is navigable like any other, and the prefix only means "no
+ * source" for classes that are not. On a real app half of all `.super`/`.implements` navigations hit this.
  */
 class BundledSdkClassNavigationTest {
 
-    private val workspace = TempTestWorkspace()
+    private val index = WorkspaceIndex()
+    private val impl = """
+        .class public final Lcom/app/Impl;
+        .super Landroidx/lifecycle/ViewModel;
+        .implements Ljava/util/function/Consumer;
 
-    @AfterEach
-    fun cleanup() = workspace.cleanup()
+        .method public accept(Ljava/lang/Object;)V
+            .registers 2
+            invoke-static {}, Ljava/lang/System;->lineSeparator()Ljava/lang/String;
+            new-instance v0, Landroidx/lifecycle/ViewModel;
+            return-void
+        .end method
+    """.trimIndent()
 
-    private fun setUp(): DefinitionProvider {
-        workspace.addFile("java/util/function/Consumer.smali", """
-            .class public interface abstract Ljava/util/function/Consumer;
-            .super Ljava/lang/Object;
-
-            .method public abstract accept(Ljava/lang/Object;)V
-            .end method
-        """.trimIndent())
-        workspace.addFile("androidx/lifecycle/ViewModel.smali", """
-            .class public abstract Landroidx/lifecycle/ViewModel;
-            .super Ljava/lang/Object;
-
-            .method public constructor <init>()V
-                .registers 1
-                return-void
-            .end method
-        """.trimIndent())
-        workspace.addFile("com/app/Impl.smali", """
-            .class public final Lcom/app/Impl;
-            .super Landroidx/lifecycle/ViewModel;
-            .implements Ljava/util/function/Consumer;
-
-            .method public accept(Ljava/lang/Object;)V
-                .registers 2
-                invoke-static {}, Ljava/lang/System;->lineSeparator()Ljava/lang/String;
-                new-instance v0, Landroidx/lifecycle/ViewModel;
-                return-void
-            .end method
-        """.trimIndent())
-        val index = workspace.buildIndex()
-        index.setDocumentContent(workspace.getUri("com/app/Impl.smali"), workspace.getContent("com/app/Impl.smali"))
-        return DefinitionProvider(index)
+    init {
+        index.openSource("file:///java/util/function/Consumer.smali", ".class public interface abstract Ljava/util/function/Consumer;\n.super Ljava/lang/Object;\n\n.method public abstract accept(Ljava/lang/Object;)V\n.end method")
+        index.openSource("file:///androidx/lifecycle/ViewModel.smali", ".class public abstract Landroidx/lifecycle/ViewModel;\n.super Ljava/lang/Object;\n\n.method public constructor <init>()V\n    .registers 1\n    return-void\n.end method")
+        index.openSource("file:///com/app/Impl.smali", impl)
     }
+
+    private fun definitionAt(marker: String, needle: String) =
+        DefinitionProvider(index).findDefinition("file:///com/app/Impl.smali", impl.positionOf(marker, needle, 3)).map { it.uri }
 
     @Test
     fun `super and implements navigate to bundled classes under SDK prefixes`() {
-        val defs = setUp()
-        val uri = workspace.getUri("com/app/Impl.smali")
-
-        val superTarget = defs.findDefinition(uri, Position(1, 10))      // on Landroidx/lifecycle/ViewModel;
-        assertEquals(listOf(workspace.getUri("androidx/lifecycle/ViewModel.smali")), superTarget.map { it.uri })
-
-        val ifaceTarget = defs.findDefinition(uri, Position(2, 15))      // on Ljava/util/function/Consumer;
-        assertEquals(listOf(workspace.getUri("java/util/function/Consumer.smali")), ifaceTarget.map { it.uri })
+        assertEquals(listOf("file:///androidx/lifecycle/ViewModel.smali"), definitionAt(".super", "Landroidx/lifecycle/ViewModel;"))
+        assertEquals(listOf("file:///java/util/function/Consumer.smali"), definitionAt(".implements", "Ljava/util/function/Consumer;"))
     }
 
     @Test
     fun `instruction operands navigate to bundled classes under SDK prefixes`() {
-        val defs = setUp()
-        val uri = workspace.getUri("com/app/Impl.smali")
-        val target = defs.findDefinition(uri, Position(7, 25))           // new-instance ..., Landroidx/lifecycle/ViewModel;
-        assertEquals(listOf(workspace.getUri("androidx/lifecycle/ViewModel.smali")), target.map { it.uri })
+        assertEquals(listOf("file:///androidx/lifecycle/ViewModel.smali"), definitionAt("new-instance", "Landroidx/lifecycle/ViewModel;"))
     }
 
     @Test
     fun `classes that are not in the workspace stay non-navigable`() {
-        val defs = setUp()
-        val uri = workspace.getUri("com/app/Impl.smali")
-        val target = defs.findDefinition(uri, Position(6, 30))           // invoke-static ..., Ljava/lang/System;
-        assertEquals(emptyList<String>(), target.map { it.uri })
+        assertEquals(emptyList<String>(), definitionAt("invoke-static", "Ljava/lang/System;"))
     }
 }

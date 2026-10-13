@@ -219,26 +219,6 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         return client.waitForDiagnostics(uri, timeoutMs)
     }
     
-    // ===== Helpers =====
-    
-    /**
-     * Wait for the initial workspace indexing to complete.
-     */
-    fun waitForIndexing(seconds: Int = 5) {
-        server.indexingDone.get(seconds.toLong(), TimeUnit.SECONDS)
-    }
-    
-    
-    /**
-     * Measure operation time
-     */
-    fun <T> measureTime(operation: () -> T): Pair<T, Long> {
-        val start = System.currentTimeMillis()
-        val result = operation()
-        val elapsed = System.currentTimeMillis() - start
-        return result to elapsed
-    }
-    
     // ===== Shutdown =====
     
     /**
@@ -256,13 +236,9 @@ class E2ETestHarness(val workspace: TestWorkspace) {
             return
         }
         
-        try {
-            server.shutdown().get(5, TimeUnit.SECONDS)
-            // DO NOT call server.exit() - it calls System.exit(0) which kills the JVM!
-            isShutdown = true
-        } catch (e: Exception) {
-            println("Error during shutdown: ${e.message}")
-        }
+        server.shutdown().get(5, TimeUnit.SECONDS)
+        // Not server.exit(): it calls System.exit, which would end the test JVM
+        isShutdown = true
     }
     
     

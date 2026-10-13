@@ -1,13 +1,14 @@
 package xyz.surendrajat.smalilsp.unit.parser
 
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.core.FieldAccessInstruction
 import xyz.surendrajat.smalilsp.core.InvokeInstruction
 import xyz.surendrajat.smalilsp.core.Span
 import xyz.surendrajat.smalilsp.core.TypeInstruction
 import xyz.surendrajat.smalilsp.parser.SmaliParser
+import xyz.surendrajat.smalilsp.shared.positionOf
 
 /** The builder records where every navigable token sits; expected spans are read off the source text. */
 class AstSpansTest {
@@ -57,13 +58,8 @@ class AstSpansTest {
     private val file = SmaliParser().parse("file:///Sample.smali", source)!!
 
     /** Span of [needle] on the line that contains [marker], searching after [after] when given. */
-    private fun spanOf(marker: String, needle: String, after: String? = null): Span {
-        val line = lines.indexOfFirst { it.contains(marker) }
-        require(line >= 0) { "no line contains $marker" }
-        val from = lines[line].indexOf(needle, if (after == null) 0 else lines[line].indexOf(after) + after.length)
-        require(from >= 0) { "no $needle on line $line" }
-        return Span(line, from, from + needle.length)
-    }
+    private fun spanOf(marker: String, needle: String, after: String? = null): Span =
+        source.positionOf(marker, needle, 0, after).let { Span(it.line, it.character, it.character + needle.length) }
 
     @Test
     fun `class, super and implements tokens`() {

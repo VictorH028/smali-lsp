@@ -2,7 +2,9 @@ package xyz.surendrajat.smalilsp.unit.indexer
 
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.io.TempDir
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -262,6 +264,5 @@ class WorkspaceScannerTest {
         // Note: filesPerSecond can be 0 if duration is 0ms (very fast execution)
         // This is actually good - means parsing is instant
         assertTrue(result.filesPerSecond >= 0, "Should calculate files/second (can be 0 if instant)")
-        println("Processing rate: ${result.filesPerSecond} files/second")
     }
 }

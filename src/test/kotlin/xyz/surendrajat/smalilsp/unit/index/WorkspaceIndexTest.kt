@@ -2,7 +2,11 @@ package xyz.surendrajat.smalilsp.unit.index
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import xyz.surendrajat.smalilsp.core.*
 
 import xyz.surendrajat.smalilsp.core.ClassDefinition
@@ -38,7 +42,7 @@ class WorkspaceIndexTest {
         
         val found = index.findClass("Lcom/example/Test;")
         assertNotNull(found)
-        assertEquals("Lcom/example/Test;", found?.classDefinition?.name)
+        assertEquals("Lcom/example/Test;", found.classDefinition?.name)
     }
     
     @Test
@@ -86,8 +90,8 @@ class WorkspaceIndexTest {
         
         val location = index.findField("Lcom/example/Test;", "myField", "I")
         assertNotNull(location)
-        assertEquals("file:///test/Test.smali", location?.uri)
-        assertEquals(5, location?.range?.start?.line)
+        assertEquals("file:///test/Test.smali", location.uri)
+        assertEquals(5, location.range?.start?.line)
     }
     
     @Test
