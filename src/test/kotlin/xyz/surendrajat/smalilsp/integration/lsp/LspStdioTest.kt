@@ -131,6 +131,16 @@ class LspStdioTest {
     }
 
     @Test
+    fun `exit without a prior shutdown returns 1`() {
+        writeWorkspace()
+        LspStdioClient().use { client ->
+            client.initializeAndIndex(initParams(client))
+            client.notify("exit")
+            assertEquals(1, client.waitForExit(), "exit without shutdown must signal an unclean stop")
+        }
+    }
+
+    @Test
     fun `stdout carries only JSON-RPC frames`() {
         writeWorkspace()
         LspStdioClient().use { client ->

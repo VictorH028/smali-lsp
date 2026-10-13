@@ -191,6 +191,9 @@ class SmaliLanguageServer : LanguageServer {
     
     private var pendingWorkspaceFolders: List<WorkspaceFolder> = emptyList()
 
+    @Volatile
+    private var shutdownRequested = false
+
     /**
      * Initialize server.
      * Client sends workspace folders and capabilities.
@@ -352,15 +355,17 @@ class SmaliLanguageServer : LanguageServer {
      */
     override fun shutdown(): CompletableFuture<Any> {
         logger.info("Shutting down server")
+        shutdownRequested = true
         return CompletableFuture.completedFuture(null)
     }
     
     /**
-     * Exit server.
+     * Exit server. The spec asks for status 0 after a shutdown request and 1 otherwise,
+     * so an editor can tell a clean stop from a server that died mid-session.
      */
     override fun exit() {
         logger.info("Server exiting")
-        System.exit(0)
+        System.exit(if (shutdownRequested) 0 else 1)
     }
     
     override fun getTextDocumentService(): TextDocumentService {
