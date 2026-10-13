@@ -1,4 +1,4 @@
-package xyz.surendrajat.smalilsp.unit.mcp
+package xyz.surendrajat.smalilsp.integration.mcp
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -7,6 +7,8 @@ import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
 import java.io.*
 import java.nio.file.Files
+import java.nio.file.Path
+import org.junit.jupiter.api.io.TempDir
 import java.util.Properties
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -26,14 +28,16 @@ class McpModeTest {
 
     private val gson = Gson()
 
+    @TempDir
+    lateinit var tempRoot: Path
+
     private lateinit var testProjectDir: File
     private lateinit var smaliFile: File
     private lateinit var smaliFileUri: String
 
     @BeforeEach
     fun setup() {
-        val tempDir = Files.createTempDirectory("mcp-test")
-        testProjectDir = tempDir.resolve("test-project").toFile()
+        testProjectDir = Files.createTempDirectory(tempRoot, "mcp-test").resolve("test-project").toFile()
         testProjectDir.mkdirs()
 
         val smaliDir = File(testProjectDir, "smali/com/example/test")
