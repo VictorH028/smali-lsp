@@ -141,7 +141,7 @@ class SmaliParser {
                 null
             } else {
                 // Convert parse tree to our data structures
-                val builder = ASTBuilder(uri, tokens)
+                val builder = ASTBuilder(uri, tokens, cleanContent)
                 ParseTreeWalker.DEFAULT.walk(builder, parseTree)
                 
                 builder.build()

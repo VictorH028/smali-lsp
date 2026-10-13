@@ -19,8 +19,31 @@ import xyz.surendrajat.smalilsp.util.StringPool
  */
 class ASTBuilder(
     private val uri: String,
-    private val tokens: CommonTokenStream
+    private val tokens: CommonTokenStream,
+    private val source: String
 ) : SmaliParserBaseListener() {
+
+    /**
+     * Text of a parse-tree node, sliced straight out of the source.
+     *
+     * `ParserRuleContext.getText()` concatenates every leaf through a StringBuilder per
+     * nesting level; for the ~1M invoke/field targets of a large APK that was the single
+     * biggest parse-pipeline cost. Token offsets are UTF-16 string indices (see
+     * [StringCharStream]), so a substring is exact. If the span holds whitespace or a
+     * comment (hand-written smali may put spaces inside a signature), fall back to the
+     * concatenation so the result stays identical to `getText()`.
+     */
+    private fun ParserRuleContext.src(): String {
+        val first = start ?: return text
+        val last = stop ?: return text
+        if (last.stopIndex < first.startIndex) return text
+        val slice = source.substring(first.startIndex, last.stopIndex + 1)
+        if (first === last) return slice
+        for (ch in slice) {
+            if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '#') return text
+        }
+        return slice
+    }
     
     // Accumulated data
     private var className: String? = null
@@ -40,11 +63,11 @@ class ASTBuilder(
     
     override fun enterClassDirective(ctx: GeneratedSmaliParser.ClassDirectiveContext) {
         // Extract class name (intern for memory efficiency)
-        className = ctx.className()?.text?.let { StringPool.intern(it) }
+        className = ctx.className()?.src()?.let { StringPool.intern(it) }
         
         // Extract modifiers (intern common ones: public, private, static, final, etc.)
         ctx.classModifier().forEach { mod ->
-            classModifiers.add(StringPool.intern(mod.text))
+            classModifiers.add(StringPool.intern(mod.src()))
         }
         
         // Create range for class definition
@@ -52,12 +75,12 @@ class ASTBuilder(
     }
     
     override fun enterSuperDirective(ctx: GeneratedSmaliParser.SuperDirectiveContext) {
-        superClass = ctx.superName()?.text?.let { StringPool.intern(it) }
+        superClass = ctx.superName()?.src()?.let { StringPool.intern(it) }
         superClassRange = ctx.toRange()  // Capture .super directive range
     }
     
     override fun enterImplementsDirective(ctx: GeneratedSmaliParser.ImplementsDirectiveContext) {
-        ctx.referenceType()?.text?.let { interfaceName ->
+        ctx.referenceType()?.src()?.let { interfaceName ->
             val internedName = StringPool.intern(interfaceName)
             interfaces.add(internedName)
             interfaceRanges[internedName] = ctx.toRange()  // Capture .implements directive range
@@ -66,7 +89,7 @@ class ASTBuilder(
     
     override fun enterFieldDirective(ctx: GeneratedSmaliParser.FieldDirectiveContext) {
         // Parse field name and type from fieldNameAndType
-        val fieldNameAndType = ctx.fieldNameAndType()?.text ?: return
+        val fieldNameAndType = ctx.fieldNameAndType()?.src() ?: return
         
         // Format is: name:type (e.g., myField:I)
         val parts = fieldNameAndType.split(":", limit = 2)
@@ -76,7 +99,7 @@ class ASTBuilder(
         val fieldType = StringPool.intern(parts[1])  // Many duplicates: I, Z, V, Ljava/lang/String;
         
         // Extract modifiers (intern common ones)
-        val fieldModifiers = ctx.fieldModifier().map { StringPool.intern(it.text) }.toSet()
+        val fieldModifiers = ctx.fieldModifier().map { StringPool.intern(it.src()) }.toSet()
         
         // Create field definition
         fields.add(FieldDefinition(
@@ -92,7 +115,7 @@ class ASTBuilder(
         
         // Get the entire method signature text
         val methodSig = methodDecl.methodSignature()
-        val sigText = methodSig?.text ?: return
+        val sigText = methodSig?.src() ?: return
         
         // Parse method name and descriptor from signature text
         // Format: methodName(params)returnType
@@ -112,7 +135,7 @@ class ASTBuilder(
         val parameters = parseParameters(params)
         
         // Extract modifiers (intern common ones)
-        val modifiers = methodDecl.methodModifier().map { StringPool.intern(it.text) }.toSet()
+        val modifiers = methodDecl.methodModifier().map { StringPool.intern(it.src()) }.toSet()
         
         // Create method definition (instructions will be added in exitMethodDirective)
         currentMethod = MethodDefinition(
@@ -189,7 +212,7 @@ class ASTBuilder(
             startToken.line - 1,  // LSP is 0-based
             startToken.charPositionInLine,
             stopToken.line - 1,
-            stopToken.charPositionInLine + stopToken.text.length
+            stopToken.charPositionInLine + (stopToken.stopIndex - stopToken.startIndex + 1)
         )
     }
     
@@ -294,7 +317,7 @@ class ASTBuilder(
         if (currentMethod == null || target == null) return
         
         // Format: Lcom/example/MyClass;->myMethod(I)V
-        val targetText = target.text
+        val targetText = target.src()
         val arrowIndex = targetText.indexOf("->")
         if (arrowIndex < 0) return
         
@@ -452,7 +475,7 @@ class ASTBuilder(
         if (currentMethod == null || fieldCtx == null) return
         
         // Format: Lcom/example/MyClass;->myField:I
-        val fieldText = fieldCtx.text
+        val fieldText = fieldCtx.src()
         val arrowIndex = fieldText.indexOf("->")
         if (arrowIndex < 0) return
         
@@ -481,7 +504,7 @@ class ASTBuilder(
     override fun enterNewInstanceInstruction(ctx: GeneratedSmaliParser.NewInstanceInstructionContext) {
         if (currentMethod == null) return
         
-        val className = ctx.newInstanceType()?.text ?: return
+        val className = ctx.newInstanceType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "new-instance",
@@ -496,7 +519,7 @@ class ASTBuilder(
     override fun enterCheckCastInstruction(ctx: GeneratedSmaliParser.CheckCastInstructionContext) {
         if (currentMethod == null) return
         
-        val className = ctx.checkCastType()?.text ?: return
+        val className = ctx.checkCastType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "check-cast",
@@ -511,7 +534,7 @@ class ASTBuilder(
     override fun enterInstanceOfInstruction(ctx: GeneratedSmaliParser.InstanceOfInstructionContext) {
         if (currentMethod == null) return
         
-        val className = ctx.checkInstanceType()?.text ?: return
+        val className = ctx.checkInstanceType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "instance-of",
@@ -526,7 +549,7 @@ class ASTBuilder(
     override fun enterConstClass(ctx: GeneratedSmaliParser.ConstClassContext) {
         if (currentMethod == null) return
         
-        val className = ctx.referenceOrArrayType()?.text ?: return
+        val className = ctx.referenceOrArrayType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "const-class",
@@ -542,7 +565,7 @@ class ASTBuilder(
     override fun enterFilledNewArrayInstruction(ctx: GeneratedSmaliParser.FilledNewArrayInstructionContext) {
         if (currentMethod == null) return
         
-        val className = ctx.arrayElementType()?.text ?: return
+        val className = ctx.arrayElementType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "filled-new-array",
@@ -558,7 +581,7 @@ class ASTBuilder(
     override fun enterFilledNewArrayRangeInstruction(ctx: GeneratedSmaliParser.FilledNewArrayRangeInstructionContext) {
         if (currentMethod == null) return
         
-        val className = ctx.arrayElementType()?.text ?: return
+        val className = ctx.arrayElementType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "filled-new-array/range",
@@ -574,7 +597,7 @@ class ASTBuilder(
     override fun enterNewArrayInstruction(ctx: GeneratedSmaliParser.NewArrayInstructionContext) {
         if (currentMethod == null) return
         
-        val className = ctx.arrayElementType()?.text ?: return
+        val className = ctx.arrayElementType()?.src() ?: return
         
         currentInstructions.add(TypeInstruction(
             opcode = "new-array",
@@ -594,8 +617,8 @@ class ASTBuilder(
     override fun enterConstString(ctx: GeneratedSmaliParser.ConstStringContext) {
         if (currentMethod == null) return
 
-        ctx.registerIdentifier()?.text ?: return
-        val rawLiteral = ctx.stringLiteral()?.text ?: return
+        ctx.registerIdentifier() ?: return
+        val rawLiteral = ctx.stringLiteral()?.src() ?: return
         val value = rawLiteral.removeSurrounding("\"")
 
         currentInstructions.add(ConstStringInstruction(
@@ -611,8 +634,8 @@ class ASTBuilder(
     override fun enterConstStringJumbo(ctx: GeneratedSmaliParser.ConstStringJumboContext) {
         if (currentMethod == null) return
 
-        ctx.registerIdentifier()?.text ?: return
-        val rawLiteral = ctx.stringLiteral()?.text ?: return
+        ctx.registerIdentifier() ?: return
+        val rawLiteral = ctx.stringLiteral()?.src() ?: return
         val value = rawLiteral.removeSurrounding("\"")
 
         currentInstructions.add(ConstStringInstruction(
@@ -631,7 +654,7 @@ class ASTBuilder(
         if (currentMethod == null) return
         
         val labelCtx = ctx.label() ?: return
-        val labelName = labelCtx.labelName()?.text ?: return
+        val labelName = labelCtx.labelName()?.src() ?: return
         
         currentLabels[labelName] = LabelDefinition(
             name = labelName,
@@ -718,7 +741,7 @@ class ASTBuilder(
     ) {
         if (currentMethod == null || labelCtx == null) return
         
-        val labelName = labelCtx.labelName()?.text ?: return
+        val labelName = labelCtx.labelName()?.src() ?: return
         val labelRange = labelCtx.toRange()
         
         currentInstructions.add(JumpInstruction(
