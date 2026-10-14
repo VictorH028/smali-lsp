@@ -4,7 +4,12 @@ import org.eclipse.lsp4j.Diagnostic
 import org.eclipse.lsp4j.DiagnosticSeverity
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
+import xyz.surendrajat.smalilsp.core.ConstStringInstruction
+import xyz.surendrajat.smalilsp.core.FieldAccessInstruction
+import xyz.surendrajat.smalilsp.core.InvokeInstruction
+import xyz.surendrajat.smalilsp.core.JumpInstruction
 import xyz.surendrajat.smalilsp.core.SmaliFile
+import xyz.surendrajat.smalilsp.core.TypeInstruction
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.util.Types
@@ -121,53 +126,19 @@ class DiagnosticProvider(
             }
         }
         
-        // Check method invocations
-        file.methods.forEach { method ->
-            method.instructions.forEach { instruction ->
+        // Check the classes instructions name
+        for (method in file.methods) {
+            for (instruction in method.instructions) {
+                val className: String
+                val range: Range
                 when (instruction) {
-                    is xyz.surendrajat.smalilsp.core.InvokeInstruction -> {
-                        if (!isKnownClass(instruction.className)) {
-                            diagnostics.add(
-                                createDiagnostic(
-                                    range = instruction.ownerSpan?.toRange() ?: instruction.range,
-                                    message = "Class '${instruction.className}' not found in workspace or SDK",
-                                    severity = DiagnosticSeverity.Warning,
-                                    code = "undefined-class"
-                                )
-                            )
-                        }
-                    }
-                    is xyz.surendrajat.smalilsp.core.FieldAccessInstruction -> {
-                        if (!isKnownClass(instruction.className)) {
-                            diagnostics.add(
-                                createDiagnostic(
-                                    range = instruction.ownerSpan?.toRange() ?: instruction.range,
-                                    message = "Class '${instruction.className}' not found in workspace or SDK",
-                                    severity = DiagnosticSeverity.Warning,
-                                    code = "undefined-class"
-                                )
-                            )
-                        }
-                    }
-                    is xyz.surendrajat.smalilsp.core.TypeInstruction -> {
-                        if (!isKnownClass(instruction.className)) {
-                            diagnostics.add(
-                                createDiagnostic(
-                                    range = instruction.typeSpan?.toRange() ?: instruction.range,
-                                    message = "Class '${instruction.className}' not found in workspace or SDK",
-                                    severity = DiagnosticSeverity.Warning,
-                                    code = "undefined-class"
-                                )
-                            )
-                        }
-                    }
-                    is xyz.surendrajat.smalilsp.core.JumpInstruction -> {
-                        // JumpInstructions reference labels within the same method
-                        // Label validation could be added here if needed
-                    }
-                    is xyz.surendrajat.smalilsp.core.ConstStringInstruction -> {
-                        // String literals don't need diagnostics
-                    }
+                    is InvokeInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range }
+                    is FieldAccessInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range }
+                    is TypeInstruction -> { className = instruction.className; range = instruction.typeSpan?.toRange() ?: instruction.range }
+                    is JumpInstruction, is ConstStringInstruction -> continue   // labels are checked above; string literals need nothing
+                }
+                if (!isKnownClass(className)) {
+                    diagnostics.add(createDiagnostic(range, "Class '$className' not found in workspace or SDK", DiagnosticSeverity.Warning, "undefined-class"))
                 }
             }
         }

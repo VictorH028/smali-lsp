@@ -78,7 +78,7 @@ fun SmaliFile.symbolAt(position: Position): Symbol? {
         if (f.typeSpan.touches(position)) return typeSymbol(f.type, f.typeSpan.toRange(), null, null)
     }
 
-    val method = methods.firstOrNull { it.touches(position) }
+    val method = methodAt(position.line)?.takeIf { it.touches(position) }
     if (method != null) {
         if (method.nameSpan.touches(position)) return Symbol.MethodDecl(method)
         if (method.descriptorSpan.touches(position)) return descriptorSymbol(method.descriptor, method.descriptorSpan, position, null)

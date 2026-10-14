@@ -149,44 +149,24 @@ class HoverProvider(
         if (Types.isPrimitive(type)) return hoverForPrimitiveType(type)
         val file = workspaceIndex.findClass(Types.className(type) ?: type)
         if (file != null) return hoverForClass(file.classDefinition)
-
-        val md = buildString {
-            append("**Class:** `${Types.readableName(type)}`\n\n")
-            if (Types.isSdkClass(type)) {
-                append("*SDK Class* - Part of Android SDK or Java standard library")
-            } else {
-                append("*Not found in workspace*")
-            }
-        }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        return unresolved("Class", type, "**Class:** `${Types.readableName(type)}`")
     }
 
     fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
         workspaceIndex.resolveMethod(className, methodName, descriptor)?.let { return hoverForMethod(it.method, it.file.classDefinition.name) }
-
-        val md = buildString {
-            append("**Method:** `${className}.${methodName}`\n\n")
-            append("**Descriptor:** `${descriptor}`\n\n")
-            if (Types.isSdkClass(className)) {
-                append("*SDK Method* - Part of Android SDK or Java standard library")
-            } else {
-                append("*Not found in workspace*")
-            }
-        }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        return unresolved("Method", className, "**Method:** `${className}.${methodName}`", "**Descriptor:** `${descriptor}`")
     }
 
     fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
         workspaceIndex.resolveField(className, fieldName, fieldType)?.let { return hoverForField(it.field, it.file.classDefinition.name) }
+        return unresolved("Field", className, "**Field:** `${className}.${fieldName}`", "**Type:** `${Types.readableName(fieldType)}`")
+    }
 
+    /** The hover for a class or member the workspace does not define: a platform one, or one the app does not ship. */
+    private fun unresolved(kind: String, className: String, vararg lines: String): Hover {
         val md = buildString {
-            append("**Field:** `${className}.${fieldName}`\n\n")
-            append("**Type:** `${Types.readableName(fieldType)}`\n\n")
-            if (Types.isSdkClass(className)) {
-                append("*SDK Field* - Part of Android SDK or Java standard library")
-            } else {
-                append("*Not found in workspace*")
-            }
+            for (line in lines) append(line).append("\n\n")
+            append(if (Types.isSdkClass(className)) "*SDK $kind* - Part of Android SDK or Java standard library" else "*Not found in workspace*")
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }

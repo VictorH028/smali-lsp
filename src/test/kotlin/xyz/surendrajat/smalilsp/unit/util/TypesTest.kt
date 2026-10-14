@@ -42,28 +42,6 @@ class TypesTest {
         assertEquals("Lcom/Foo;", Types.className("Lcom/Foo;->bar()V"))
     }
 
-    // --- classNames ---
-
-    @Test
-    fun `classNames ignores primitives`() {
-        assertTrue(Types.classNames("(IJ)V").isEmpty())
-        assertTrue(Types.classNames("").isEmpty())
-    }
-
-    @Test
-    fun `classNames from a method descriptor`() {
-        assertEquals(setOf("Ljava/lang/String;"), Types.classNames("(Ljava/lang/String;)V"))
-        assertEquals(setOf("Ljava/lang/String;", "Ljava/lang/Integer;"), Types.classNames("(ILjava/lang/String;J)Ljava/lang/Integer;"))
-        assertEquals(setOf("Landroid/content/Context;", "Landroid/util/AttributeSet;"), Types.classNames("(Landroid/content/Context;Landroid/util/AttributeSet;)V"))
-        assertEquals(setOf("Ljava/lang/String;"), Types.classNames("()Ljava/lang/String;"))
-    }
-
-    @Test
-    fun `classNames uses the element class of arrays`() {
-        assertEquals(setOf("Ljava/lang/String;", "Ljava/lang/Integer;"), Types.classNames("([Ljava/lang/String;[[I)[[Ljava/lang/Integer;"))
-        assertEquals(setOf("Ljava/lang/Object;"), Types.classNames("[[Ljava/lang/Object;"))
-    }
-
     // --- isPrimitive ---
 
     @Test

@@ -137,7 +137,6 @@ class McpMode {
         fun string(name: String): String? = present(name)?.let { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content ?: throw ToolError("'$name' must be a string") }
         fun int(name: String): Int? = present(name)?.let { (it as? JsonPrimitive)?.intOrNull ?: throw ToolError("'$name' must be a number") }
         fun require(name: String): String = string(name) ?: throw MissingArgument(name)
-        fun requireInt(name: String): Int = int(name) ?: throw MissingArgument(name)
         /** `max_results`, defaulting to [default] and never above [cap], so one answer cannot flood an agent's context. */
         fun maxResults(default: Int, cap: Int = 5000): Int = (int("max_results") ?: default).coerceIn(1, cap)
     }

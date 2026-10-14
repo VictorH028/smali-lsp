@@ -51,7 +51,7 @@ class CallHierarchyProvider(
         for (site in callSites) {
             val file = index.findFileByUri(site.uri) ?: continue
             val method = file.methodAt(site.range.start.line) ?: continue
-            callers.getOrPut(file.uri to method.range.start.line) { method to mutableListOf() }.second.add(site.range)
+            callers.getOrPut(file.uri to method.startLine) { method to mutableListOf() }.second.add(site.range)
         }
         return callers.map { (key, value) ->
             CallHierarchyIncomingCall().apply {
@@ -69,7 +69,7 @@ class CallHierarchyProvider(
         val itemClass = item.detail ?: return emptyList()
         val file = index.findClass(itemClass) ?: return emptyList()
 
-        val method = file.methods.find { it.range == item.range }
+        val method = file.methodAt(item.range.start.line)?.takeIf { it.range == item.range }
             ?: return emptyList()
 
         // Group invoke instructions by target method to consolidate calls
