@@ -175,7 +175,8 @@ Measured on three apktool projects (Mastodon v2.13.4, ProtonMail 7.11.5 and a 76
 | | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
 | --- | --- | --- | --- |
 | Index the workspace (parallel, cold) | 1.6 s | 2.7 s | 8.8 s |
-| Heap after indexing (AST + index, string literals included) | — | 288 MB | 1.05 GB |
+| Heap after indexing (AST + index, string literals included) | — | 190 MB | 702 MB |
+| Committed heap a minute after indexing, idle | — | 400 MB | 1.6 GB |
 | Re-parse and re-index one file on edit, p95 | — | 0.7 ms | 0.7 ms |
 | Workspace symbol search, per query | — | 4–14 ms | 19–25 ms |
 

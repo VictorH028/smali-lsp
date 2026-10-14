@@ -102,11 +102,20 @@ thousands of files is one `String`; the pool is bounded (500 K entries) and per 
 | | ProtonMail (19,637 files) | 76 K-file app |
 |---|---|---|
 | Single-thread parse, all files | 2.7 s (0.14 ms/file) | ~11 s |
-| AST heap after GC | 190 MB (10 KB/file) | 673 MB |
+| AST heap after GC | 129 MB (6.6 KB/file) | 432 MB |
 
 Interning the instruction strings took the ProtonMail AST from 470 MB to 293 MB for 2 to 5 %
 parse time; storing instruction and label ranges as four ints instead of LSP4J `Range`
-objects took it to 190 MB. Declarations keep their `Range`; there are few of them.
+objects took it to 190 MB. The rest came from what a class histogram showed around the
+instructions, none of it visible through the API: declarations now keep their range and
+token spans as ints too and build `Range`/`Span` on demand (a `Range` is three objects); a
+member's modifiers are one immutable set per distinct combination (`StringPool.internModifiers`,
+a few dozen per workspace) instead of a `LinkedHashSet` with its table and entries; a
+method's labels sit in `LabelMap`, two sorted arrays behind the `Map` interface; parameters
+and directive blocks are `ParameterList`/`BlockList`, arrays behind the `List` interface; and
+string literals up to 64 characters are pooled. The instruction objects are now two thirds
+of what is left; their line ints stay exact because the lexer skips newlines, so a
+hand-edited instruction may span lines.
 
 ### 2.4 Symbol resolution: `SmaliFile.symbolAt`
 
@@ -154,11 +163,31 @@ and removal scanned every usage set the file touched, so a keystroke in a file t
 
 | | ProtonMail | 76 K-file app |
 |---|---|---|
-| Index heap after GC | 371 MB → **90 MB** | 1,331 MB → **328 MB** |
-| AST + index | 841 MB → **281 MB** | 2,850 MB → **1,027 MB** |
+| Index heap after GC | 371 MB → 90 MB → **61 MB** | 1,331 MB → 328 MB → **270 MB** |
+| AST + index | 841 MB → 281 MB → **190 MB** | 2,850 MB → 1,027 MB → **702 MB** |
 | Index build, single thread | 0.95 s → 0.52 s | 3.4 s → 1.4 s |
 | didChange (re-parse + re-index one file), p95 | 58 ms → **0.6 ms** | 340 ms → **0.8 ms** |
 | didChange, worst of 200 files | 0.9 s → 18 ms | 7.5 s → 9 ms |
+
+The second step: the method and field tables are keyed by `MemberKey` (owner, name,
+descriptor, each the AST's pooled string) instead of a concatenated `Lowner;->name(desc)`
+string per symbol, which was 67 MB of keys on the large app, and the usage lists are trimmed
+to their exact size once the initial scan ends (`trimUsages`), dropping the 30 % the doubling
+growth leaves; they grow by half afterwards.
+
+### 4.1 Giving memory back
+
+The live heap is not what the OS shows. G1 keeps up to 70 % of the heap free after a
+collection and never uncommits, so a server whose live data was 300 MB sat at 1.2 GB of
+committed heap after the scan, and 3 GB on the large app. `JvmTuning` sets the two free-ratio
+flags to 10..30 % through the HotSpot diagnostic bean at startup (they are manageable, so no
+launch flag is needed) and arms G1's periodic collection: 30 s without a collection triggers a
+concurrent cycle, after which G1 uncommits down to the ratio. A cycle marks the whole live
+heap (about 0.4 s of CPU per gigabyte), so it is not left running: every request or
+notification re-arms it, and a cycle that followed no activity disarms it. Measured on the
+real server over stdio: committed heap 1,256 → 400 MB on ProtonMail and 2,992 → 1,556 MB on
+the large app, a minute after indexing, with the scan time unchanged and a remark pause of 2
+to 4 ms; a JVM without these flags is left as it is.
 
 ### 3.3 Scanning (`WorkspaceScanner.kt`)
 
@@ -339,8 +368,8 @@ only one index is built at a time.
   re-reading lines and matching names with `indexOf`, mis-resolved duplicated names and needed
   file reads for closed documents.
 - **Full ASTs in memory.** Hover, call hierarchy, diagnostics and the MCP tools all need
-  instruction lists. At about 10 KB per file after interning and range packing, the AST is
-  two thirds of the heap; re-parsing on demand would save it at the cost of a disk read per
+  instruction lists. At about 6.6 KB per file after interning and packing, the AST is two
+  thirds of the heap; re-parsing on demand would save it at the cost of a disk read per
   request.
 - **Generations, not per-symbol removal.** O(1) retirement is what makes editing a file that
   references popular symbols cheap.
