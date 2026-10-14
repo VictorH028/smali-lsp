@@ -276,6 +276,7 @@ class SmaliLanguageServer : LanguageServer {
             CompletableFuture.runAsync {
                 try {
                     indexWorkspace(pendingWorkspaceFolders)
+                    index.trimUsages()
                 } catch (e: Throwable) {
                     logger.error("Failed to index workspace", e)
                 } finally {

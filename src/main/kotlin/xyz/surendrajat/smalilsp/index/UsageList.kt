@@ -8,18 +8,24 @@ import java.util.concurrent.atomic.AtomicIntegerArray
  * a newer generation is stale; readers skip it and [compact] drops it.
  */
 internal class UsageList {
-    private var data = IntArray(STRIDE * 2)
+    private var data = EMPTY
     private var size = 0
 
     @Synchronized
     fun add(fileId: Int, generation: Int, line: Int, start: Int, end: Int) {
-        if (size + STRIDE > data.size) data = data.copyOf(data.size * 2)
+        if (size + STRIDE > data.size) data = data.copyOf(maxOf(size + STRIDE * 2, size + size / 2))
         data[size] = fileId
         data[size + 1] = generation
         data[size + 2] = line
         data[size + 3] = start
         data[size + 4] = end
         size += STRIDE
+    }
+
+    /** Drops the spare capacity; called once the initial scan is over, when most lists will never grow again. */
+    @Synchronized
+    fun trim() {
+        if (data.size != size) data = if (size == 0) EMPTY else data.copyOf(size)
     }
 
     /** A copy of the packed entries, stale ones included. */
@@ -49,5 +55,6 @@ internal class UsageList {
 
     companion object {
         const val STRIDE = 5
+        private val EMPTY = IntArray(0)
     }
 }

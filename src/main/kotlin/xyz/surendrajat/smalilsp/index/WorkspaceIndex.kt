@@ -54,8 +54,8 @@ class WorkspaceIndex {
     private val implementorsIndex = ConcurrentHashMap<String, MutableSet<String>>()
 
     // ---- usages ----
-    private val methodUsages = ConcurrentHashMap<String, UsageList>()
-    private val fieldUsages = ConcurrentHashMap<String, UsageList>()
+    private val methodUsages = ConcurrentHashMap<MemberKey, UsageList>()
+    private val fieldUsages = ConcurrentHashMap<MemberKey, UsageList>()
     private val classRefs = ConcurrentHashMap<String, UsageList>()
     private val totalEntries = AtomicLong(0)
     private val staleEntries = AtomicLong(0)
@@ -91,8 +91,8 @@ class WorkspaceIndex {
         updateStringValueCounts(file, delta = 1)
 
         var added = 0
-        forEachUsage(file) { table, key, span ->
-            table.computeIfAbsent(key) { UsageList() }.add(id, gen, span.line, span.start, span.end)
+        forEachUsage(file) { list, line, start, end ->
+            list.add(id, gen, line, start, end)
             added++
         }
         totalEntries.addAndGet(added.toLong())
@@ -170,46 +170,57 @@ class WorkspaceIndex {
      */
     private inline fun forEachUsage(
         file: SmaliFile,
-        sink: (table: ConcurrentHashMap<String, UsageList>, key: String, span: Span) -> Unit
+        sink: (list: UsageList, line: Int, start: Int, end: Int) -> Unit
     ) {
         for (method in file.methods) {
             for (instr in method.instructions) {
                 when (instr) {
                     is InvokeInstruction -> {
-                        sink(methodUsages, methodKey(instr.className, instr.methodName, instr.descriptor), instr.nameSpan ?: instr.range.toSpan())
-                        Types.className(instr.className)?.let { sink(classRefs, it, instr.ownerSpan ?: instr.range.toSpan()) }
+                        at(instr.nameSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(methodUsages, MemberKey(instr.className, instr.methodName, instr.descriptor)), l, a, b) }
+                        Types.className(instr.className)?.let { owner -> at(instr.ownerSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, owner), l, a, b) } }
                     }
                     is FieldAccessInstruction -> {
-                        sink(fieldUsages, fieldKey(instr.className, instr.fieldName, instr.fieldType), instr.nameSpan ?: instr.range.toSpan())
-                        Types.className(instr.className)?.let { sink(classRefs, it, instr.ownerSpan ?: instr.range.toSpan()) }
-                        Types.className(instr.fieldType)?.let { sink(classRefs, it, instr.typeSpan ?: instr.range.toSpan()) }
+                        at(instr.nameSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(fieldUsages, MemberKey(instr.className, instr.fieldName, instr.fieldType)), l, a, b) }
+                        Types.className(instr.className)?.let { owner -> at(instr.ownerSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, owner), l, a, b) } }
+                        Types.className(instr.fieldType)?.let { type -> at(instr.typeSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
                     }
                     is TypeInstruction -> {
-                        Types.className(instr.className)?.let { sink(classRefs, it, instr.typeSpan ?: instr.range.toSpan()) }
+                        Types.className(instr.className)?.let { type -> at(instr.typeSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
                     }
-                    is ConstStringInstruction -> sink(stringUsages, instr.value, Span(instr.startLine, instr.startChar, if (instr.endLine == instr.startLine) instr.endChar else instr.startChar))
+                    is ConstStringInstruction -> sink(listFor(stringUsages, instr.value), instr.startLine, instr.startChar, if (instr.endLine == instr.startLine) instr.endChar else instr.startChar)
                     is JumpInstruction -> {}
                 }
             }
-            val descriptor = method.descriptorSpan
-            if (descriptor.length == method.descriptor.length) {
+            if (method.descriptorEnd - method.descriptorStart == method.descriptor.length) {
                 for (type in Types.parseTypeSequence(method.descriptor)) {
                     val className = type.className ?: continue
-                    sink(classRefs, className, Span(descriptor.line, descriptor.start + type.start, descriptor.start + type.end))
+                    sink(listFor(classRefs, className), method.descriptorLine, method.descriptorStart + type.start, method.descriptorStart + type.end)
                 }
             } else {
                 // No usable span (a hand-built definition): point at the declaration
-                Types.className(method.returnType)?.let { sink(classRefs, it, method.range.toSpan()) }
+                Types.className(method.returnType)?.let { type -> at(method.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
                 for (param in method.parameters) {
-                    Types.className(param.type)?.let { sink(classRefs, it, method.range.toSpan()) }
+                    Types.className(param.type)?.let { type -> at(method.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
                 }
             }
         }
         for (field in file.fields) {
-            Types.className(field.type)?.let { sink(classRefs, it, field.typeSpan) }
+            Types.className(field.type)?.let { type -> sink(listFor(classRefs, type), field.typeLine, field.typeStart, field.typeEnd) }
         }
         // Annotations, .catch exception types, .local types, method prototypes
-        for (ref in file.typeRefs) sink(classRefs, ref.className, ref.span)
+        for (ref in file.typeRefs) sink(listFor(classRefs, ref.className), ref.line, ref.start, ref.end)
+    }
+
+    private inline fun at(span: Span, use: (line: Int, start: Int, end: Int) -> Unit) = use(span.line, span.start, span.end)
+
+    private fun <K : Any> listFor(table: ConcurrentHashMap<K, UsageList>, key: K): UsageList =
+        table[key] ?: table.computeIfAbsent(key) { UsageList() }
+
+    /** Drops the spare capacity of every usage list; called once the initial scan is over. */
+    fun trimUsages() {
+        for (table in listOf(methodUsages, fieldUsages, classRefs, stringUsages)) {
+            for (list in table.values) list.trim()
+        }
     }
 
     private fun Range.toSpan() = Span(start.line, start.character, if (end.line == start.line) end.character else start.character)
@@ -366,11 +377,11 @@ class WorkspaceIndex {
 
     /** Every call site of the method, at the method-name token. */
     fun findMethodUsages(className: String, methodName: String, descriptor: String): List<Location> =
-        methodUsages[methodKey(className, methodName, descriptor)].toLocations()
+        methodUsages[MemberKey(className, methodName, descriptor)].toLocations()
 
     /** Every access of the field, at the field-name token. */
     fun findFieldUsages(className: String, fieldName: String, fieldType: String): List<Location> =
-        fieldUsages[fieldKey(className, fieldName, fieldType)].toLocations()
+        fieldUsages[MemberKey(className, fieldName, fieldType)].toLocations()
 
     /** Every reference to the class as an owner, operand, field type or descriptor type; [cancel] is checked along the way for the big ones. */
     fun findClassRefLocations(className: String, cancel: CancelChecker? = null): List<Location> = classRefs[className].toLocations(cancel)
@@ -494,9 +505,7 @@ class WorkspaceIndex {
         }
     }
 
-    private fun methodKey(className: String, methodName: String, descriptor: String) = "$className->$methodName$descriptor"
 
-    private fun fieldKey(className: String, fieldName: String, fieldType: String) = "$className->$fieldName:$fieldType"
 
     /** Last path segment of a class name, keeping the Outer$Inner chain (unlike Types.simpleName): "Lcom/a/Outer$Inner;" → "Outer$Inner". */
     private fun simpleKey(className: String): String = className.removePrefix("L").removeSuffix(";").substringAfterLast('/')
@@ -533,3 +542,17 @@ data class StringSearchResult(
     val value: String,
     val location: Location
 )
+
+/**
+ * A method or field as the usage tables key it: owner, name and descriptor (or field type).
+ * The parts are the AST's pooled strings, so a key is one small object sharing them instead
+ * of a concatenated `Lowner;->name(desc)` string, and equality is usually three identity checks.
+ */
+internal class MemberKey(@JvmField val owner: String, @JvmField val name: String, @JvmField val descriptor: String) {
+    override fun hashCode(): Int = (owner.hashCode() * 31 + name.hashCode()) * 31 + descriptor.hashCode()
+
+    override fun equals(other: Any?): Boolean =
+        other is MemberKey && (owner === other.owner || owner == other.owner) && (name === other.name || name == other.name) && (descriptor === other.descriptor || descriptor == other.descriptor)
+
+    override fun toString(): String = "$owner->$name$descriptor"
+}

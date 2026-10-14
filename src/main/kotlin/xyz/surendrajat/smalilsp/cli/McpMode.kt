@@ -186,6 +186,7 @@ class McpMode {
                 session = null
                 val index = WorkspaceIndex()
                 val result = WorkspaceScanner(index).scanDirectory(dir) { _, _ -> }
+                index.trimUsages()
                 session = Session(dir.absolutePath, index)
                 index to result
             } finally {
