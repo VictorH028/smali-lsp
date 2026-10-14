@@ -32,6 +32,7 @@ import org.eclipse.lsp4j.SymbolKind
 import org.eclipse.lsp4j.TypeHierarchyItem
 import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
+import xyz.surendrajat.smalilsp.JvmTuning
 import xyz.surendrajat.smalilsp.indexer.WorkspaceScanner
 import xyz.surendrajat.smalilsp.loadVersionInfo
 import xyz.surendrajat.smalilsp.parser.SmaliParser
@@ -138,6 +139,7 @@ class McpMode {
             required = args.filter { it.required }.map { it.name }
         )
         addTool(name = name, description = description, inputSchema = schema) { request ->
+            JvmTuning.noteActivity()
             val current = session
             if (needsSession && current == null) return@addTool toolError("No index loaded. Call smali_index first.")
             try {

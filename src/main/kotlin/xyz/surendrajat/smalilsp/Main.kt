@@ -14,6 +14,8 @@ fun main(args: Array<String>) {
     }
     configureLogging(options.verbose, options.logFile)
 
+    if (options.command == "lsp" || options.command == "mcp") JvmTuning.applyHeapSettings()
+
     when (options.command) {
         "lsp" -> startLsp()
         "mcp" -> McpMode().run()

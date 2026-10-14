@@ -24,6 +24,7 @@ class WriteQueue : AutoCloseable {
 
     /** Runs [work] after everything queued before it. A failure is logged and never holds up later work. */
     fun submit(name: String, work: () -> Unit): CompletableFuture<Void> = synchronized(lock) {
+        JvmTuning.noteActivity()
         if (executor.isShutdown) return tail
         val next = tail.handleAsync<Void>({ _, _ ->
             try {
@@ -49,6 +50,7 @@ class WriteQueue : AutoCloseable {
      */
     fun <T> request(name: String, context: String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
         logger.debug("{}: {}", name, context)
+        JvmTuning.noteActivity()
         val barrier = barrier()
         return CompletableFutures.computeAsync { checker ->
             try {
