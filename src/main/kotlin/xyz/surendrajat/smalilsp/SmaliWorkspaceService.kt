@@ -80,7 +80,7 @@ class SmaliWorkspaceService(
      */
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
         if (params.changes.isEmpty()) return
-        logger.debug("didChangeWatchedFiles: ${params.changes.size} change(s)")
+        logger.debug("didChangeWatchedFiles: {} change(s)", params.changes.size)
 
         // Only the last event per file matters; a regenerated project can send thousands at once
         val latest = LinkedHashMap<String, FileChangeType>()
@@ -125,7 +125,7 @@ class SmaliWorkspaceService(
      * one, which stops its scan.
      */
     override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> =
-        writes.request("workspace/symbol", params.query, { Either.forLeft(emptyList()) }) { checker ->
+        writes.request("workspace/symbol", { params.query }, { Either.forLeft(emptyList()) }) { checker ->
             Either.forLeft(symbolProvider.search(params.query, checker))
         }
 }

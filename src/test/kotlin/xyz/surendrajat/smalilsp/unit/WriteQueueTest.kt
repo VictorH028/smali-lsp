@@ -67,12 +67,12 @@ class WriteQueueTest {
         val queue = WriteQueue()
         val log = java.util.concurrent.CopyOnWriteArrayList<String>()
         queue.submit("first") { Thread.sleep(50); log.add("write") }
-        val answer = queue.request("probe", null, { "fallback" }) { log.add("read"); "answer" }
+        val answer = queue.request("probe", { null }, { "fallback" }) { log.add("read"); "answer" }
         assertEquals("answer", answer.get(5, java.util.concurrent.TimeUnit.SECONDS))
         assertEquals(listOf("write", "read"), log)
-        val failed = queue.request("broken", "ctx", { "fallback" }) { throw IllegalStateException("boom") }
+        val failed = queue.request("broken", { "ctx" }, { "fallback" }) { throw IllegalStateException("boom") }
         assertEquals("fallback", failed.get(5, java.util.concurrent.TimeUnit.SECONDS))
-        val error = queue.request("refused", null, { "fallback" }) {
+        val error = queue.request("refused", { null }, { "fallback" }) {
             throw org.eclipse.lsp4j.jsonrpc.ResponseErrorException(org.eclipse.lsp4j.jsonrpc.messages.ResponseError(org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode.InvalidRequest, "no", null))
         }
         val thrown = org.junit.jupiter.api.assertThrows<java.util.concurrent.ExecutionException> { error.get(5, java.util.concurrent.TimeUnit.SECONDS) }

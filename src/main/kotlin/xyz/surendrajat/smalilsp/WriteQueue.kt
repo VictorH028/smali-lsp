@@ -48,8 +48,8 @@ class WriteQueue : AutoCloseable {
      * client as that error; a cancelled request ($/cancelRequest) stays cancelled, and long scans
      * check the [CancelChecker] so a superseded request stops early.
      */
-    fun <T> request(name: String, context: String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
-        logger.debug("{}: {}", name, context)
+    fun <T> request(name: String, context: () -> String?, fallback: () -> T, compute: (CancelChecker) -> T): CompletableFuture<T> {
+        if (logger.isDebugEnabled) logger.debug("{}: {}", name, context())
         JvmTuning.noteActivity()
         val barrier = barrier()
         return CompletableFutures.computeAsync { checker ->
@@ -61,7 +61,7 @@ class WriteQueue : AutoCloseable {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logger.error("Error in $name${context?.let { ": $it" } ?: ""}", e)
+                logger.error("Error in $name${context()?.let { ": $it" } ?: ""}", e)
                 fallback()
             }
         }
