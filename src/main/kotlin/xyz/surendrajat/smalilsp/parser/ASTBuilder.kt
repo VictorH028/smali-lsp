@@ -156,20 +156,21 @@ class ASTBuilder(
         val fieldName = strings.intern(parts[0])
         val fieldType = strings.intern(parts[1])  // Many duplicates: I, Z, V, Ljava/lang/String;
         val fieldModifiers = strings.internModifiers(ctx.fieldModifier().map { strings.intern(it.src()) })
-        val range = ctx.toRange()
 
         val nameStart = nameAndType.start.toSpan()
         val colon = nameAndType.COLON()?.symbol
         val nameSpan = if (colon != null && colon.line == nameAndType.start.line) Span(nameStart.line, nameStart.start, colon.charPositionInLine) else null
         val typeSpan = nameAndType.anyType()?.toSpan()
+        val startLine = ctx.startLine
+        val startChar = ctx.startChar
 
         fields.add(FieldDefinition(
             name = fieldName,
             type = fieldType,
-            range = range,
+            startLine = startLine, startChar = startChar, endLine = ctx.endLine, endChar = ctx.endChar,
             modifiers = fieldModifiers,
-            nameSpan = nameSpan ?: Span(range.start.line, range.start.character, range.start.character),
-            typeSpan = typeSpan ?: Span(range.start.line, range.start.character, range.start.character)
+            nameLine = nameSpan?.line ?: startLine, nameStart = nameSpan?.start ?: startChar, nameEnd = nameSpan?.end ?: startChar,
+            typeLine = typeSpan?.line ?: startLine, typeStart = typeSpan?.start ?: startChar, typeEnd = typeSpan?.end ?: startChar
         ))
     }
 
@@ -179,11 +180,7 @@ class ASTBuilder(
      * once the full `.method` .. `.end method` range is known.
      */
     override fun exitMethodDeclaration(ctx: GeneratedSmaliParser.MethodDeclarationContext) {
-        pendingMethod = null
-        currentInstructions.clear()
-        currentLabels.clear()
-        currentDuplicateLabels.clear()
-        currentLabelRefs.clear()
+        resetMethod()
 
         val signature = ctx.methodSignature() ?: return
         val sigText = signature.src()
@@ -218,22 +215,28 @@ class ASTBuilder(
 
     override fun exitMethodDirective(ctx: GeneratedSmaliParser.MethodDirectiveContext) {
         pendingMethod?.let { m ->
-            val range = ctx.toRange()
+            val startLine = ctx.startLine
+            val startChar = ctx.startChar
             methods.add(MethodDefinition(
                 name = m.name,
                 descriptor = m.descriptor,
-                range = range,
+                startLine = startLine, startChar = startChar, endLine = ctx.endLine, endChar = ctx.endChar,
                 modifiers = m.modifiers,
                 parameters = m.parameters,
                 returnType = m.returnType,
                 instructions = currentInstructions.toList(),
                 labels = LabelMap.of(currentLabels),
-                nameSpan = m.nameSpan ?: Span(range.start.line, range.start.character, range.start.character),
-                descriptorSpan = m.descriptorSpan ?: Span(range.start.line, range.start.character, range.start.character),
-                labelRefs = currentLabelRefs.toList(),
+                nameLine = m.nameSpan?.line ?: startLine, nameStart = m.nameSpan?.start ?: startChar, nameEnd = m.nameSpan?.end ?: startChar,
+                descriptorLine = m.descriptorSpan?.line ?: startLine, descriptorStart = m.descriptorSpan?.start ?: startChar, descriptorEnd = m.descriptorSpan?.end ?: startChar,
+                labelRefs = LabelRefList.of(currentLabelRefs),
                 duplicateLabels = currentDuplicateLabels.toList()
             ))
         }
+        resetMethod()
+    }
+
+    /** Forgets the method being built and its accumulators. */
+    private fun resetMethod() {
         pendingMethod = null
         currentInstructions.clear()
         currentLabels.clear()
@@ -272,7 +275,7 @@ class ASTBuilder(
             ),
             methods = methods.toList(),
             fields = fields.toList(),
-            typeRefs = typeRefs.toList(),
+            typeRefs = TypeRefList.of(typeRefs),
             blocks = BlockList.of(blocks)
         )
     }

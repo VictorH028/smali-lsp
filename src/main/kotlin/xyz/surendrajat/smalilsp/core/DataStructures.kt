@@ -59,10 +59,13 @@ data class ClassDefinition(
     val modifiers: Set<String>,  // public, final, etc.
     val superClass: String?,  // null for Object
     val interfaces: List<String>,
-    /** The type token of the `.super` directive. */
-    val superClassRange: Range? = null,
-    /** Interface name to the type token of its `.implements` directive. */
-    val interfaceRanges: Map<String, Range> = emptyMap(),
+    /** The type token of the `.super` directive; `superLine` is -1 when there is none. */
+    val superLine: Int = -1,
+    val superStart: Int = -1,
+    val superEndLine: Int = -1,
+    val superEnd: Int = -1,
+    /** The type tokens of the `.implements` directives, aligned with [interfaces]. */
+    val interfaceTokens: List<Range> = emptyList(),
     /** The class name token of the `.class` directive. */
     val nameLine: Int = startLine,
     val nameStart: Int = startChar,
@@ -77,10 +80,42 @@ data class ClassDefinition(
         superClassRange: Range? = null,
         interfaceRanges: Map<String, Range> = emptyMap(),
         nameSpan: Span = Span(range.start.line, range.start.character, range.start.character)
-    ) : this(name, range.start.line, range.start.character, range.end.line, range.end.character, modifiers, superClass, interfaces, superClassRange, interfaceRanges, nameSpan.line, nameSpan.start, nameSpan.end)
+    ) : this(
+        name, range.start.line, range.start.character, range.end.line, range.end.character, modifiers, superClass, interfaces,
+        superClassRange?.start?.line ?: -1, superClassRange?.start?.character ?: -1, superClassRange?.end?.line ?: -1, superClassRange?.end?.character ?: -1,
+        RangeList.of(interfaces.map { interfaceRanges[it] ?: NO_RANGE }),
+        nameSpan.line, nameSpan.start, nameSpan.end
+    )
 
     val range: Range get() = range(startLine, startChar, endLine, endChar)
     val nameSpan: Span get() = Span(nameLine, nameStart, nameEnd)
+    val superClassRange: Range? get() = if (superLine < 0) null else range(superLine, superStart, superEndLine, superEnd)
+
+    /** Interface name to the type token of its `.implements` directive. */
+    val interfaceRanges: Map<String, Range>
+        get() {
+            if (interfaceTokens.isEmpty()) return emptyMap()
+            val out = LinkedHashMap<String, Range>(interfaces.size * 2)
+            for ((i, token) in interfaceTokens.withIndex()) if (token.start.line >= 0 && i < interfaces.size) out[interfaces[i]] = token
+            return out
+        }
+
+    private companion object {
+        val NO_RANGE = range(-1, -1, -1, -1)
+    }
+}
+
+/** Ranges as one int array behind the `List` interface, four ints each. */
+class RangeList private constructor(private val positions: IntArray) : AbstractList<Range>(), RandomAccess {
+    override val size: Int get() = positions.size / 4
+    override fun get(index: Int): Range = range(positions[4 * index], positions[4 * index + 1], positions[4 * index + 2], positions[4 * index + 3])
+
+    companion object {
+        fun of(ranges: List<Range>): List<Range> = if (ranges.isEmpty()) emptyList() else RangeList(IntArray(ranges.size * 4) { i ->
+            val r = ranges[i / 4]
+            when (i % 4) { 0 -> r.start.line; 1 -> r.start.character; 2 -> r.end.line; else -> r.end.character }
+        })
+    }
 }
 
 data class MethodDefinition(
@@ -195,6 +230,17 @@ data class TypeRef(val className: String, val line: Int, val start: Int, val end
     val span: Span get() = Span(line, start, end)
 }
 
+/** A file's type references as a name array and an int array behind the `List` interface; a large app has 670 K of them. */
+class TypeRefList private constructor(private val names: Array<String>, private val positions: IntArray) : AbstractList<TypeRef>(), RandomAccess {
+    override val size: Int get() = names.size
+    override fun get(index: Int): TypeRef = TypeRef(names[index], positions[3 * index], positions[3 * index + 1], positions[3 * index + 2])
+
+    companion object {
+        fun of(refs: List<TypeRef>): List<TypeRef> =
+            if (refs.isEmpty()) emptyList() else TypeRefList(Array(refs.size) { refs[it].className }, IntArray(refs.size * 3) { i -> refs[i / 3].let { r -> when (i % 3) { 0 -> r.line; 1 -> r.start; else -> r.end } } })
+    }
+}
+
 /** A `:label` reference; [span] covers the colon and the name. */
 data class LabelRef(val name: String, val line: Int, val start: Int, val end: Int) {
     constructor(name: String, span: Span) : this(name, span.line, span.start, span.end)
@@ -203,6 +249,17 @@ data class LabelRef(val name: String, val line: Int, val start: Int, val end: In
 
     /** The name without its colon. */
     val nameSpan: Span get() = Span(line, start + 1, end)
+}
+
+/** A method's label references as a name array and an int array behind the `List` interface; a large app has 740 K of them. */
+class LabelRefList private constructor(private val names: Array<String>, private val positions: IntArray) : AbstractList<LabelRef>(), RandomAccess {
+    override val size: Int get() = names.size
+    override fun get(index: Int): LabelRef = LabelRef(names[index], positions[3 * index], positions[3 * index + 1], positions[3 * index + 2])
+
+    companion object {
+        fun of(refs: List<LabelRef>): List<LabelRef> =
+            if (refs.isEmpty()) emptyList() else LabelRefList(Array(refs.size) { refs[it].name }, IntArray(refs.size * 3) { i -> refs[i / 3].let { r -> when (i % 3) { 0 -> r.line; 1 -> r.start; else -> r.end } } })
+    }
 }
 
 /**

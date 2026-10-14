@@ -5,13 +5,13 @@ import java.util.Arrays
 import java.util.Collections
 
 /**
- * A method's labels by name, behind the `Map` interface: two sorted arrays and a binary
- * search instead of a `LinkedHashMap` with a table and an entry per label. A large app has
+ * A method's labels by name, behind the `Map` interface: a sorted array of names and an int
+ * array of positions, with a [LabelDefinition] built when one is asked for. A large app has
  * over half a million labels, which made the maps the second-largest item of the AST.
  */
 class LabelMap private constructor(
     private val names: Array<String>,
-    private val labels: Array<LabelDefinition>
+    private val positions: IntArray
 ) : AbstractMap<String, LabelDefinition>() {
 
     override val size: Int get() = names.size
@@ -20,16 +20,22 @@ class LabelMap private constructor(
 
     override fun get(key: String): LabelDefinition? {
         val i = Arrays.binarySearch(names, key)
-        return if (i >= 0) labels[i] else null
+        return if (i >= 0) at(i) else null
     }
 
-    override val values: Collection<LabelDefinition> get() = labels.asList()
+    private fun at(i: Int) = LabelDefinition(names[i], positions[3 * i], positions[3 * i + 1], positions[3 * i + 2])
+
+    override val values: Collection<LabelDefinition>
+        get() = object : AbstractList<LabelDefinition>(), RandomAccess {
+            override val size: Int get() = names.size
+            override fun get(index: Int): LabelDefinition = at(index)
+        }
 
     override val entries: Set<Map.Entry<String, LabelDefinition>>
         get() = object : AbstractSet<Map.Entry<String, LabelDefinition>>() {
             override val size: Int get() = names.size
             override fun iterator(): Iterator<Map.Entry<String, LabelDefinition>> =
-                names.indices.asSequence().map { SimpleImmutableEntry(names[it], labels[it]) }.iterator()
+                names.indices.asSequence().map { SimpleImmutableEntry(names[it], at(it)) }.iterator()
         }
 
     companion object {
@@ -41,7 +47,12 @@ class LabelMap private constructor(
             }
             val names = labels.keys.toTypedArray()
             Arrays.sort(names)
-            return LabelMap(names, Array(names.size) { labels.getValue(names[it]) })
+            val positions = IntArray(names.size * 3)
+            for ((i, name) in names.withIndex()) {
+                val label = labels.getValue(name)
+                positions[3 * i] = label.line; positions[3 * i + 1] = label.start; positions[3 * i + 2] = label.end
+            }
+            return LabelMap(names, positions)
         }
     }
 }
