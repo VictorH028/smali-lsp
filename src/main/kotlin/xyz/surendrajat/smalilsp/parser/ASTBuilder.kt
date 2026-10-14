@@ -155,7 +155,7 @@ class ASTBuilder(
 
         val fieldName = strings.intern(parts[0])
         val fieldType = strings.intern(parts[1])  // Many duplicates: I, Z, V, Ljava/lang/String;
-        val fieldModifiers = ctx.fieldModifier().map { strings.intern(it.src()) }.toSet()
+        val fieldModifiers = strings.internModifiers(ctx.fieldModifier().map { strings.intern(it.src()) })
         val range = ctx.toRange()
 
         val nameStart = nameAndType.start.toSpan()
@@ -197,7 +197,7 @@ class ASTBuilder(
         val methodName = strings.intern(sigText.substring(0, openParen))
         val params = sigText.substring(openParen + 1, closeParen)
         val returnType = strings.intern(sigText.substring(closeParen + 1))  // Many duplicates: V, I, Z
-        val modifiers = ctx.methodModifier().map { strings.intern(it.src()) }.toSet()
+        val modifiers = strings.internModifiers(ctx.methodModifier().map { strings.intern(it.src()) })
 
         val lparen = signature.LPAREN()?.symbol
         val first = signature.start
@@ -227,7 +227,7 @@ class ASTBuilder(
                 parameters = m.parameters,
                 returnType = m.returnType,
                 instructions = currentInstructions.toList(),
-                labels = currentLabels.toMap(),
+                labels = LabelMap.of(currentLabels),
                 nameSpan = m.nameSpan ?: Span(range.start.line, range.start.character, range.start.character),
                 descriptorSpan = m.descriptorSpan ?: Span(range.start.line, range.start.character, range.start.character),
                 labelRefs = currentLabelRefs.toList(),
@@ -248,9 +248,7 @@ class ASTBuilder(
      */
     private fun parseParameters(paramStr: String): List<Parameter> {
         if (paramStr.isEmpty()) return emptyList()
-        return Types.parseTypeStrings(paramStr).map { type ->
-            Parameter(strings.intern(type), null)
-        }
+        return ParameterList.of(Types.parseTypeStrings(paramStr).map { strings.intern(it) })
     }
 
     /**
@@ -265,7 +263,7 @@ class ASTBuilder(
             classDefinition = ClassDefinition(
                 name = name,
                 range = range,
-                modifiers = classModifiers.toSet(),
+                modifiers = strings.internModifiers(classModifiers.toList()),
                 superClass = superClass,
                 interfaces = interfaces.toList(),
                 superClassRange = superClassRange,
@@ -275,7 +273,7 @@ class ASTBuilder(
             methods = methods.toList(),
             fields = fields.toList(),
             typeRefs = typeRefs.toList(),
-            blocks = blocks.toList()
+            blocks = BlockList.of(blocks)
         )
     }
 
@@ -652,7 +650,7 @@ class ASTBuilder(
         if (pendingMethod == null) return
 
         val rawLiteral = ctx.stringLiteral()?.src() ?: return
-        val value = rawLiteral.removeSurrounding("\"")
+        val value = strings.internLiteral(rawLiteral.removeSurrounding("\""))
 
         currentInstructions.add(ConstStringInstruction(value, ctx.startLine, ctx.startChar, ctx.endLine, ctx.endChar))
     }
@@ -662,7 +660,7 @@ class ASTBuilder(
         if (pendingMethod == null) return
 
         val rawLiteral = ctx.stringLiteral()?.src() ?: return
-        val value = rawLiteral.removeSurrounding("\"")
+        val value = strings.internLiteral(rawLiteral.removeSurrounding("\""))
 
         currentInstructions.add(ConstStringInstruction(value, ctx.startLine, ctx.startChar, ctx.endLine, ctx.endChar))
     }

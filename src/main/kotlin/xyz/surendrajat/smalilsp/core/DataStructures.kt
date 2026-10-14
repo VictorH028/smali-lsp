@@ -2,6 +2,7 @@ package xyz.surendrajat.smalilsp.core
 
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
+import java.util.RandomAccess
 
 /** One token's place in a file: UTF-16 columns [start, end) on a single line. */
 data class Span(val line: Int, val start: Int, val end: Int) {
@@ -32,9 +33,29 @@ data class SmaliFile(
 /** The lines of a directive block, from its opening directive to its `.end`. */
 data class Block(val startLine: Int, val endLine: Int)
 
+/** A file's blocks as one int array behind the `List` interface: a large app has half a million. */
+class BlockList private constructor(private val lines: IntArray) : AbstractList<Block>(), RandomAccess {
+    override val size: Int get() = lines.size / 2
+    override fun get(index: Int): Block = Block(lines[2 * index], lines[2 * index + 1])
+
+    companion object {
+        fun of(blocks: List<Block>): List<Block> =
+            if (blocks.isEmpty()) emptyList() else BlockList(IntArray(blocks.size * 2) { i -> if (i % 2 == 0) blocks[i / 2].startLine else blocks[i / 2].endLine })
+    }
+}
+
+/**
+ * Declarations keep their positions as ints and build the LSP [Range] and the token [Span]s on
+ * demand, as instructions do: a `Range` is three objects and a `Span` one, and a large app has
+ * a million declarations and token spans. Secondary constructors take the objects, for callers
+ * that build definitions by hand.
+ */
 data class ClassDefinition(
     val name: String,  // e.g., "Lcom/example/MyClass;"
-    val range: Range,
+    val startLine: Int,
+    val startChar: Int,
+    val endLine: Int,
+    val endChar: Int,
     val modifiers: Set<String>,  // public, final, etc.
     val superClass: String?,  // null for Object
     val interfaces: List<String>,
@@ -43,27 +64,77 @@ data class ClassDefinition(
     /** Interface name to the type token of its `.implements` directive. */
     val interfaceRanges: Map<String, Range> = emptyMap(),
     /** The class name token of the `.class` directive. */
-    val nameSpan: Span = Span(range.start.line, range.start.character, range.start.character)
-)
+    val nameLine: Int = startLine,
+    val nameStart: Int = startChar,
+    val nameEnd: Int = startChar
+) {
+    constructor(
+        name: String,
+        range: Range,
+        modifiers: Set<String>,
+        superClass: String?,
+        interfaces: List<String>,
+        superClassRange: Range? = null,
+        interfaceRanges: Map<String, Range> = emptyMap(),
+        nameSpan: Span = Span(range.start.line, range.start.character, range.start.character)
+    ) : this(name, range.start.line, range.start.character, range.end.line, range.end.character, modifiers, superClass, interfaces, superClassRange, interfaceRanges, nameSpan.line, nameSpan.start, nameSpan.end)
+
+    val range: Range get() = range(startLine, startChar, endLine, endChar)
+    val nameSpan: Span get() = Span(nameLine, nameStart, nameEnd)
+}
 
 data class MethodDefinition(
     val name: String,  // e.g., "myMethod" or "<init>"
     val descriptor: String,  // e.g., "(Ljava/lang/String;)V"
-    val range: Range,
+    val startLine: Int,
+    val startChar: Int,
+    val endLine: Int,
+    val endChar: Int,
     val modifiers: Set<String>,
     val parameters: List<Parameter>,
     val returnType: String,
     val instructions: List<Instruction> = emptyList(),  // Instruction-level AST
     val labels: Map<String, LabelDefinition> = emptyMap(),  // Label definitions (name -> position)
     /** The method name in the `.method` line. */
-    val nameSpan: Span = Span(range.start.line, range.start.character, range.start.character),
+    val nameLine: Int = startLine,
+    val nameStart: Int = startChar,
+    val nameEnd: Int = startChar,
     /** The `(params)return` part of the `.method` line. */
-    val descriptorSpan: Span = Span(range.start.line, range.start.character, range.start.character),
+    val descriptorLine: Int = startLine,
+    val descriptorStart: Int = startChar,
+    val descriptorEnd: Int = startChar,
     /** Every label reference in the body: jumps, `.catch` blocks, switch tables, `fill-array-data`. */
     val labelRefs: List<LabelRef> = emptyList(),
     /** Definitions of a label name that was already defined in the method; [labels] keeps the first. */
     val duplicateLabels: List<LabelDefinition> = emptyList()
 ) {
+    constructor(
+        name: String,
+        descriptor: String,
+        range: Range,
+        modifiers: Set<String>,
+        parameters: List<Parameter>,
+        returnType: String,
+        instructions: List<Instruction> = emptyList(),
+        labels: Map<String, LabelDefinition> = emptyMap(),
+        nameSpan: Span = Span(range.start.line, range.start.character, range.start.character),
+        descriptorSpan: Span = Span(range.start.line, range.start.character, range.start.character),
+        labelRefs: List<LabelRef> = emptyList(),
+        duplicateLabels: List<LabelDefinition> = emptyList()
+    ) : this(
+        name, descriptor, range.start.line, range.start.character, range.end.line, range.end.character, modifiers, parameters, returnType, instructions, labels,
+        nameSpan.line, nameSpan.start, nameSpan.end, descriptorSpan.line, descriptorSpan.start, descriptorSpan.end, labelRefs, duplicateLabels
+    )
+
+    val range: Range get() = range(startLine, startChar, endLine, endChar)
+    val nameSpan: Span get() = Span(nameLine, nameStart, nameEnd)
+    val descriptorSpan: Span get() = Span(descriptorLine, descriptorStart, descriptorEnd)
+
+    /** The caret is inside the method's range or right after its last character. */
+    fun touches(position: Position): Boolean =
+        (position.line > startLine || (position.line == startLine && position.character >= startChar)) &&
+            (position.line < endLine || (position.line == endLine && position.character <= endChar))
+
     /** `<init>` or `<clinit>`: bound to its own class, never inherited or overridden. */
     val isConstructor: Boolean get() = name == "<init>" || name == "<clinit>"
 
@@ -76,24 +147,62 @@ data class Parameter(
     val name: String?  // Can be null in smali
 )
 
+/** A method's parameters as an array of type strings behind the `List` interface; baksmali leaves the names to `.param` directives, so they are null. */
+class ParameterList private constructor(private val types: Array<String>) : AbstractList<Parameter>(), RandomAccess {
+    override val size: Int get() = types.size
+    override fun get(index: Int): Parameter = Parameter(types[index], null)
+
+    companion object {
+        fun of(types: List<String>): List<Parameter> = if (types.isEmpty()) emptyList() else ParameterList(types.toTypedArray())
+    }
+}
+
 data class FieldDefinition(
     val name: String,
     val type: String,
-    val range: Range,
+    val startLine: Int,
+    val startChar: Int,
+    val endLine: Int,
+    val endChar: Int,
     val modifiers: Set<String>,
     /** The field name in the `.field` line. */
-    val nameSpan: Span = Span(range.start.line, range.start.character, range.start.character),
+    val nameLine: Int = startLine,
+    val nameStart: Int = startChar,
+    val nameEnd: Int = startChar,
     /** The type after the colon in the `.field` line. */
-    val typeSpan: Span = Span(range.start.line, range.start.character, range.start.character)
-)
+    val typeLine: Int = startLine,
+    val typeStart: Int = startChar,
+    val typeEnd: Int = startChar
+) {
+    constructor(
+        name: String,
+        type: String,
+        range: Range,
+        modifiers: Set<String>,
+        nameSpan: Span = Span(range.start.line, range.start.character, range.start.character),
+        typeSpan: Span = Span(range.start.line, range.start.character, range.start.character)
+    ) : this(name, type, range.start.line, range.start.character, range.end.line, range.end.character, modifiers, nameSpan.line, nameSpan.start, nameSpan.end, typeSpan.line, typeSpan.start, typeSpan.end)
+
+    val range: Range get() = range(startLine, startChar, endLine, endChar)
+    val nameSpan: Span get() = Span(nameLine, nameStart, nameEnd)
+    val typeSpan: Span get() = Span(typeLine, typeStart, typeEnd)
+}
 
 /** A class name token inside a directive, e.g. the exception type of a `.catch`. */
-data class TypeRef(val className: String, val span: Span)
+data class TypeRef(val className: String, val line: Int, val start: Int, val end: Int) {
+    constructor(className: String, span: Span) : this(className, span.line, span.start, span.end)
+
+    val span: Span get() = Span(line, start, end)
+}
 
 /** A `:label` reference; [span] covers the colon and the name. */
-data class LabelRef(val name: String, val span: Span) {
+data class LabelRef(val name: String, val line: Int, val start: Int, val end: Int) {
+    constructor(name: String, span: Span) : this(name, span.line, span.start, span.end)
+
+    val span: Span get() = Span(line, start, end)
+
     /** The name without its colon. */
-    val nameSpan: Span get() = Span(span.line, span.start + 1, span.end)
+    val nameSpan: Span get() = Span(line, start + 1, end)
 }
 
 /**
@@ -240,8 +349,8 @@ fun SmaliFile.methodAt(line: Int): MethodDefinition? {
         val mid = (low + high) ushr 1
         val method = methods[mid]
         when {
-            line < method.range.start.line -> high = mid - 1
-            line > method.range.end.line -> low = mid + 1
+            line < method.startLine -> high = mid - 1
+            line > method.endLine -> low = mid + 1
             else -> return method
         }
     }

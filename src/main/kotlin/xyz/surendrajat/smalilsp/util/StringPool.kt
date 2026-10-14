@@ -1,5 +1,6 @@
 package xyz.surendrajat.smalilsp.util
 
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -11,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class StringPool {
     private val pool = ConcurrentHashMap<String, String>()
+    private val modifierSets = ConcurrentHashMap<List<String>, Set<String>>()
 
     init {
         // Strings that appear in nearly every file skip the computeIfAbsent path
@@ -25,10 +27,27 @@ class StringPool {
         return pool.computeIfAbsent(s) { it }
     }
 
+    /**
+     * The canonical set for a member's modifiers, in source order. A workspace has a few dozen
+     * distinct combinations, so every member shares one immutable set instead of carrying a
+     * `LinkedHashSet` with its table and entries. Bounded like the string pool.
+     */
+    fun internModifiers(modifiers: List<String>): Set<String> {
+        if (modifiers.isEmpty()) return emptySet()
+        modifierSets[modifiers]?.let { return it }
+        if (modifierSets.size >= MAX_MODIFIER_SETS) return LinkedHashSet(modifiers)
+        return modifierSets.computeIfAbsent(ArrayList(modifiers)) { Collections.unmodifiableSet(LinkedHashSet(it)) }
+    }
+
+    /** A string literal's value: interned when short, since resource names and keys repeat across files; long ones pass through. */
+    fun internLiteral(value: String): String = if (value.length <= MAX_LITERAL_LENGTH) intern(value) else value
+
     val size: Int get() = pool.size
 
     companion object {
         private const val MAX_SIZE = 500_000
+        private const val MAX_MODIFIER_SETS = 4_096
+        private const val MAX_LITERAL_LENGTH = 64
 
         private val COMMON = listOf(
             // Modifiers
