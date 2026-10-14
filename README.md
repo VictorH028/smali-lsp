@@ -16,7 +16,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors, undefined or duplicate labels, unresolved class references, and what the assembler would reject after a hand edit: a register the method does not declare or that the instruction form cannot address (`move` v0..v15, `invoke-*` five registers below v16 unless `/range`), a literal that does not fit (`const/4` holds -8..7), a `move-result` not right after a call
+- **Diagnostics** — syntax errors, undefined or duplicate labels, a class name in one of the app's own packages that nothing defines (classes the app references but does not ship, such as `org.xmlpull` or an optional Conscrypt, are not mistakes), and what the assembler would reject after a hand edit: a register the method does not declare or that the instruction form cannot address (`move` v0..v15, `invoke-*` five registers below v16 unless `/range`), a literal that does not fit (`const/4` holds -8..7), a `move-result` not right after a call
 - **Implementations, document highlight, folding** — implementors and overrides of a method, occurrences of a symbol or a register in its file (reads and writes apart), foldable methods and directive blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** (224 opcode tokens, including `invoke-custom`, `invoke-polymorphic` and method handles); navigation covers invoke-\*, field access, type operands, labels and strings

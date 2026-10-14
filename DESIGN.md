@@ -311,7 +311,12 @@ whose declarations are unreachable.
   checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per
   operand, five 4-bit registers for `35c` calls, literal ranges for `11n`/`21s`/`21h`/`22b`/`22s`,
   `move-result` placement); unresolved classes in `.super`, `.implements`, field types and
-  instruction targets wait for indexing to finish and skip platform SDK classes.
+  instruction targets wait for indexing to finish and are reported only when the class's
+  package is one the workspace defines classes in (the file's own package included). A
+  decompiled app also references classes it does not ship, such as `org.xmlpull` from the
+  platform or an optional library like Conscrypt behind a runtime check, and those are not
+  errors; a hand-edited name inside the app's own packages is. The three fixtures went from
+  652 such warnings to none.
 - **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
   decodes one instruction line (opcode, register tokens with columns, range form, literal) and
   `RegisterFrame` maps `pN` to its frame slot from `.registers`/`.locals` and the parameter
@@ -331,7 +336,10 @@ open document's buffer, or the file on disk when the document is not open (MCP b
 `smali_index` scans a directory into a fresh `WorkspaceIndex` and swaps in one immutable
 `Session(index, providers)`; the old session is dropped before the scan so two indexes of a
 large app never coexist. A registration helper declares each tool's arguments once, answers a
-missing index or argument uniformly, and turns any failure into a tool error.
+missing index or argument uniformly, and turns any failure into a tool error. A call to a
+tool that does not exist is the one protocol error: the session's `tools/call` handler answers
+it with JSON-RPC "invalid params" (-32602), as the specification asks, where the SDK alone
+would return a tool result marked as an error.
 
 | Tool | Answers |
 |------|---------|
