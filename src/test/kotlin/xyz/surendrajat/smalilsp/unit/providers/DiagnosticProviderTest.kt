@@ -45,9 +45,34 @@ class DiagnosticProviderTest {
     ) = Diagnostic(rangeOf(source, marker, needle), message, severity, "smali-lsp", "undefined-class")
 
     @Test
+    fun `a class outside every workspace package is not reported`() {
+        // The app references classes it does not ship: platform ones outside the SDK list and optional libraries behind runtime checks
+        val source = """
+            .class public Lcom/example/Test;
+            .super Ljava/lang/Object;
+            .implements Lorg/xmlpull/v1/XmlPullParser;
+
+            .field private provider:Lorg/conscrypt/Conscrypt;
+
+            .method public foo()V
+                invoke-static {}, Lorg/conscrypt/Conscrypt;->isAvailable()Z
+                new-instance v0, Lcom/google/firebase/analytics/connector/AnalyticsConnector;
+                check-cast v0, [Llibcore/io/Memory;
+                invoke-static {}, Lcom/example/Missing;->go()V
+                return-void
+            .end method
+        """.trimIndent()
+        assertEquals(
+            listOf("Class 'Lcom/example/Missing;' not found in workspace or SDK"),
+            diagnosticsOf(source).map { it.text },
+            "only the name in the workspace's own package can be a mistake"
+        )
+    }
+
+    @Test
     fun `a valid file has no diagnostics`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .method public foo()V
@@ -60,7 +85,7 @@ class DiagnosticProviderTest {
     @Test
     fun `an undefined superclass is a warning on its token`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Lcom/example/NonExistent;
         """.trimIndent()
         assertEquals(
@@ -72,7 +97,7 @@ class DiagnosticProviderTest {
     @Test
     fun `an undefined interface is a warning on its token`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
             .implements Lcom/example/NonExistentInterface;
         """.trimIndent()
@@ -85,7 +110,7 @@ class DiagnosticProviderTest {
     @Test
     fun `an undefined invoke owner is a warning on its token and an SDK owner is not flagged`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .method public foo()V
@@ -103,7 +128,7 @@ class DiagnosticProviderTest {
     @Test
     fun `an undefined field type is information on the type token`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .field public myField:Lcom/example/CustomType;
@@ -117,7 +142,7 @@ class DiagnosticProviderTest {
     @Test
     fun `an array field of an undefined class is reported on the whole type and named without the brackets`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .field public customArray:[Lcom/example/CustomType;
@@ -131,7 +156,7 @@ class DiagnosticProviderTest {
     @Test
     fun `every undefined reference is reported once at its own severity`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Lcom/example/Missing1;
             .implements Lcom/example/Missing2;
 
@@ -159,7 +184,7 @@ class DiagnosticProviderTest {
     @Test
     fun `primitive and SDK array types are not flagged in fields or check-casts`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .field public intField:I
@@ -184,7 +209,7 @@ class DiagnosticProviderTest {
     fun `an indexed workspace class is not flagged and neither is an array of it`() {
         scan("file:///com/example/Foo.smali", ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;")
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .method public cast(Ljava/lang/Object;)V
@@ -199,7 +224,7 @@ class DiagnosticProviderTest {
     @Test
     fun `check-cast to an undefined class or an array of one is a warning on the type token`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .method public cast(Ljava/lang/Object;)V
@@ -221,16 +246,16 @@ class DiagnosticProviderTest {
     fun `every undefined-class diagnostic covers exactly the class token`() {
         val source = """
             .class public Lcom/app/Foo;
-            .super Lcom/missing/Base;
-            .implements Lcom/missing/Iface;
+            .super Lcom/app/Base;
+            .implements Lcom/app/Iface;
 
-            .field private data:Lcom/missing/Data;
+            .field private data:Lcom/app/Data;
 
             .method public run()V
                 .registers 2
-                invoke-static {}, Lcom/missing/Util;->go()V
-                iget v0, p0, Lcom/missing/Holder;->x:I
-                new-instance v0, Lcom/missing/Thing;
+                invoke-static {}, Lcom/app/Util;->go()V
+                iget v0, p0, Lcom/app/Holder;->x:I
+                new-instance v0, Lcom/app/Thing;
                 return-void
             .end method
         """.trimIndent()
@@ -240,12 +265,12 @@ class DiagnosticProviderTest {
         }
         assertEquals(
             mapOf(
-                "Lcom/missing/Base;" to rangeOf(source, ".super", "Lcom/missing/Base;"),
-                "Lcom/missing/Iface;" to rangeOf(source, ".implements", "Lcom/missing/Iface;"),
-                "Lcom/missing/Data;" to rangeOf(source, "data:", "Lcom/missing/Data;"),
-                "Lcom/missing/Util;" to rangeOf(source, "invoke-static", "Lcom/missing/Util;"),
-                "Lcom/missing/Holder;" to rangeOf(source, "iget", "Lcom/missing/Holder;"),
-                "Lcom/missing/Thing;" to rangeOf(source, "new-instance", "Lcom/missing/Thing;"),
+                "Lcom/app/Base;" to rangeOf(source, ".super", "Lcom/app/Base;"),
+                "Lcom/app/Iface;" to rangeOf(source, ".implements", "Lcom/app/Iface;"),
+                "Lcom/app/Data;" to rangeOf(source, "data:", "Lcom/app/Data;"),
+                "Lcom/app/Util;" to rangeOf(source, "invoke-static", "Lcom/app/Util;"),
+                "Lcom/app/Holder;" to rangeOf(source, "iget", "Lcom/app/Holder;"),
+                "Lcom/app/Thing;" to rangeOf(source, "new-instance", "Lcom/app/Thing;"),
             ),
             byClass
         )
@@ -272,7 +297,7 @@ class DiagnosticProviderTest {
     @Test
     fun `a method without its end directive is a one-character error at end of file`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             .method public test()V
@@ -311,7 +336,7 @@ class DiagnosticProviderTest {
     @Test
     fun `garbage after the class directive is a syntax error`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             this is not valid smali code at all
             it should not crash the diagnostic provider
         """.trimIndent()
@@ -321,7 +346,7 @@ class DiagnosticProviderTest {
     @Test
     fun `syntax-only diagnostics leave out the undefined-class warnings`() {
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Lcom/example/NonExistent;
 
             .method public foo()V
@@ -354,7 +379,7 @@ class DiagnosticProviderTest {
             """.trimIndent()
         }
         val source = """
-            .class public LTest;
+            .class public Lcom/example/Test;
             .super Ljava/lang/Object;
 
             $methods

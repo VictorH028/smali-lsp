@@ -449,7 +449,7 @@ class McpModeTest {
                 .super Ljava/lang/Object;
 
                 .method public test()V
-                    invoke-virtual {p0}, Lcom/nonexistent/FakeClass;->fakeMethod()V
+                    invoke-virtual {p0}, Lcom/example/FakeClass;->fakeMethod()V
                     return-void
                 .end method
             """.trimIndent()

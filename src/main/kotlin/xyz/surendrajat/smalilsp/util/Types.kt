@@ -39,6 +39,9 @@ object Types {
         return SDK_PREFIXES.any { baseType.startsWith(it) }
     }
 
+    /** The package part of a class name, slash-terminated: `Lcom/app/Foo;` → `Lcom/app/`, `LFoo;` → `L`. */
+    fun packageOf(className: String): String = className.trimStart('[').substring(0, className.trimStart('[').lastIndexOf('/') + 1).ifEmpty { "L" }
+
     /** `[Lcom/example/Outer$Inner;` → `Inner`. */
     fun simpleName(className: String): String {
         val cleaned = className.trimStart('[').removePrefix("L").removeSuffix(";")

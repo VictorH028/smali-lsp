@@ -90,10 +90,12 @@ class DiagnosticProvider(
      */
     private fun computeSemanticDiagnostics(uri: String, file: SmaliFile): List<Diagnostic> {
         val diagnostics = mutableListOf<Diagnostic>()
+        val ownPackage = Types.packageOf(file.classDefinition.name)
+        fun isKnownClass(className: String) = isKnownClass(className, ownPackage)
         
         // Check superclass exists
         file.classDefinition.superClass?.let { superClass ->
-            if (!index.hasClass(superClass) && !Types.isSdkClass(superClass)) {
+            if (!isKnownClass(superClass)) {
                 diagnostics.add(
                     createDiagnostic(
                         range = file.classDefinition.superClassRange ?: file.classDefinition.nameSpan.toRange(),
@@ -107,7 +109,7 @@ class DiagnosticProvider(
         
         // Check interfaces exist
         file.classDefinition.interfaces.forEach { interfaceName ->
-            if (!index.hasClass(interfaceName) && !Types.isSdkClass(interfaceName)) {
+            if (!isKnownClass(interfaceName)) {
                 diagnostics.add(
                     createDiagnostic(
                         range = file.classDefinition.interfaceRanges[interfaceName] ?: file.classDefinition.nameSpan.toRange(),
@@ -173,7 +175,7 @@ class DiagnosticProvider(
         // Check field references
         file.fields.forEach { field ->
             val typeClass = Types.className(field.type)
-            if (typeClass != null && !index.hasClass(typeClass) && !Types.isSdkClass(typeClass)) {
+            if (typeClass != null && !isKnownClass(typeClass)) {
                 diagnostics.add(
                     createDiagnostic(
                         range = field.typeSpan.toRange(),
@@ -189,13 +191,20 @@ class DiagnosticProvider(
     }
         
     /**
-     * A class reference resolves if its base type (array brackets stripped) is defined
-     * in the workspace, or it is an SDK/primitive type. check-cast/instance-of/new-array
-     * operands like "[Lcom/app/Foo;" must be checked against the index key "Lcom/app/Foo;"
-     * (isSDKClass already strips brackets itself).
+     * A class reference is reported only when it looks like a mistake: the class is not in the
+     * workspace, not a platform class, and its package is one the workspace defines classes in.
+     * A decompiled app also references classes it does not ship, such as `org.xmlpull` from the
+     * platform or an optional library like Conscrypt behind a runtime check, and those are not
+     * errors; a hand-edited name inside the app's own packages is. The file's own package counts
+     * as the workspace's whether or not the file is indexed yet. Array brackets are stripped:
+     * a check-cast to `[Lcom/app/Foo;` is checked against the index key `Lcom/app/Foo;`.
      */
-    private fun isKnownClass(className: String): Boolean {
-        return Types.isSdkClass(className) || index.hasClass(className.trimStart('['))
+    private fun isKnownClass(className: String, ownPackage: String): Boolean {
+        if (Types.isSdkClass(className)) return true
+        val base = className.trimStart('[')
+        if (index.hasClass(base)) return true
+        val pkg = Types.packageOf(base)
+        return pkg != ownPackage && !index.hasPackage(pkg)
     }
 
     private fun createDiagnostic(

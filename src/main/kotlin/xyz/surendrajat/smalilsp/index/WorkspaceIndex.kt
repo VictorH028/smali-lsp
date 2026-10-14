@@ -39,6 +39,7 @@ class WorkspaceIndex {
     private val filesByUri = ConcurrentHashMap<String, SmaliFile>()
     private val uriByClass = ConcurrentHashMap<String, String>()
     private val simpleNameIndex = ConcurrentHashMap<String, MutableSet<String>>()
+    private val packageCounts = ConcurrentHashMap<String, Int>()
     private val methodCount = AtomicInteger(0)
     private val fieldCount = AtomicInteger(0)
 
@@ -82,6 +83,7 @@ class WorkspaceIndex {
         val className = file.classDefinition.name
         uriByClass[className] = uri
         simpleNameIndex.computeIfAbsent(simpleKey(className)) { ConcurrentHashMap.newKeySet() }.add(className)
+        packageCounts.merge(Types.packageOf(className), 1, Int::plus)
         file.classDefinition.superClass?.let { subclassIndex.computeIfAbsent(it) { ConcurrentHashMap.newKeySet() }.add(className) }
         for (iface in file.classDefinition.interfaces) {
             implementorsIndex.computeIfAbsent(iface) { ConcurrentHashMap.newKeySet() }.add(className)
@@ -125,6 +127,7 @@ class WorkspaceIndex {
         val className = file.classDefinition.name
         uriByClass.remove(className, uri)
         simpleNameIndex[simpleKey(className)]?.remove(className)
+        packageCounts.computeIfPresent(Types.packageOf(className)) { _, n -> if (n > 1) n - 1 else null }
         file.classDefinition.superClass?.let { subclassIndex[it]?.remove(className) }
         for (iface in file.classDefinition.interfaces) implementorsIndex[iface]?.remove(className)
         methodCount.addAndGet(-file.methods.size)
@@ -474,6 +477,9 @@ class WorkspaceIndex {
     }
 
     fun getDocumentContent(uri: String): String? = documentContents[canonicalUri(uri)]
+
+    /** Whether the workspace defines at least one class in [packagePrefix] (`Lcom/app/`, as [Types.packageOf] spells it). */
+    fun hasPackage(packagePrefix: String): Boolean = packageCounts.containsKey(packagePrefix)
 
     /** Whether an editor buffer is open for the file, under any spelling of its URI. */
     fun isOpen(uri: String): Boolean = documentContents.containsKey(canonicalUri(uri))

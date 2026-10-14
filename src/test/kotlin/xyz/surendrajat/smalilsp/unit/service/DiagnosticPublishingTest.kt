@@ -178,7 +178,7 @@ class DiagnosticPublishingTest {
         service.indexingComplete = true
         fun uri(i: Int) = "file:///Test$i.smali"
         val threads = (1..10).map { i ->
-            Thread { open(uri(i), source(name = "LTest$i;", superClass = if (i % 2 == 0) "Lcom/example/Missing$i;" else "Ljava/lang/Object;")) }
+            Thread { open(uri(i), source(name = "Lcom/example/Test$i;", superClass = if (i % 2 == 0) "Lcom/example/Missing$i;" else "Ljava/lang/Object;")) }
         }
         threads.forEach { it.start() }
         threads.forEach { it.join() }
@@ -186,7 +186,7 @@ class DiagnosticPublishingTest {
         for (i in 1..10) {
             val expected = if (i % 2 == 0) listOf(missingSuperclass("Lcom/example/Missing$i;")) else emptyList()
             assertEquals(expected, published(uri(i)).map { it.text }, "file $i")
-            assertTrue(index.hasClass("LTest$i;"), "file $i is indexed")
+            assertTrue(index.hasClass("Lcom/example/Test$i;"), "file $i is indexed")
         }
     }
 }
