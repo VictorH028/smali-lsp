@@ -102,7 +102,7 @@ thousands of files is one `String`; the pool is bounded (500 K entries) and per 
 | | ProtonMail (19,637 files) | 76 K-file app |
 |---|---|---|
 | Single-thread parse, all files | 2.7 s (0.14 ms/file) | ~11 s |
-| AST heap after GC | 129 MB (6.6 KB/file) | 432 MB |
+| AST heap after GC | 116 MB (5.9 KB/file) | 388 MB |
 
 Interning the instruction strings took the ProtonMail AST from 470 MB to 293 MB for 2 to 5 %
 parse time; storing instruction and label ranges as four ints instead of LSP4J `Range`
@@ -111,11 +111,15 @@ instructions, none of it visible through the API: declarations now keep their ra
 token spans as ints too and build `Range`/`Span` on demand (a `Range` is three objects); a
 member's modifiers are one immutable set per distinct combination (`StringPool.internModifiers`,
 a few dozen per workspace) instead of a `LinkedHashSet` with its table and entries; a
-method's labels sit in `LabelMap`, two sorted arrays behind the `Map` interface; parameters
-and directive blocks are `ParameterList`/`BlockList`, arrays behind the `List` interface; and
-string literals up to 64 characters are pooled. The instruction objects are now two thirds
-of what is left; their line ints stay exact because the lexer skips newlines, so a
-hand-edited instruction may span lines.
+method's labels sit in `LabelMap`, a sorted name array and an int array behind the `Map`
+interface, with the `LabelDefinition` built when one is asked for; label references, type
+references, parameters, directive blocks and the `.implements` tokens are `LabelRefList`,
+`TypeRefList`, `ParameterList`, `BlockList` and `RangeList`, arrays behind the `List`
+interface that build their element on access; and string literals up to 64 characters are
+pooled. Every value read through the getters is unchanged, which a per-file hash of the whole
+AST over the three fixtures (`Fingerprint3`) checks after each step. The instruction objects
+are now half of what is left; their line ints stay exact because the lexer skips newlines,
+so a hand-edited instruction may span lines.
 
 ### 2.4 Symbol resolution: `SmaliFile.symbolAt`
 
@@ -163,8 +167,8 @@ and removal scanned every usage set the file touched, so a keystroke in a file t
 
 | | ProtonMail | 76 K-file app |
 |---|---|---|
-| Index heap after GC | 371 MB → 90 MB → **61 MB** | 1,331 MB → 328 MB → **270 MB** |
-| AST + index | 841 MB → 281 MB → **190 MB** | 2,850 MB → 1,027 MB → **702 MB** |
+| Index heap after GC | 371 MB → 90 MB → **62 MB** | 1,331 MB → 328 MB → **271 MB** |
+| AST + index | 841 MB → 281 MB → **178 MB** | 2,850 MB → 1,027 MB → **659 MB** |
 | Index build, single thread | 0.95 s → 0.52 s | 3.4 s → 1.4 s |
 | didChange (re-parse + re-index one file), p95 | 58 ms → **0.6 ms** | 340 ms → **0.8 ms** |
 | didChange, worst of 200 files | 0.9 s → 18 ms | 7.5 s → 9 ms |
@@ -376,7 +380,7 @@ only one index is built at a time.
   re-reading lines and matching names with `indexOf`, mis-resolved duplicated names and needed
   file reads for closed documents.
 - **Full ASTs in memory.** Hover, call hierarchy, diagnostics and the MCP tools all need
-  instruction lists. At about 6.6 KB per file after interning and packing, the AST is two
+  instruction lists. At about 5.9 KB per file after interning and packing, the AST is two
   thirds of the heap; re-parsing on demand would save it at the cost of a disk read per
   request.
 - **Generations, not per-symbol removal.** O(1) retirement is what makes editing a file that
