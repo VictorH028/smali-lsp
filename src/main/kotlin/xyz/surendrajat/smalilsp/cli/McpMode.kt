@@ -3,9 +3,13 @@ package xyz.surendrajat.smalilsp.cli
 import com.google.gson.Gson
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
+import io.modelcontextprotocol.kotlin.sdk.server.ServerSession
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.McpException
+import io.modelcontextprotocol.kotlin.sdk.types.Method
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
@@ -56,6 +60,9 @@ import java.net.URI
 class McpMode {
 
     private val logger = LoggerFactory.getLogger(McpMode::class.java)
+
+    /** JSON-RPC "invalid params": the code the protocol gives an unknown tool. */
+    private val INVALID_PARAMS = -32602
     private val gson = Gson()
     private val versionInfo = loadVersionInfo()
 
@@ -90,12 +97,30 @@ class McpMode {
         val transport = StdioServerTransport(System.`in`.asSource().buffered(), System.out.asSink().buffered()) {}
         runBlocking {
             val mcpSession = server.createSession(transport)
+            answerUnknownToolsWithProtocolError(mcpSession)
             logger.info("MCP server started")
             val done = Job()
             mcpSession.onClose { done.complete() }
             done.join()
         }
     }
+
+    /**
+     * The SDK answers a call to a tool that does not exist with a tool result marked as an
+     * error, as if the tool had run and failed. The protocol says an unknown tool is a
+     * JSON-RPC error (invalid params, -32602), which is what clients check for, so the
+     * session's `tools/call` handler is replaced by one that raises it and otherwise runs the
+     * registered tool.
+     */
+    private fun answerUnknownToolsWithProtocolError(mcpSession: ServerSession) {
+        mcpSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
+            val run = handlers[request.name] ?: throw McpException(INVALID_PARAMS, "Unknown tool: ${request.name}")
+            run(request)
+        }
+    }
+
+    /** The registered tools by name, as [tool] wraps them; the session's `tools/call` dispatches through this map. */
+    private val handlers = LinkedHashMap<String, suspend (CallToolRequest) -> CallToolResult>()
 
     // ======================================================================
     // Tool registration
@@ -138,19 +163,24 @@ class McpMode {
             },
             required = args.filter { it.required }.map { it.name }
         )
-        addTool(name = name, description = description, inputSchema = schema) { request ->
+        val run: suspend (CallToolRequest) -> CallToolResult = { request ->
             JvmTuning.noteActivity()
             val current = session
-            if (needsSession && current == null) return@addTool toolError("No index loaded. Call smali_index first.")
-            try {
-                handler(Args(request.arguments), current)
-            } catch (e: ToolError) {
-                toolError(e.message ?: name)
-            } catch (e: Exception) {
-                logger.error("$name failed", e)
-                toolError("$name failed: ${e.message}")
+            if (needsSession && current == null) {
+                toolError("No index loaded. Call smali_index first.")
+            } else {
+                try {
+                    handler(Args(request.arguments), current)
+                } catch (e: ToolError) {
+                    toolError(e.message ?: name)
+                } catch (e: Exception) {
+                    logger.error("$name failed", e)
+                    toolError("$name failed: ${e.message}")
+                }
             }
         }
+        handlers[name] = run
+        addTool(name = name, description = description, inputSchema = schema) { request -> run(request) }
     }
 
     private val uriArg = Arg("uri", "File URI (e.g., 'file:///path/to/file.smali')")

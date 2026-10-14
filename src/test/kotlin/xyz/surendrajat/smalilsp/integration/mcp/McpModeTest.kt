@@ -388,6 +388,28 @@ class McpModeTest {
     }
 
     @Test
+    fun `test unknown tool is a JSON-RPC error`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            // The protocol reserves JSON-RPC "invalid params" for a tool that does not exist; the SDK alone would answer with a tool error
+            val response = callTool(stdin, stdout, 45, "smali_nope")
+
+            assertJsonRpcError(response)
+            assertEquals(-32602, response.getAsJsonObject("error").get("code").asInt)
+            assertTrue(response.getAsJsonObject("error").get("message").asString.contains("smali_nope"))
+
+            // and the session goes on answering
+            assertJsonRpcSuccess(callTool(stdin, stdout, 46, "smali_get_stats"), 46)
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
     fun `test tool error - missing arguments`() {
         val process = startMcpProcess()
 
