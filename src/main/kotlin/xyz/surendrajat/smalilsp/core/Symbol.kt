@@ -53,7 +53,7 @@ sealed class Symbol {
     /** A `:label` reference in a jump, `.catch`, switch table or `fill-array-data`. */
     data class LabelRef(val name: String, override val range: Range, val method: MethodDefinition) : Symbol()
 
-    /** On a modelled instruction but not on one of its symbols: the opcode, a register, a string. */
+    /** On a modelled instruction but not on one of its symbols: the opcode, a register, a string. Nothing to navigate to; hover and references on the string are read from the line. */
     data class OnInstruction(val instruction: Instruction, val method: MethodDefinition) : Symbol() {
         override val range: Range get() = instruction.range
     }

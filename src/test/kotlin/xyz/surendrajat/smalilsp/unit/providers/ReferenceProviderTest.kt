@@ -303,7 +303,7 @@ class ReferenceProviderTest {
         val all = (jumps + inWidget("    :cond_0")).ordered()
         assertEquals(all, fromWidget("    :cond_0", ":cond_0", 2), "from the definition")
         assertEquals(all, fromWidget("if-eqz", ":cond_0", 2), "from a jump")
-        assertEquals(all, fromWidget("goto :cond_0", "goto"), "from a jump's opcode")
+        assertTrue(fromWidget("goto :cond_0", "goto").isEmpty(), "a jump's opcode is not the label")
         assertEquals(jumps, fromWidget("if-eqz", ":cond_0", 2, includeDeclaration = false))
         val userLabel = listOf(inUser("if-nez v2, :cond_0"), inUser(".catch Lcom/Widget;"), inUser("    :cond_0")).ordered()
         assertEquals(userLabel, fromUser(".catch", ":cond_0", 2), "the same name in another method is another label")
@@ -320,9 +320,10 @@ class ReferenceProviderTest {
     }
 
     @Test
-    fun `a caret on the opcode of a call, an access or a type operand answers like its symbol`() {
-        assertEquals(fromWidget("String;->length", "length"), fromWidget("String;->length", "invoke-virtual"), "the call's method")
-        assertEquals(fromWidget("iget v0, p0", "count"), fromWidget("iget v0, p0", "iget"), "the access's field")
-        assertEquals(fromUser("new-instance v0", "Lcom/Widget;"), fromUser("new-instance v0", "new-instance"), "the operand's class")
+    fun `a caret on the opcode or a register of a call, an access or a type operand answers nothing`() {
+        assertTrue(fromWidget("String;->length", "length").isNotEmpty())
+        assertTrue(fromWidget("String;->length", "invoke-virtual").isEmpty(), "the opcode is not the call")
+        assertTrue(fromWidget("iget v0, p0", "iget").isEmpty() && fromWidget("iget v0, p0", "p0", 1).isEmpty(), "neither the opcode nor a register is the field")
+        assertTrue(fromUser("new-instance v0", "new-instance").isEmpty(), "the opcode is not the operand's class")
     }
 }

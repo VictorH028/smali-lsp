@@ -37,6 +37,7 @@ drives of every request at thousands of positions, and the MCP tools.
 
 ### Fixed
 
+- The opcode and registers of an instruction no longer answer go-to-definition, references, implementation or document highlight with the instruction's member (editors underlined the whole instruction as a link); only the owner, member and type tokens do
 - Label operations scoped to the containing method (rename, definition and hover for `:cond_0` resolved against methods in file order)
 - Rename rejected for SDK and unindexed members; arrays of workspace classes no longer flagged; a primitive-array owner is not a class reference
 - Ghost class evicted when a watched file's class is renamed in place; the index follows the editor's buffer, then the disk again on close; percent-encoded file URIs are the same file; a watcher is registered for `.smali` files

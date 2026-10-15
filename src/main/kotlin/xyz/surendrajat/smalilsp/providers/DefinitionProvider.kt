@@ -36,14 +36,8 @@ class DefinitionProvider(
             }
             is Symbol.LabelDecl -> listOf(Location(uri, symbol.label.range))
             is Symbol.LabelRef -> labelDefinition(symbol.method, symbol.name, uri)
-            // Anywhere else on an instruction: its primary symbol
-            is Symbol.OnInstruction -> when (val instruction = symbol.instruction) {
-                is InvokeInstruction -> methodDefinition(instruction)
-                is FieldAccessInstruction -> fieldDefinition(instruction)
-                is TypeInstruction -> classDefinition(instruction.className)
-                is JumpInstruction -> labelDefinition(symbol.method, instruction.targetLabel, uri)
-                is ConstStringInstruction -> emptyList()
-            }
+            // The opcode, a register, a string: nothing to go to
+            is Symbol.OnInstruction -> emptyList()
         }
     }
 

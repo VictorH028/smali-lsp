@@ -5,10 +5,8 @@ import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.InvokeInstruction
 import xyz.surendrajat.smalilsp.core.Symbol
-import xyz.surendrajat.smalilsp.core.TypeInstruction
 import xyz.surendrajat.smalilsp.core.symbolAt
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * `textDocument/implementation`: for a method, the concrete declarations of its member family
@@ -27,12 +25,7 @@ class ImplementationProvider(private val index: WorkspaceIndex) {
             is Symbol.MethodDecl -> implementationsOf(file.classDefinition.name, symbol.method.name, symbol.method.descriptor, file.uri to symbol.range)
             is Symbol.MethodRef -> implementationsOf(symbol.instruction)
             is Symbol.Primitive -> (symbol.inside as? InvokeInstruction)?.let { implementationsOf(it) } ?: emptyList()
-            is Symbol.OnInstruction -> when (val instruction = symbol.instruction) {
-                is InvokeInstruction -> implementationsOf(instruction)
-                is TypeInstruction -> subtypes(Types.elementClass(instruction.className))
-                else -> emptyList()
-            }
-            else -> emptyList()
+            else -> emptyList()   // the opcode, a register, a string, or nothing navigable
         }
     }
 

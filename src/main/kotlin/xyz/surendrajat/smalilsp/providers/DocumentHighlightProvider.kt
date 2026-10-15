@@ -6,7 +6,6 @@ import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import xyz.surendrajat.smalilsp.core.FieldAccessInstruction
 import xyz.surendrajat.smalilsp.core.InvokeInstruction
-import xyz.surendrajat.smalilsp.core.JumpInstruction
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.core.Span
 import xyz.surendrajat.smalilsp.core.Symbol
@@ -47,13 +46,7 @@ class DocumentHighlightProvider(private val index: WorkspaceIndex) {
                 else -> emptyList()
             }
             is Symbol.LabelDecl, is Symbol.LabelRef -> labelOccurrences(uri, position)
-            is Symbol.OnInstruction -> when (val instruction = symbol.instruction) {
-                is InvokeInstruction -> methodOccurrences(file, instruction)
-                is FieldAccessInstruction -> fieldOccurrences(file, instruction)
-                is TypeInstruction -> classOccurrences(file, Types.elementClass(instruction.className))
-                is JumpInstruction -> labelOccurrences(uri, position)
-                else -> emptyList()
-            }
+            is Symbol.OnInstruction -> emptyList()   // the opcode or a string (a register returned above)
         }
         return highlights
             .distinctBy { it.range.start.line to it.range.start.character }

@@ -129,7 +129,8 @@ class DefinitionProviderTest {
         assertEquals(base.positionOf(".method", ".method").line, greet.single().range.start.line)
         assertGoesTo("file:///Base.smali", definitionAt("invoke-virtual {p0, p1}", "Lcom/example/Base;", 4), )
         assertGoesTo("file:///Widget.smali", definitionAt("invoke-virtual {p0, p1}", "Lcom/example/Widget;", 4, after = "greet("))
-        assertGoesTo("file:///Base.smali", definitionAt("invoke-virtual {p0, p1}", "invoke-virtual"), )
+        assertTrue(definitionAt("invoke-virtual {p0, p1}", "invoke-virtual").isEmpty(), "the opcode is not a link")
+        assertTrue(definitionAt("invoke-virtual {p0, p1}", "p1", 1).isEmpty(), "nor is a register")
         assertTrue(definitionAt("hashCode", "hashCode", 3).isEmpty(), "not in the workspace")
 
         val shared = definitionAt("sget", "shared", 3)
@@ -144,7 +145,7 @@ class DefinitionProviderTest {
     fun `type operands`() {
         assertGoesTo("file:///Widget.smali", definitionAt("new-instance", "Lcom/example/Widget;", 1))
         assertGoesTo("file:///Data.smali", definitionAt("check-cast", "[Lcom/example/Data;", 0))
-        assertGoesTo("file:///Widget.smali", definitionAt("new-instance", "new-instance", 3), )
+        assertTrue(definitionAt("new-instance", "new-instance", 3).isEmpty(), "the opcode is not a link")
     }
 
     @Test
@@ -152,7 +153,7 @@ class DefinitionProviderTest {
         val definition = source.positionOf("    :cond_0", ":cond_0")
         assertEquals(listOf(definition.line), definitionAt("if-eqz", ":cond_0", 2).map { it.range.start.line })
         assertEquals(listOf(definition.line), definitionAt(".catch", ":cond_0", 2).map { it.range.start.line })
-        assertEquals(listOf(definition.line), definitionAt("if-eqz", "if-eqz").map { it.range.start.line })
+        assertTrue(definitionAt("if-eqz", "if-eqz").isEmpty(), "the opcode is not a link")
         assertEquals(listOf(definition.line), definitionAt(definition).map { it.range.start.line })
     }
 

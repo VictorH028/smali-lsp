@@ -2,6 +2,7 @@ package xyz.surendrajat.smalilsp.unit.providers
 
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
+import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.shared.openSource
@@ -50,6 +51,9 @@ class StringLiteralTest {
         assertEquals(4, found[0].range.start.character, "the instruction, from its opcode")
         assertEquals(found, references.findReferences("file:///A.smali", a.positionOf("\"shared\"", "shared", 2), includeDeclaration = false), "a string has no declaration")
         assertEquals(listOf("file:///A.smali:5"), references.findReferences("file:///A.smali", a.positionOf("only", "only", 1)).map { "${it.uri}:${it.range.start.line}" })
+        assertEquals(emptyList(), references.findReferences("file:///A.smali", a.positionOf("\"shared\"", "const-string", 3)), "the opcode is not the string")
+        assertEquals(emptyList(), references.findReferences("file:///A.smali", a.positionOf("\"shared\"", "v0", 1)), "nor is the register")
+        assertEquals(emptyList(), DefinitionProvider(index).findDefinition("file:///A.smali", a.positionOf("\"shared\"", "shared", 2)), "a string has nowhere to go")
     }
 
     @Test

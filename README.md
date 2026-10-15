@@ -6,7 +6,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 ### LSP Server (for IDEs)
 
-- **Go to Definition** — jump from any instruction to its target (classes, methods, fields, labels)
+- **Go to Definition** — jump from the owner, member or type token of an instruction to its target (classes, methods, fields, labels); the opcode and registers are not links
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; on a string literal, every `const-string` of the same value
 - **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection; registers (`p1` is which parameter, `v3` is which local, with `.param`/`.local` names); the whole frame on the `.registers` line (which `vN` the locals, `this` and each parameter occupy); the register each parameter arrives in; a string literal's text and how many places load it; resource ids (`0x7f0a0012` is `id/login_button`, with the string, color or dimension value from `res/values/*.xml`; go-to-definition opens the value's line, the layout or drawable file, or the `public.xml` entry)
 - **Inlay hints** — the resource name and value after every `0x7f...` literal (`const v0, 0x7f0c0001  string/app_name = "Proton Mail"`) and the decimal value after any other hex literal (`const/16 v0, 0x3e8  = 1000`, `and-int/lit8 v0, v0, 0xf  = 15`)

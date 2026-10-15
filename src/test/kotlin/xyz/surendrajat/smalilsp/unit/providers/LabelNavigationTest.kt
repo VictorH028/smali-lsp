@@ -140,7 +140,7 @@ class LabelNavigationTest {
     }
 
     @Test
-    fun `references from the definition, from any reference or from the jump opcode`() {
+    fun `references from the definition or from any reference, not from the jump opcode`() {
         val expected = listOf(
             flow.definitionOf("cond_0"), flow.referenceOf("if-eqz", "cond_0"),
             flow.referenceOf("        :cond_0", "cond_0"), flow.referenceOf("0x1 ->", "cond_0"),
@@ -149,7 +149,7 @@ class LabelNavigationTest {
         assertEquals(expected, fromDefinition.map { it.range })
         assertTrue(fromDefinition.all { it.uri == flowUri })
         assertEquals(expected, references.findReferences(flowUri, flow.positionOf("0x1 ->", ":cond_0", 4)).map { it.range }, "from a switch table entry")
-        assertEquals(expected, references.findReferences(flowUri, flow.positionOf("if-eqz", "if-eqz", 3)).map { it.range }, "from the opcode of a jump")
+        assertTrue(references.findReferences(flowUri, flow.positionOf("if-eqz", "if-eqz", 3)).isEmpty(), "the opcode of a jump is not the label")
         assertEquals(expected.drop(1), references.findReferences(flowUri, flow.positionOf("if-eqz", ":cond_0", 3), includeDeclaration = false).map { it.range })
         assertEquals(listOf(flow.definitionOf("lonely")), references.findReferences(flowUri, flow.definitionOf("lonely").start).map { it.range }, "an unreferenced label is only its definition")
     }

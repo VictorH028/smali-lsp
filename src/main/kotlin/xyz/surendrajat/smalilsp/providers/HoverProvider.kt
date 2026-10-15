@@ -34,14 +34,13 @@ class HoverProvider(
             is Symbol.LabelDecl -> hoverForLabel(symbol.label, symbol.method)
             is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { hoverForLabel(it, symbol.method) }
                 ?: Hover(MarkupContent(MarkupKind.MARKDOWN, "**Jump to label:** `:${symbol.name}`"))
-            is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position) ?: hoverForString(symbol.instruction)
+            is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position) ?: hoverForString(uri, position, symbol)
         }
     }
 
     /** A string literal: its text and how many `const-string` instructions in the workspace load the same value. */
-    private fun hoverForString(instruction: Instruction): Hover? {
-        if (instruction !is ConstStringInstruction) return null
-        val value = instruction.value
+    private fun hoverForString(uri: String, position: Position, symbol: Symbol): Hover? {
+        val value = StringLiterals.at(workspaceIndex, uri, position, symbol)?.value ?: return null
         val shown = if (value.length > 200) value.substring(0, 199) + "\u2026" else value
         val md = "**String:** ${codeSpan("\"$shown\"")}\n\n**References:** ${workspaceIndex.findStringUsages(value).size}"
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))

@@ -102,14 +102,8 @@ class ReferenceProvider(
             }
             is Symbol.LabelDecl -> findLabelReferences(symbol.label.name, uri, symbol.method, includeDeclaration)
             is Symbol.LabelRef -> findLabelReferences(symbol.name, uri, symbol.method, includeDeclaration)
-            // Anywhere else on an instruction (the opcode, a register): its primary symbol
-            is Symbol.OnInstruction -> when (val instruction = symbol.instruction) {
-                is InvokeInstruction -> methodReferences(instruction, includeDeclaration)
-                is FieldAccessInstruction -> fieldReferences(instruction, includeDeclaration)
-                is TypeInstruction -> findClassReferences(Types.elementClass(instruction.className), includeDeclaration, cancel)
-                is JumpInstruction -> findLabelReferences(instruction.targetLabel, uri, symbol.method, includeDeclaration)
-                is ConstStringInstruction -> workspaceIndex.findStringUsages(instruction.value)
-            }
+            // A string literal: every load of the same value; the opcode or a register: nothing
+            is Symbol.OnInstruction -> StringLiterals.at(workspaceIndex, uri, position, symbol)?.let { workspaceIndex.findStringUsages(it.value) } ?: emptyList()
         }
     }
 

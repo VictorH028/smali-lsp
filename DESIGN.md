@@ -149,8 +149,11 @@ Providers never read line text to find out what the caret is on. `symbolAt(posit
 the spans and answers with a `Symbol`: `ClassDecl`, `MethodDecl`, `FieldDecl`, `ClassRef` (owner,
 `.super`, `.implements`, a type in a descriptor or field type, a type operand, a directive
 reference; arrays resolve to their element class), `MethodRef`, `FieldRef`, `Primitive`,
-`LabelDecl`, `LabelRef`, or `OnInstruction` when the caret is on an opcode or register. A caret
-right after a token still counts as that token, as editors expect.
+`LabelDecl`, `LabelRef`, or `OnInstruction` when the caret is on an opcode, a register or a
+string. `OnInstruction` navigates nowhere (an editor underlines whatever answers go-to-definition,
+and an opcode is not a link); hover reads the opcode or register from the line, and references on
+the string literal are every load of the same value. A caret right after a token still counts as
+that token, as editors expect.
 
 ---
 
