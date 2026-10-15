@@ -343,9 +343,13 @@ whose declarations are unreachable.
   errors; a hand-edited name inside the app's own packages is. The three fixtures went from
   652 such warnings to none.
 - **Resource ids**: `ResourceTable` reads each workspace root's `res/values/public.xml` once
-  after the scan (and again when the watcher reports it changed) into a map of id → entry.
-  Hover on a `0x7f...` literal names the resource (`id/login_button`), definition opens the
-  entry; the literal is read from the line on demand, like registers, so the AST is untouched.
+  after the scan (and again when the watcher reports it changed) into a map of id → entry,
+  plus the values the default `res/values/*.xml` files give strings, colors, dimensions,
+  integers and booleans. Hover on a `0x7f...` literal names the resource (`id/login_button`)
+  and shows its value; definition opens the value's line, the file a layout or drawable is, or
+  the `public.xml` entry; `textDocument/inlayHint` puts name and value after every such
+  literal in the requested range. The literal is read from the line on demand, like
+  registers, so the AST is untouched.
 - **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
   decodes one instruction line (opcode, register tokens with columns, range form, literal) and
   `RegisterFrame` maps `pN` to its frame slot from `.registers`/`.locals` and the parameter

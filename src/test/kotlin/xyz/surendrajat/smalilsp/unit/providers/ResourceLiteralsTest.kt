@@ -7,6 +7,7 @@ import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
+import xyz.surendrajat.smalilsp.providers.ResourceLiterals
 import xyz.surendrajat.smalilsp.shared.openSource
 import xyz.surendrajat.smalilsp.shared.positionOf
 import java.io.File
@@ -43,10 +44,15 @@ class ResourceLiteralsTest {
                 <public type="id" name="login_button" id="0x7f0a0012" />
                 <public type="layout" name="activity_main" id="0x7f0b0000" />
                 <public type="string" name="app_name" id="0x7f0c0001" />
+                <public type="color" name="accent" id="0x7f0d0003" />
             </resources>
         """.trimIndent())
+        File(root, "res/values/strings.xml").writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <string name=\"app_name\">Proton &amp; Mail</string>\n    <string name=\"other\">x</string>\n</resources>\n")
+        File(root, "res/values/colors.xml").writeText("<resources>\n    <color name=\"accent\">#ff3366</color>\n</resources>\n")
+        File(root, "res/layout").mkdirs()
+        File(root, "res/layout/activity_main.xml").writeText("<LinearLayout />\n")
         val index = WorkspaceIndex()
-        assertEquals(3, index.resources.load(xml))
+        assertEquals(4, index.resources.load(xml))
         index.openSource("file:///Main.smali", source)
         return index
     }
@@ -63,6 +69,41 @@ class ResourceLiteralsTest {
         assertEquals(ResourceTable.publicXml(root).toPath().toUri().toString(), definition.uri)
         val xmlLine = ResourceTable.publicXml(root).readLines()[definition.range.start.line]
         assertEquals("login_button", xmlLine.substring(definition.range.start.character, definition.range.end.character))
+    }
+
+    @Test
+    fun `values and files show in the hover and are where definition goes`() {
+        val index = workspace()
+        val stringSource = source.replace("const v0, 0x7f0a9999", "const v0, 0x7f0c0001").replace("const/4 v1, 0x5", "const v1, 0x7f0d0003")
+        index.openSource("file:///Main.smali", stringSource)
+        val stringHover = assertNotNull(HoverProvider(index).provideHover("file:///Main.smali", stringSource.positionOf("0x7f0c0001", "0x7f0c0001", 2))).contents.right.value
+        assertTrue(stringHover.contains("**Value:** \"Proton & Mail\"") && stringHover.contains("res/values/strings.xml"), stringHover)
+        assertTrue(assertNotNull(HoverProvider(index).provideHover("file:///Main.smali", stringSource.positionOf("0x7f0d0003", "0x7f0d0003", 2))).contents.right.value.contains("**Value:** #ff3366"))
+        val layoutHover = assertNotNull(HoverProvider(index).provideHover("file:///Main.smali", stringSource.positionOf("const/high16", "0x7f0b0000", 0))).contents.right.value
+        assertTrue(layoutHover.contains("res/layout/activity_main.xml"), layoutHover)
+
+        val stringDefinition = DefinitionProvider(index).findDefinition("file:///Main.smali", stringSource.positionOf("0x7f0c0001", "0x7f0c0001", 2)).single()
+        assertTrue(stringDefinition.uri.endsWith("/res/values/strings.xml"), stringDefinition.uri)
+        assertEquals(2, stringDefinition.range.start.line)
+        val layoutDefinition = DefinitionProvider(index).findDefinition("file:///Main.smali", stringSource.positionOf("const/high16", "0x7f0b0000", 0)).single()
+        assertTrue(layoutDefinition.uri.endsWith("/res/layout/activity_main.xml"), layoutDefinition.uri)
+        val idDefinition = DefinitionProvider(index).findDefinition("file:///Main.smali", stringSource.positionOf("const v0, 0x7f0a0012", "0x7f0a0012", 3)).single()
+        assertTrue(idDefinition.uri.endsWith("/res/values/public.xml"), "an id has no value and no file: its public.xml entry")
+    }
+
+    @Test
+    fun `inlay hints name the resource and its value after the literal`() {
+        val index = workspace()
+        val stringSource = source.replace("const v0, 0x7f0a9999", "const v0, 0x7f0c0001")
+        index.openSource("file:///Main.smali", stringSource)
+        val lines = stringSource.lines()
+        val hints = ResourceLiterals.inlayHints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(lines.size - 1, 0)))
+        assertEquals(listOf("id/login_button", "layout/activity_main", "string/app_name = \"Proton & Mail\""), hints.map { it.label.left })
+        val first = hints[0]
+        assertEquals(4, first.position.line)
+        assertEquals(lines[4].length, first.position.character, "right after the literal")
+        assertTrue(first.paddingLeft)
+        assertEquals(emptyList(), ResourceLiterals.inlayHints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(3, 0))), "no literal in the first lines")
     }
 
     @Test

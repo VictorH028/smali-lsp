@@ -39,7 +39,7 @@ class HoverProvider(
 
     /** The resource id under the caret, named by the workspace's `public.xml`. */
     private fun hoverForResource(uri: String, position: Position): Hover? =
-        ResourceLiterals.at(workspaceIndex, uri, position)?.let { ResourceLiterals.hover(it) }
+        ResourceLiterals.at(workspaceIndex, uri, position)?.let { ResourceLiterals.hover(workspaceIndex, it) }
 
     /** The register under the caret: which parameter it carries, or its local slot and debug name. */
     private fun hoverForRegister(uri: String, file: SmaliFile, position: Position): Hover? {

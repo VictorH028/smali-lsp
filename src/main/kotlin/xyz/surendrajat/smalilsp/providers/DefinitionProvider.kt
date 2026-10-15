@@ -23,7 +23,7 @@ class DefinitionProvider(
         }
         return when (val symbol = file.symbolAt(position)) {
             // Nothing navigable in the AST: a resource id literal still leads to its public.xml entry
-            null -> listOfNotNull(ResourceLiterals.at(workspaceIndex, uri, position)?.location)
+            null -> ResourceLiterals.at(workspaceIndex, uri, position)?.let { ResourceLiterals.definition(workspaceIndex, it) } ?: emptyList()
             is Symbol.ClassDecl -> listOf(Location(uri, symbol.range))
             is Symbol.MethodDecl, is Symbol.FieldDecl -> emptyList()
             is Symbol.ClassRef -> classDefinition(symbol.className)

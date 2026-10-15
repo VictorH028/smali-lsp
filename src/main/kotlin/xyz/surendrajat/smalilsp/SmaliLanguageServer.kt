@@ -254,6 +254,7 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setImplementationProvider(true)
         capabilities.setDocumentHighlightProvider(true)
         capabilities.setFoldingRangeProvider(true)
+        capabilities.setInlayHintProvider(true)
 
         // Folders added or removed during the session are indexed or dropped
         capabilities.workspace = WorkspaceServerCapabilities().apply {

@@ -247,4 +247,27 @@ class LspStdioTest {
             assertEquals(0, client.waitForExit())
         }
     }
+
+    @Test
+    fun `resource ids come back as inlay hints and hover over stdio`() {
+        writeWorkspace()
+        workspace.resolve("res/values").toFile().mkdirs()
+        workspace.resolve("res/values/public.xml").toFile().writeText("<resources>\n    <public type=\"string\" name=\"app_name\" id=\"0x7f0c0001\" />\n</resources>\n")
+        workspace.resolve("res/values/strings.xml").toFile().writeText("<resources>\n    <string name=\"app_name\">Hello</string>\n</resources>\n")
+        val resSmali = ".class public Lcom/app/Res;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n    const v0, 0x7f0c0001\n    return-void\n.end method\n"
+        val res = workspace.resolve("smali/com/app/Res.smali").toFile().apply { writeText(resSmali) }
+        val resUri = res.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            val init = client.initializeAndIndex(initParams(client))
+            assertTrue(init.getAsJsonObject("capabilities")["inlayHintProvider"].asBoolean)
+            client.open(res, resSmali)
+            val hints = client.result("textDocument/inlayHint", mapOf("textDocument" to client.textDocument(resUri), "range" to mapOf("start" to mapOf("line" to 0, "character" to 0), "end" to mapOf("line" to 6, "character" to 0)))).asJsonArray
+            assertEquals(1, hints.size(), hints.toString())
+            val hint = hints[0].asJsonObject
+            assertEquals("string/app_name = \"Hello\"", hint["label"].asString)
+            assertEquals(4, hint.getAsJsonObject("position")["line"].asInt)
+            val hover = client.result("textDocument/hover", mapOf("textDocument" to client.textDocument(resUri), "position" to mapOf("line" to 4, "character" to 16))).asJsonObject
+            assertTrue(hover.getAsJsonObject("contents")["value"].asString.contains("string/app_name"), hover.toString())
+        }
+    }
 }

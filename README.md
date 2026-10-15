@@ -8,7 +8,8 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 - **Go to Definition** — jump from any instruction to its target (classes, methods, fields, labels)
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching
-- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection; registers (`p1` is which parameter, `v3` is which local, with `.param`/`.local` names); resource ids (`0x7f0a0012` is `id/login_button`, from the project's `res/values/public.xml`, which go-to-definition opens)
+- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection; registers (`p1` is which parameter, `v3` is which local, with `.param`/`.local` names); resource ids (`0x7f0a0012` is `id/login_button`, with the string, color or dimension value from `res/values/*.xml`; go-to-definition opens the value's line, the layout or drawable file, or the `public.xml` entry)
+- **Inlay hints** — the resource name and value after every `0x7f...` literal (`const v0, 0x7f0c0001  string/app_name = "Proton Mail"`)
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
 - **Code Lens** — inline reference counts on methods and fields
