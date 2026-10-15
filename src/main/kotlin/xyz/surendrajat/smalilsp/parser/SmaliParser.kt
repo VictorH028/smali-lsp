@@ -1,29 +1,31 @@
 package xyz.surendrajat.smalilsp.parser
 
 import org.antlr.v4.runtime.*
+import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.parser.generated.SmaliLexer
 import xyz.surendrajat.smalilsp.parser.generated.SmaliParser as GeneratedSmaliParser
 import xyz.surendrajat.smalilsp.util.StringPool
-import org.slf4j.LoggerFactory
 
 /**
- * The parser entry: runs the ANTLR lexer and parser over a file's text and hands the parse to
- * [ASTBuilder], which listens to it and builds the model, so the tree is never walked twice.
+ * The parser entry. The hand-written [SmaliTextParser] is the front end; the ANTLR grammar it
+ * replaces stays reachable through [parseWithAntlr] for the parity check over the corpus.
  * Syntax errors are collected, not thrown: a broken method still yields the class around it.
  */
-class SmaliParser(private val strings: StringPool = StringPool()) {
+class SmaliParser(private val strings: StringPool = StringPool(), private val engine: Engine = Engine.TEXT) {
+
+    /** Which front end parses: the hand-written text parser, or the ANTLR grammar it replaces. */
+    enum class Engine { TEXT, ANTLR }
+
     private val logger = LoggerFactory.getLogger(SmaliParser::class.java)
-    
-    /**
-     * Result of parsing with error collection.
-     */
+
+    /** The model (possibly partial) and the syntax errors, each on its offending token. */
     data class ParseResult(
         val smaliFile: SmaliFile?,
         val syntaxErrors: List<SyntaxError>
     )
-    
-    /** Syntax error at a 1-based line, with the length of the offending token (1 when there is none). */
+
+    /** Syntax error at a 1-based line and 0-based UTF-16 column, with the length of the offending token (1 at the end of the file). */
     data class SyntaxError(
         val line: Int,
         val charPositionInLine: Int,
@@ -36,91 +38,59 @@ class SmaliParser(private val strings: StringPool = StringPool()) {
         if (token.type == Token.EOF) return 1
         return token.text?.length?.coerceAtLeast(1) ?: 1
     }
-    
-    /**
-     * The model of a file, or null for empty or class-less text or when the parse itself fails.
-     *
-     * Prediction is single-stage SLL: the grammar has no ambiguity that needs LL fallback, and
-     * every file of the three decompiled apps under test-data (98,686 files) parses this way
-     * without a syntax error, at about 0.14 ms per file single-threaded. Call [parseWithErrors]
-     * for the syntax errors as well.
-     */
-    fun parse(uri: String, content: String): SmaliFile? {
-        return parseWithErrors(uri, content).smaliFile
+
+    /** The model of a file, or null for empty or class-less text. Call [parseWithErrors] for the syntax errors as well. */
+    fun parse(uri: String, content: String): SmaliFile? = parseWithErrors(uri, content).smaliFile
+
+    /** The model (possibly partial) and every syntax error, each with the offending token's length. */
+    fun parseWithErrors(uri: String, content: String): ParseResult =
+        if (engine == Engine.TEXT) parseWithText(uri, content) else parseWithAntlr(uri, content)
+
+    /** The hand-written front end. */
+    fun parseWithText(uri: String, content: String): ParseResult {
+        val cleanContent = if (content.startsWith('﻿')) content.substring(1) else content
+        if (cleanContent.isBlank() || !cleanContent.contains(".class")) return ParseResult(null, emptyList())
+        val parser = SmaliTextParser(uri, cleanContent, strings)
+        val file = try {
+            parser.parse()
+        } catch (e: Exception) {
+            logger.error("Failed to parse $uri", e)
+            return ParseResult(null, parser.syntaxErrors + SyntaxError(1, 0, "Parse error: ${e.message}"))
+        }
+        return ParseResult(file, parser.syntaxErrors)
     }
-    
-    /** The model (possibly partial) and every lexer and parser error, each with the offending token's length. */
-    fun parseWithErrors(uri: String, content: String): ParseResult {
-        // Strip UTF-8 BOM if present (some editors add it)
-        val cleanContent = if (content.startsWith('\uFEFF')) content.substring(1) else content
 
-        // Handle empty or whitespace-only files gracefully
-        if (cleanContent.isBlank()) {
-            logger.debug("Skipping parse of empty file: $uri")
-            return ParseResult(null, emptyList())
-        }
-        
-        // Handle comment-only files (no .class directive)
-        if (!cleanContent.contains(".class")) {
-            logger.debug("Skipping parse of file with no .class directive: $uri")
-            return ParseResult(null, emptyList())
-        }
-
+    /** The ANTLR front end: SLL prediction, the AST built by [ASTBuilder] as a parse listener. */
+    fun parseWithAntlr(uri: String, content: String): ParseResult {
+        val cleanContent = if (content.startsWith('﻿')) content.substring(1) else content
+        if (cleanContent.isBlank() || !cleanContent.contains(".class")) return ParseResult(null, emptyList())
         val syntaxErrors = mutableListOf<SyntaxError>()
-
         val smaliFile = try {
-            val charStream = StringCharStream(cleanContent, uri)
-            val lexer = SmaliLexer(charStream)
-            
-            // Collect lexer errors
+            val lexer = SmaliLexer(StringCharStream(cleanContent, uri))
             lexer.removeErrorListeners()
             lexer.addErrorListener(object : BaseErrorListener() {
-                override fun syntaxError(
-                    recognizer: Recognizer<*, *>?,
-                    offendingSymbol: Any?,
-                    line: Int,
-                    charPositionInLine: Int,
-                    msg: String?,
-                    e: RecognitionException?
-                ) {
+                override fun syntaxError(recognizer: Recognizer<*, *>?, offendingSymbol: Any?, line: Int, charPositionInLine: Int, msg: String?, e: RecognitionException?) {
                     syntaxErrors.add(SyntaxError(line, charPositionInLine, msg ?: "Lexer error"))
                 }
             })
-            
             val tokens = CommonTokenStream(lexer)
-            
             val parser = GeneratedSmaliParser(tokens)
             parser.interpreter.predictionMode = org.antlr.v4.runtime.atn.PredictionMode.SLL
-            
-            // Collect parser errors
             parser.removeErrorListeners()
             parser.addErrorListener(object : BaseErrorListener() {
-                override fun syntaxError(
-                    recognizer: Recognizer<*, *>?,
-                    offendingSymbol: Any?,
-                    line: Int,
-                    charPositionInLine: Int,
-                    msg: String?,
-                    e: RecognitionException?
-                ) {
+                override fun syntaxError(recognizer: Recognizer<*, *>?, offendingSymbol: Any?, line: Int, charPositionInLine: Int, msg: String?, e: RecognitionException?) {
                     syntaxErrors.add(SyntaxError(line, charPositionInLine, msg ?: "Parser error", tokenLength(offendingSymbol)))
                 }
             })
-            
-            // The builder listens to the parse itself — no second traversal of the tree.
             val builder = ASTBuilder(uri, tokens, cleanContent, strings)
             parser.addParseListener(builder)
             parser.parse()
-
             builder.build()
-            
         } catch (e: Exception) {
             logger.error("Failed to parse $uri", e)
             syntaxErrors.add(SyntaxError(1, 0, "Parse error: ${e.message}"))
             null
         }
-        
         return ParseResult(smaliFile, syntaxErrors)
     }
-    
 }
