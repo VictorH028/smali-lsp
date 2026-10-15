@@ -4,7 +4,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.shadow)
-    id("antlr")
 }
 
 group = "xyz.surendrajat"
@@ -15,10 +14,6 @@ repositories {
 }
 
 dependencies {
-    // ANTLR for parsing
-    antlr(libs.antlr.tool)
-    implementation(libs.antlr.runtime)
-
     // LSP4J for language server
     implementation(libs.lsp4j)
 
@@ -42,17 +37,12 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
-// Keep build-time-only and never-loaded artifacts off the runtime classpath, so the
-// shadow jar stays lean without fragile path-based excludes:
-//  - org.antlr:antlr4 is the grammar *tool* (codegen, StringTemplate, ICU, ANTLR3);
-//    the antlr plugin leaks it onto the runtime classpath. Only antlr4-runtime —
-//    declared directly above — is needed at runtime.
-//  - io.ktor:* are the MCP SDK's HTTP/SSE transports (dragging in kotlin-reflect,
-//    jansi, and typesafe-config through ktor-server-core). This server is
-//    stdio-only; the ktor code paths are never loaded.
+// Keep never-loaded artifacts off the runtime classpath, so the shadow jar stays lean
+// without fragile path-based excludes: io.ktor:* are the MCP SDK's HTTP/SSE transports
+// (dragging in kotlin-reflect, jansi, and typesafe-config through ktor-server-core). This
+// server is stdio-only; the ktor code paths are never loaded.
 // Tests keep the full classpath (this only touches runtimeClasspath).
 configurations.runtimeClasspath {
-    exclude(group = "org.antlr", module = "antlr4")
     exclude(group = "io.ktor")
 }
 
@@ -76,22 +66,6 @@ kotlin {
 
 tasks.withType<JavaCompile>().configureEach {
     options.release.set(targetJavaVersion)
-}
-
-// Configure ANTLR
-tasks.generateGrammarSource {
-    maxHeapSize = "128m"
-    arguments = arguments + listOf("-visitor", "-long-messages", "-package", "xyz.surendrajat.smalilsp.parser.generated")
-    outputDirectory = file("build/generated-src/antlr/main/xyz/surendrajat/smalilsp/parser/generated")
-}
-
-// Make Kotlin compilation depend on ANTLR generation
-tasks.compileKotlin {
-    dependsOn(tasks.generateGrammarSource)
-}
-
-tasks.compileTestKotlin {
-    dependsOn(tasks.generateTestGrammarSource)
 }
 
 tasks.test {
