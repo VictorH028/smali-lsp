@@ -19,7 +19,7 @@ import xyz.surendrajat.smalilsp.providers.DiagnosticProvider
 import xyz.surendrajat.smalilsp.providers.DocumentHighlightProvider
 import xyz.surendrajat.smalilsp.providers.DocumentSymbolProvider
 import xyz.surendrajat.smalilsp.providers.FoldingRangeProvider
-import xyz.surendrajat.smalilsp.providers.ResourceLiterals
+import xyz.surendrajat.smalilsp.providers.InlayHints
 import xyz.surendrajat.smalilsp.providers.ImplementationProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
@@ -213,7 +213,7 @@ class SmaliTextDocumentService(
     override fun inlayHint(params: InlayHintParams): CompletableFuture<MutableList<InlayHint>> =
         writes.request("inlayHint", { params.textDocument.uri }, { mutableListOf() }) {
             val lines = index.getLines(params.textDocument.uri) ?: return@request mutableListOf()
-            ResourceLiterals.inlayHints(index, lines, params.range).toMutableList()
+            InlayHints.hints(index, lines, params.range).toMutableList()
         }
 
     override fun foldingRange(params: FoldingRangeRequestParams): CompletableFuture<MutableList<FoldingRange>> =

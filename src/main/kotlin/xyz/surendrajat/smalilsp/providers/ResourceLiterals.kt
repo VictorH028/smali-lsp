@@ -1,7 +1,6 @@
 package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.Hover
-import org.eclipse.lsp4j.InlayHint
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.MarkupContent
 import org.eclipse.lsp4j.MarkupKind
@@ -18,7 +17,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
  * `const/16` whose value the workspace's `public.xml` names. Literals are not in the AST, so
  * the line is decoded on demand, as registers are. Hover shows the name and the value the
  * values files give it, definition opens the value's line (or the file the resource is), and
- * inlay hints put name and value after the literal.
+ * [InlayHints] puts name and value after the literal.
  */
 object ResourceLiterals {
 
@@ -62,21 +61,10 @@ object ResourceLiterals {
         return listOf(resource.location)
     }
 
-    /** One hint per line of [lines] within [range] whose literal names a resource: ` name` or ` name = value`, right after the literal. */
-    fun inlayHints(index: WorkspaceIndex, lines: List<String>, range: Range): List<InlayHint> {
-        if (index.resources.size == 0) return emptyList()
-        val out = ArrayList<InlayHint>()
-        val last = minOf(range.end.line, lines.size - 1)
-        for (lineNumber in maxOf(0, range.start.line)..last) {
-            val (resource, _, literalEnd) = resourceOf(index, lines[lineNumber]) ?: continue
-            val value = index.resources.valueOf(resource)
-            val label = if (value != null) "${resource.qualifiedName} = ${shown(resource.type, value.value, 40)}" else resource.qualifiedName
-            out.add(InlayHint(Position(lineNumber, literalEnd), org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(label)).apply {
-                paddingLeft = true
-                if (value != null && value.value.length > 40) tooltip = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(value.value)
-            })
-        }
-        return out
+    /** The inlay hint for a literal naming [resource]: `name` or `name = value`, the whole value as the tooltip when it was cut short. */
+    fun hint(index: WorkspaceIndex, resource: Resource): InlayHints.Hint {
+        val value = index.resources.valueOf(resource) ?: return InlayHints.Hint(resource.qualifiedName, null)
+        return InlayHints.Hint("${resource.qualifiedName} = ${shown(resource.type, value.value, 40)}", value.value.takeIf { it.length > 40 })
     }
 
     private fun shown(type: String, value: String, limit: Int): String {

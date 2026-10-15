@@ -7,7 +7,7 @@ import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
-import xyz.surendrajat.smalilsp.providers.ResourceLiterals
+import xyz.surendrajat.smalilsp.providers.InlayHints
 import xyz.surendrajat.smalilsp.shared.openSource
 import xyz.surendrajat.smalilsp.shared.positionOf
 import java.io.File
@@ -97,13 +97,13 @@ class ResourceLiteralsTest {
         val stringSource = source.replace("const v0, 0x7f0a9999", "const v0, 0x7f0c0001")
         index.openSource("file:///Main.smali", stringSource)
         val lines = stringSource.lines()
-        val hints = ResourceLiterals.inlayHints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(lines.size - 1, 0)))
+        val hints = InlayHints.hints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(lines.size - 1, 0)))
         assertEquals(listOf("id/login_button", "layout/activity_main", "string/app_name = \"Proton & Mail\""), hints.map { it.label.left })
         val first = hints[0]
         assertEquals(4, first.position.line)
         assertEquals(lines[4].length, first.position.character, "right after the literal")
         assertTrue(first.paddingLeft)
-        assertEquals(emptyList(), ResourceLiterals.inlayHints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(3, 0))), "no literal in the first lines")
+        assertEquals(emptyList(), InlayHints.hints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(3, 0))), "no literal in the first lines")
     }
 
     @Test
