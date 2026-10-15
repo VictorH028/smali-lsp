@@ -5,6 +5,7 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.launch.LSPLauncher
 import org.eclipse.lsp4j.services.*
 import org.slf4j.LoggerFactory
+import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.indexer.WorkspaceScanner
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
@@ -179,10 +180,12 @@ class SmaliLanguageServer : LanguageServer {
                             }
                         }
 
+                        val resources = index.resources.load(ResourceTable.publicXml(dir))
                         val duration = System.currentTimeMillis() - startTime
                         val stats = index.getStats()
 
                         logger.info("Indexed ${result.filesSucceeded} files in ${duration}ms")
+                        if (resources > 0) logger.info("  Resources: $resources ids from res/values/public.xml")
                         logger.info("  Rate: ${result.filesPerSecond} files/sec")
                         logger.info("  Classes: ${stats.classes}, Methods: ${stats.methods}, Fields: ${stats.fields}, Strings: ${stats.strings}")
 
@@ -299,7 +302,10 @@ class SmaliLanguageServer : LanguageServer {
      */
     private fun registerFileWatcher() {
         if (!clientSupportsWatcherRegistration) return
-        val options = DidChangeWatchedFilesRegistrationOptions(listOf(FileSystemWatcher(Either.forLeft("**/*.smali"))))
+        val options = DidChangeWatchedFilesRegistrationOptions(listOf(
+            FileSystemWatcher(Either.forLeft("**/*.smali")),
+            FileSystemWatcher(Either.forLeft("**/res/values/public.xml"))
+        ))
         val registration = Registration("smali-file-watcher", "workspace/didChangeWatchedFiles", options)
         try {
             client.registerCapability(RegistrationParams(listOf(registration))).exceptionally { e ->

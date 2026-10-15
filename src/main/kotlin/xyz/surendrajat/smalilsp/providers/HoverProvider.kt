@@ -22,7 +22,7 @@ class HoverProvider(
     fun provideHover(uri: String, position: Position): Hover? {
         val file = workspaceIndex.findFileByUri(uri) ?: return null
         return when (val symbol = file.symbolAt(position)) {
-            null -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position)
+            null -> hoverForRegister(uri, file, position) ?: hoverForResource(uri, position) ?: hoverForOpcodeKeyword(uri, position)
             is Symbol.ClassDecl -> hoverForClass(symbol.classDef)
             is Symbol.ClassRef -> hoverForClassReference(symbol.type)
             is Symbol.MethodDecl -> hoverForMethod(symbol.method, file.classDefinition.name)
@@ -36,6 +36,10 @@ class HoverProvider(
             is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position)
         }
     }
+
+    /** The resource id under the caret, named by the workspace's `public.xml`. */
+    private fun hoverForResource(uri: String, position: Position): Hover? =
+        ResourceLiterals.at(workspaceIndex, uri, position)?.let { ResourceLiterals.hover(it) }
 
     /** The register under the caret: which parameter it carries, or its local slot and debug name. */
     private fun hoverForRegister(uri: String, file: SmaliFile, position: Position): Hover? {

@@ -342,6 +342,10 @@ whose declarations are unreachable.
   platform or an optional library like Conscrypt behind a runtime check, and those are not
   errors; a hand-edited name inside the app's own packages is. The three fixtures went from
   652 such warnings to none.
+- **Resource ids**: `ResourceTable` reads each workspace root's `res/values/public.xml` once
+  after the scan (and again when the watcher reports it changed) into a map of id → entry.
+  Hover on a `0x7f...` literal names the resource (`id/login_button`), definition opens the
+  entry; the literal is read from the line on demand, like registers, so the AST is untouched.
 - **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
   decodes one instruction line (opcode, register tokens with columns, range form, literal) and
   `RegisterFrame` maps `pN` to its frame slot from `.registers`/`.locals` and the parameter

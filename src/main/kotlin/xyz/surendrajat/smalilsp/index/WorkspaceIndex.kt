@@ -35,6 +35,9 @@ class WorkspaceIndex {
     /** The pool every parser feeding this index should intern through (`SmaliParser(index.strings)`). */
     val strings = StringPool()
 
+    /** Resource ids by value, from each workspace root's `res/values/public.xml`. */
+    val resources = ResourceTable()
+
     // ---- files ----
     private val filesByUri = ConcurrentHashMap<String, SmaliFile>()
     private val uriByClass = ConcurrentHashMap<String, String>()

@@ -209,7 +209,7 @@ class LspStdioTest {
             assertNotNull(registration, "server must register a workspace/didChangeWatchedFiles watcher; requests seen: ${client.serverRequests}")
             assertEquals("workspace/didChangeWatchedFiles", registration["method"].asString)
             val globs = registration.getAsJsonObject("registerOptions").getAsJsonArray("watchers").map { it.asJsonObject["globPattern"].asString }
-            assertEquals(listOf("**/*.smali"), globs)
+            assertEquals(listOf("**/*.smali", "**/res/values/public.xml"), globs)
             client.result("shutdown"); client.notify("exit")
         }
     }

@@ -98,6 +98,12 @@ class SmaliWorkspaceService(
     }
 
     private fun applyWatchedChange(uri: String, type: FileChangeType) {
+        if (uri.endsWith("/res/values/public.xml")) {
+            // apktool rewrote the resource table (or it went away with the project): read it again
+            val count = index.resources.load(File(URI(uri)))
+            logger.debug("Resource table {}: {} ids", type, count)
+            return
+        }
         // An open buffer is the truth for its file: the editor reports its own changes through
         // didChange, and didClose brings the disk version back.
         if (index.isOpen(uri)) return

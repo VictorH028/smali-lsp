@@ -35,6 +35,7 @@ import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.SymbolKind
 import org.eclipse.lsp4j.TypeHierarchyItem
 import org.slf4j.LoggerFactory
+import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.JvmTuning
 import xyz.surendrajat.smalilsp.indexer.WorkspaceScanner
@@ -218,6 +219,7 @@ class McpMode {
                 val index = WorkspaceIndex()
                 val result = WorkspaceScanner(index).scanDirectory(dir) { _, _ -> }
                 index.trimUsages()
+                index.resources.load(ResourceTable.publicXml(dir))
                 session = Session(dir.absolutePath, index)
                 index to result
             } finally {
