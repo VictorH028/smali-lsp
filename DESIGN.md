@@ -322,7 +322,9 @@ whose declarations are unreachable.
 - **Folding ranges**: multi-line methods and the annotation, switch-table and array-data
   blocks the builder records.
 - **Code lens**: one lens per method and field on its declaration line, resolved lazily to
-  the count of sites that bind to that declaration (an override counts its own callers).
+  the count of sites that bind to that declaration (an override counts its own callers); the
+  `.class` line has one for the class's references and, when any, one for how many classes
+  extend or implement it (a map lookup, so it comes resolved).
 - **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
   type as detail, name token as `selectionRange`.
 - **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
@@ -347,14 +349,21 @@ whose declarations are unreachable.
   plus the values the default `res/values/*.xml` files give strings, colors, dimensions,
   integers and booleans. Hover on a `0x7f...` literal names the resource (`id/login_button`)
   and shows its value; definition opens the value's line, the file a layout or drawable is, or
-  the `public.xml` entry; `textDocument/inlayHint` puts name and value after every such
-  literal in the requested range. The literal is read from the line on demand, like
-  registers, so the AST is untouched.
+  the `public.xml` entry. The literal is read from the line on demand, like registers, so the
+  AST is untouched.
+- **Inlay hints**: `InlayHints` scans the requested lines once. A `0x7f...` id the table
+  knows becomes its name and value; any other hex literal of a `const*` or `*-int/lit*`
+  instruction becomes its decimal value (`= 1000`). Values -9..9, decimal literals, resource-
+  shaped ids the table does not know, and lines baksmali already annotated (`0x3f800000    #
+  1.0f`) get nothing.
+- **Strings**: `const-string` sites are indexed by value like member usages, so references
+  on a string are every load of the same value and its hover carries the count.
 - **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
   decodes one instruction line (opcode, register tokens with columns, range form, literal) and
   `RegisterFrame` maps `pN` to its frame slot from `.registers`/`.locals` and the parameter
-  types; hover and document highlight on a register scan the method's lines on demand, and the
-  assembler checks scan the edited file's lines in the diagnostics pass.
+  types; hover and document highlight on a register scan the method's lines on demand, the
+  `.registers` line hovers the whole frame (which `vN` the locals, `this` and each parameter
+  occupy), and the assembler checks scan the edited file's lines in the diagnostics pass.
 
 ### 5.3 What still reads line text
 
@@ -473,7 +482,7 @@ only one index is built at a time.
 | SmaliTextDocumentService.kt | 252 | document lifecycle and requests |
 | DataStructures.kt | 252 | the AST model |
 | Types.kt | 222 | descriptor and class-name helpers |
-| HoverProvider.kt | 209 | hover |
+| HoverProvider.kt | 238 | hover |
 | ReferenceProvider.kt | 195 | references and member families |
 | DiagnosticProvider.kt | 188 | diagnostics |
 | CompletionProvider.kt | 185 | completion |
@@ -485,10 +494,11 @@ only one index is built at a time.
 | InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
 | SmaliParser.kt | 50 | parser entry |
 | SmaliWorkspaceService.kt | 113 | watched files, workspace symbols |
-| CodeLensProvider.kt | 88 | reference counts |
+| CodeLensProvider.kt | 108 | reference and subtype counts |
 | DocumentSymbolProvider.kt | 82 | outline |
 | WriteQueue.kt | 71 | the writer thread and the request helper |
 | DefinitionProvider.kt | 68 | definition |
+| InlayHints.kt | 66 | resource names and decimal values after literals |
 | Cli.kt | 64 | command line, usage, version |
 | UsageList.kt | 53 | packed usage sites |
 | StringPool.kt | 53 | per-index interning |

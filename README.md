@@ -7,12 +7,12 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 ### LSP Server (for IDEs)
 
 - **Go to Definition** — jump from any instruction to its target (classes, methods, fields, labels)
-- **Find References** — cross-file xrefs with inheritance-aware polymorphic matching
-- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection; registers (`p1` is which parameter, `v3` is which local, with `.param`/`.local` names); resource ids (`0x7f0a0012` is `id/login_button`, with the string, color or dimension value from `res/values/*.xml`; go-to-definition opens the value's line, the layout or drawable file, or the `public.xml` entry)
-- **Inlay hints** — the resource name and value after every `0x7f...` literal (`const v0, 0x7f0c0001  string/app_name = "Proton Mail"`)
+- **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; on a string literal, every `const-string` of the same value
+- **Hover** — method signatures, field types, class info, the declaring class and reference count of a member, SDK class detection; registers (`p1` is which parameter, `v3` is which local, with `.param`/`.local` names); the whole frame on the `.registers` line (which `vN` the locals, `this` and each parameter occupy); the register each parameter arrives in; a string literal's text and how many places load it; resource ids (`0x7f0a0012` is `id/login_button`, with the string, color or dimension value from `res/values/*.xml`; go-to-definition opens the value's line, the layout or drawable file, or the `public.xml` entry)
+- **Inlay hints** — the resource name and value after every `0x7f...` literal (`const v0, 0x7f0c0001  string/app_name = "Proton Mail"`) and the decimal value after any other hex literal (`const/16 v0, 0x3e8  = 1000`, `and-int/lit8 v0, v0, 0xf  = 15`)
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
-- **Code Lens** — inline reference counts on methods and fields
+- **Code Lens** — inline reference counts on the class, its methods and fields, and how many classes extend or implement it
 - **Completion** — class names (ranked), members including inherited ones, opcodes
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
@@ -33,7 +33,8 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow the member family: overrides, calls through subclasses, calls on the supertype |
 | `textDocument/foldingRange` | methods, annotations, switch tables, array data |
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search over classes, methods and fields, best 500 |
-| `textDocument/codeLens` + `codeLens/resolve` | reference counts, resolved lazily |
+| `textDocument/codeLens` + `codeLens/resolve` | reference counts on the class line and every member, resolved lazily; subclass and implementation counts |
+| `textDocument/inlayHint` | resource name and value after a `0x7f...` literal, the decimal value after any other hex literal |
 | `textDocument/completion` | trigger characters `L`, `>`, `/` |
 | `textDocument/prepareRename` + `rename` | methods, fields, labels |
 | `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
