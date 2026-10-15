@@ -142,3 +142,13 @@ tasks.shadowJar {
         attributes["Main-Class"] = "xyz.surendrajat.smalilsp.MainKt"
     }
 }
+
+// Live testing in APKLab: copies the fat jar to ~/.apklab/smali-lsp-dev.jar (or -PapklabDir=<dir>).
+// Point `apklab.smaliLspPath` at that file once; reload the VS Code window after each install.
+tasks.register<Copy>("installApklab") {
+    group = "distribution"
+    description = "Copies the shadow jar to ~/.apklab/smali-lsp-dev.jar for APKLab to launch"
+    from(tasks.shadowJar.flatMap { it.archiveFile })
+    into(providers.gradleProperty("apklabDir").orElse(providers.systemProperty("user.home").map { "$it/.apklab" }))
+    rename { "smali-lsp-dev.jar" }
+}

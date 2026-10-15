@@ -197,6 +197,10 @@ Requires Java 17+; the Gradle wrapper (9.8) downloads itself.
 
 Output: `build/libs/smali-lsp-<version>.jar`
 
+To try a build in APKLab, `./gradlew installApklab` copies it to `~/.apklab/smali-lsp-dev.jar`
+(`-PapklabDir=<dir>` for another directory); point the `apklab.smaliLspPath` setting at that
+file once and reload the VS Code window after each install.
+
 ## Architecture
 
 ```
