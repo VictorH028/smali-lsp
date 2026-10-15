@@ -567,12 +567,11 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         return anyType()
     }
 
-    /** `[` then a class, primitive, primitive sequence, compound literal or another array. */
+    /** `[` (any number of them) then a class, primitive, primitive sequence or compound literal. */
     private fun arrayType() {
-        advance()
+        while (kind == T.LBRACK) advance()
         when (kind) {
             T.TYPE, T.PRIM, T.PRIMSEQ, T.COMPOUND -> consumeType()
-            T.LBRACK -> arrayType()
             else -> fail("Expected the element type after '[', not ${describe()}")
         }
     }
@@ -801,8 +800,12 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     // Annotations
     // ======================================================================
 
+    /** Annotations nest through their values; deeper than this is not smali but an attack on the stack. */
+    private var nesting = 0
+
     private fun annotationDirective() {
         val startLine = tokLine
+        if (++nesting > MAX_NESTING) { nesting--; fail("Annotations nested too deep") }
         typeRefDepth++
         try {
             advance()
@@ -815,15 +818,21 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
             advance()
         } finally {
             typeRefDepth--
+            nesting--
         }
     }
 
     private fun subannotation() {
-        advance()
-        if (kind != T.TYPE) fail("Expected the annotation class, not ${describe()}")
-        consumeType()
-        annotationFields(".end subannotation")
-        advance()
+        if (++nesting > MAX_NESTING) { nesting--; fail("Annotations nested too deep") }
+        try {
+            advance()
+            if (kind != T.TYPE) fail("Expected the annotation class, not ${describe()}")
+            consumeType()
+            annotationFields(".end subannotation")
+            advance()
+        } finally {
+            nesting--
+        }
     }
 
     /** `name = value` entries up to [terminator], which is left as the current token. */
@@ -1151,6 +1160,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
 
     companion object {
         private const val PRIMITIVES = "ZBSCIJFD"
+        private const val MAX_NESTING = 64
         private val END_WORDS = setOf("method", "field", "annotation", "local", "packed-switch", "sparse-switch", "array-data", "param", "subannotation")
         private val CLASS_MODIFIERS = setOf("public", "private", "protected", "final", "annotation", "synthetic", "static", "abstract", "enum", "interface")
         private val METHOD_MODIFIERS = setOf("public", "private", "protected", "final", "synthetic", "static", "abstract", "constructor", "bridge", "declared-synchronized", "synchronized", "strictfp", "varargs", "native")

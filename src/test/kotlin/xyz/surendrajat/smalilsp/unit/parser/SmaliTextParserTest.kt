@@ -156,6 +156,26 @@ class SmaliTextParserTest {
     }
 
     @Test
+    fun `pathological nesting and bracket runs neither overflow the stack nor lose the class`() {
+        val brackets = "[".repeat(20_000)
+        val deepArray = ".class public Lcom/T;\n.super Ljava/lang/Object;\n.field public a:${brackets}I\n.method public run()V\n    check-cast v0, ${brackets}Lcom/T;\n    return-void\n.end method\n"
+        val arrays = parser.parseWithErrors("file:///T.smali", deepArray)
+        assertEquals(emptyList(), arrays.syntaxErrors, "any number of array dimensions is a type")
+        assertEquals(20_000 + 1, arrays.smaliFile!!.fields.single().type.length)
+
+        val depth = 200
+        val nested = buildString {
+            append(".class public Lcom/T;\n.super Ljava/lang/Object;\n")
+            repeat(depth) { append(".annotation system Lcom/A;\n    v = ") }
+            repeat(depth) { append("\n.end annotation") }
+            append("\n.field public ok:I\n")
+        }
+        val result = parser.parseWithErrors("file:///T.smali", nested)
+        assertTrue(result.syntaxErrors.any { it.message == "Annotations nested too deep" }, result.syntaxErrors.take(3).toString())
+        assertNotNull(result.smaliFile, "the class survives the rejected nest")
+    }
+
+    @Test
     fun `a modifier spelled name still declares the member`() {
         val content = """
             .class public Lcom/T;
