@@ -137,7 +137,7 @@ class InProcessServerWorkflowTest {
             // hover on the call describes the declaration
             val hover = assertNotNull(hover(classAUri, callInA.range.start))
             assertEquals(
-                "**Method:** `process`\n\n**Declared in:** `Service`\n\n**Modifiers:** public\n\n**Signature:** `(java.lang.String)int`\n\n**Parameters:**\n- `java.lang.String`\n\n**Returns:** `int`\n\n**References:** 2",
+                "**Method:** `process`\n\n**Declared in:** `Service`\n\n**Modifiers:** public\n\n**Signature:** `(java.lang.String)int`\n\n**Parameters:**\n- `p1` `java.lang.String`\n\n**Returns:** `int`\n\n**References:** 2",
                 hover.contents.right.value
             )
 

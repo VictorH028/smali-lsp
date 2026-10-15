@@ -49,6 +49,20 @@ class RegisterTest {
         assertNotNull(hovers.provideHover(uri, source.positionOf(marker, needle, offset))).contents.right.value
 
     @Test
+    fun `the registers line maps the whole frame`() {
+        assertEquals(
+            "**Frame:** 7 registers (2 local, 5 parameter) in `run`\n\n" +
+                "- `v0`–`v1`: locals\n" +
+                "- `p0` = `v2`: `this` (`com.Regs`)\n" +
+                "- `p1` = `v3`: `int` count\n" +
+                "- `p2` = `v4`: `java.lang.String`\n" +
+                "- `p3`–`p4` = `v5`–`v6`: `long`",
+            hoverAt(".registers 7", ".registers", 3)
+        )
+        assertEquals("**Frame:** 2 registers (1 local, 1 parameter) in `util`\n\n- `v0`: local\n- `p0` = `v1`: `int`", hoverAt(".registers 2", ".registers", 0), "static: no `this`")
+    }
+
+    @Test
     fun `a parameter register names its parameter, this, or the second half of a wide one`() {
         assertEquals("**Parameter** `p0`: `this` (`com.Regs`)\n\n**Frame:** 7 registers (2 local, 5 parameter) in `run`", hoverAt("invoke-virtual", "p0"), "this, int, String and a two-slot long")
         val p1 = hoverAt("add-int v0", "p1")

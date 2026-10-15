@@ -12,8 +12,8 @@ import xyz.surendrajat.smalilsp.util.Types
 /**
  * Hover: class hierarchy, member signatures, field types, primitive types, labels, string
  * literals, and Dalvik opcode documentation, as Markdown. The symbol under the caret comes from
- * [SmaliFile.symbolAt]; registers, resource ids and the opcode lookup read the line text,
- * because they have no AST node.
+ * [SmaliFile.symbolAt]; registers, resource ids, the `.registers` frame and the opcode lookup
+ * read the line text, because they have no AST node.
  */
 class HoverProvider(
     private val workspaceIndex: WorkspaceIndex
@@ -23,7 +23,7 @@ class HoverProvider(
     fun provideHover(uri: String, position: Position): Hover? {
         val file = workspaceIndex.findFileByUri(uri) ?: return null
         return when (val symbol = file.symbolAt(position)) {
-            null -> hoverForRegister(uri, file, position) ?: hoverForResource(uri, position) ?: hoverForOpcodeKeyword(uri, position)
+            null -> hoverForRegister(uri, file, position) ?: hoverForResource(uri, position) ?: hoverForFrame(uri, file, position) ?: hoverForOpcodeKeyword(uri, position)
             is Symbol.ClassDecl -> hoverForClass(symbol.classDef)
             is Symbol.ClassRef -> hoverForClassReference(symbol.type)
             is Symbol.MethodDecl -> hoverForMethod(symbol.method, file.classDefinition.name)
@@ -54,6 +54,15 @@ class HoverProvider(
         for (c in text) { run = if (c == '`') run + 1 else 0; longest = maxOf(longest, run) }
         val fence = "`".repeat(longest + 1)
         return "$fence$text$fence"
+    }
+
+    /** On a `.registers` or `.locals` line: the method's frame, with the registers the locals, `this` and each parameter occupy. */
+    private fun hoverForFrame(uri: String, file: SmaliFile, position: Position): Hover? {
+        val line = workspaceIndex.getLineContent(uri, position.line)?.trimStart() ?: return null
+        if (!line.startsWith(".registers") && !line.startsWith(".locals")) return null
+        val method = file.methodAt(position.line) ?: return null
+        val lines = workspaceIndex.getLines(uri) ?: return null
+        return Registers.frameHover(method, file.classDefinition.name, lines)
     }
 
     /** The resource id under the caret, named by the workspace's `public.xml`. */
@@ -113,7 +122,7 @@ class HoverProvider(
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    /** The declaration's signature, where it is declared, and how many calls bind to it (through subclasses and overrides). */
+    /** The declaration's signature with the register each parameter arrives in, where it is declared, and how many calls bind to it (through subclasses and overrides). */
     private fun hoverForMethod(method: MethodDefinition, className: String): Hover {
         val md = buildString {
             append("**Method:** `${method.name}`\n\n")
@@ -126,10 +135,13 @@ class HoverProvider(
             append("**Signature:** `($params)$returnType`\n\n")
             if (method.parameters.isNotEmpty()) {
                 append("**Parameters:**\n")
+                var slot = if ("static" in method.modifiers) 0 else 1
                 method.parameters.forEach { param ->
-                    append("- `${Types.readableName(param.type)}`")
+                    val width = RegisterFrame.slots(param.type)
+                    append("- ${Registers.span("p", slot, slot + width - 1)} `${Types.readableName(param.type)}`")
                     param.name?.let { append(" $it") }
                     append("\n")
+                    slot += width
                 }
                 append("\n")
             }

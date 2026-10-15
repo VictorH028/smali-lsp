@@ -264,7 +264,7 @@ class HoverTypeOperandTest {
 
     @Test
     fun `directives and comments hover nothing`() {
-        assertNull(hoverAt(".locals", ".locals", 2))
+        assertTrue(hoverAt(".locals", ".locals", 2)!!.startsWith("**Frame:**"), "the frame directive is the one directive that hovers")
         assertNull(hoverAt(".prologue", ".prologue", 2))
         assertNull(hoverAt(".line", "12"))
         assertNull(hoverAt("# fields first", "fields"))

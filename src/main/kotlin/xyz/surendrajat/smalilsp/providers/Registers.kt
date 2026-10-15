@@ -18,7 +18,8 @@ import xyz.surendrajat.smalilsp.util.Types
 /**
  * Registers for hover and document highlight. Registers are not in the AST (they would double
  * it for nothing navigable), so these read the method's lines: the token under the caret, every
- * use of it in the method with whether the instruction writes it, and what `pN` is a parameter of.
+ * use of it in the method with whether the instruction writes it, what `pN` is a parameter of,
+ * and the whole frame for the `.registers` line.
  */
 object Registers {
 
@@ -78,6 +79,31 @@ object Registers {
         }
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
+
+    /** Markdown for a `.registers`/`.locals` line: the frame's size, then which registers the locals, `this` and each parameter occupy, with the `.param` names. */
+    fun frameHover(method: MethodDefinition, className: String, lines: List<String>): Hover? {
+        val frame = RegisterFrame.of(method, lines) ?: return null
+        val md = buildString {
+            append("**Frame:** ${frame.total} registers (${frame.locals} local, ${frame.parameters} parameter) in `${method.name}`\n\n")
+            if (frame.locals > 0) append("- ${span("v", 0, frame.locals - 1)}: local${if (frame.locals > 1) "s" else ""}\n")
+            var slot = 0
+            if ("static" !in method.modifiers) {
+                append("- `p0` = `v${frame.locals}`: `this` (`${Types.readableName(className)}`)\n")
+                slot = 1
+            }
+            for (parameter in method.parameters) {
+                val width = RegisterFrame.slots(parameter.type)
+                append("- ${span("p", slot, slot + width - 1)} = ${span("v", frame.locals + slot, frame.locals + slot + width - 1)}: `${Types.readableName(parameter.type)}`")
+                (parameter.name ?: debugName(lines, method, "p$slot", method.range.end.line, ".param"))?.let { append(" $it") }
+                append('\n')
+                slot += width
+            }
+        }
+        return Hover(MarkupContent(MarkupKind.MARKDOWN, md.trimEnd()))
+    }
+
+    /** `v3` or `v3`–`v4`: the registers [from]..[to] of kind [kind] as code. */
+    fun span(kind: String, from: Int, to: Int): String = if (from == to) "`$kind$from`" else "`$kind$from`\u2013`$kind$to`"
 
     /** `(parameter index, type, second half of a wide parameter)` for a parameter register, index -1 for `this`; null for a local. */
     fun parameterOf(method: MethodDefinition, frame: RegisterFrame, register: RegisterToken): Triple<Int, String, Boolean>? {

@@ -99,6 +99,7 @@ class HoverProviderTest {
         assertTrue(hover.contains("**Method:** `onClick`"), hover)
         assertTrue(hover.contains("**Modifiers:** public"), hover)
         assertTrue(hover.contains("**Signature:** `(android.view.View, int)void`"), hover)
+        assertTrue(hover.contains("- `p1` `android.view.View`\n- `p2` `int`\n"), "each parameter with its register: $hover")
         assertTrue(hoverAt(".method", "Landroid/view/View;", 5)!!.contains("*SDK Class*"))
         assertTrue(hoverAt(".method", "I", after = "View;")!!.contains("**Primitive Type:** `int`"))
         assertNull(hoverAt(".method", "public"))
@@ -147,7 +148,7 @@ class HoverProviderTest {
             assertTrue(hover.lowercase().contains(hex), "$marker should document opcode 0x$hex: $hover")
         }
         assertTrue(assertNotNull(hoverAt("move v0", "v1"), "a register").contains("**Parameter** `v1`"), "a register hovers as what it holds")
-        assertNull(hoverAt(".registers", ".registers", 2))
+        assertTrue(hoverAt(".registers", ".registers", 2)!!.startsWith("**Frame:** 4 registers"), "the frame, not an opcode")
     }
 
     @Test
