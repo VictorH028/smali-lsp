@@ -71,8 +71,8 @@ class MemberFamily internal constructor(
 /**
  * Find references. Classes: subclasses, implementors and every use as a type or owner.
  * Methods and fields: the declaration and every site that binds to it (see [MemberFamily]).
- * Labels: every reference in the method. All answered from the reverse indexes; the symbol
- * under the caret comes from [SmaliFile.symbolAt].
+ * Labels: every reference in the method. Strings: every `const-string` of the same value. All
+ * answered from the reverse indexes; the symbol under the caret comes from [SmaliFile.symbolAt].
  */
 class ReferenceProvider(
     private val workspaceIndex: WorkspaceIndex
@@ -108,7 +108,7 @@ class ReferenceProvider(
                 is FieldAccessInstruction -> fieldReferences(instruction, includeDeclaration)
                 is TypeInstruction -> findClassReferences(Types.elementClass(instruction.className), includeDeclaration, cancel)
                 is JumpInstruction -> findLabelReferences(instruction.targetLabel, uri, symbol.method, includeDeclaration)
-                is ConstStringInstruction -> emptyList()
+                is ConstStringInstruction -> workspaceIndex.findStringUsages(instruction.value)
             }
         }
     }

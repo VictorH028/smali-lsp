@@ -10,9 +10,10 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
 /**
- * Hover: class hierarchy, member signatures, field types, primitive types, labels, and Dalvik
- * opcode documentation, as Markdown. The symbol under the caret comes from [SmaliFile.symbolAt];
- * only the opcode lookup reads the line text, because unmodelled instructions have no AST node.
+ * Hover: class hierarchy, member signatures, field types, primitive types, labels, string
+ * literals, and Dalvik opcode documentation, as Markdown. The symbol under the caret comes from
+ * [SmaliFile.symbolAt]; registers, resource ids and the opcode lookup read the line text,
+ * because they have no AST node.
  */
 class HoverProvider(
     private val workspaceIndex: WorkspaceIndex
@@ -33,8 +34,26 @@ class HoverProvider(
             is Symbol.LabelDecl -> hoverForLabel(symbol.label, symbol.method)
             is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { hoverForLabel(it, symbol.method) }
                 ?: Hover(MarkupContent(MarkupKind.MARKDOWN, "**Jump to label:** `:${symbol.name}`"))
-            is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position)
+            is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position) ?: hoverForString(symbol.instruction)
         }
+    }
+
+    /** A string literal: its text and how many `const-string` instructions in the workspace load the same value. */
+    private fun hoverForString(instruction: Instruction): Hover? {
+        if (instruction !is ConstStringInstruction) return null
+        val value = instruction.value
+        val shown = if (value.length > 200) value.substring(0, 199) + "\u2026" else value
+        val md = "**String:** ${codeSpan("\"$shown\"")}\n\n**References:** ${workspaceIndex.findStringUsages(value).size}"
+        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+    }
+
+    /** [text] as a Markdown code span, fenced with one more backtick than its longest run of them. */
+    private fun codeSpan(text: String): String {
+        var longest = 0
+        var run = 0
+        for (c in text) { run = if (c == '`') run + 1 else 0; longest = maxOf(longest, run) }
+        val fence = "`".repeat(longest + 1)
+        return "$fence$text$fence"
     }
 
     /** The resource id under the caret, named by the workspace's `public.xml`. */

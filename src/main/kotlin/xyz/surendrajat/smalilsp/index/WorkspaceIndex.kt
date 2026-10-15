@@ -389,6 +389,9 @@ class WorkspaceIndex {
     fun findFieldUsages(className: String, fieldName: String, fieldType: String): List<Location> =
         fieldUsages[MemberKey(className, fieldName, fieldType)].toLocations()
 
+    /** Every `const-string` that loads exactly [value], at the instruction. */
+    fun findStringUsages(value: String): List<Location> = stringUsages[value].toLocations()
+
     /** Every reference to the class as an owner, operand, field type or descriptor type; [cancel] is checked along the way for the big ones. */
     fun findClassRefLocations(className: String, cancel: CancelChecker? = null): List<Location> = classRefs[className].toLocations(cancel)
 
