@@ -2,28 +2,50 @@
 
 ## Unreleased
 
-### Fixed
+A hand-written parser replaces the ANTLR grammar, the index and AST hold a third of the memory
+they did, the server gives idle memory back to the OS, and editing gets register-aware hover,
+assembler-level diagnostics and resource-id navigation. Every change is verified
+against three decompiled apps (98,686 files) with a per-file AST fingerprint, real-server
+drives of every request at thousands of positions, and the MCP tools.
 
-- **Label operations scoped to the containing method** — rename, go-to-definition, and hover for labels resolved the label name against methods in file order; since baksmali reuses `:cond_0`/`:goto_0` in nearly every method, renaming a label in any method after the first silently rewrote the *first* method's labels, go-to-definition jumped into the wrong method, and hover inflated jump counts
-- **Rename rejected for SDK/unindexed members** — renaming e.g. `String.length()` from a call site rewrote every call site in the workspace while the SDK declaration kept its name, breaking each rewritten call
-- **Arrays of workspace classes no longer flagged** — `check-cast v0, [Lcom/app/Foo;` produced a false "class not found" warning even when `Lcom/app/Foo;` was indexed (primitive/SDK arrays were already handled)
-- **Ghost class evicted on watched-file class rename** — when apktool regenerates a file whose class name changed, the previous class at that URI is now removed from the index
-- **MCP stdout protocol corruption** — kotlin-logging 8.x (transitive via MCP SDK 0.14) printed a startup banner to stdout ahead of the first JSON-RPC response; suppressed via `kotlin-logging.logStartupMessage`
+### Added
+
+- **Register hover and highlight** — hover on `p1` says which parameter it carries (`this`, the second register of a wide one), on `v3` which local slot, with the `.param`/`.local` debug names and the method's frame; document highlight on a register marks every use in the method, writes apart from reads
+- **Assembler checks for hand edits** — a register the method does not declare or that the instruction form cannot address (`move` v0..v15, five sub-v16 registers for `invoke-*` unless `/range`), a literal that does not fit (`const/4` holds -8..7), a `move-result` not right after a call; widths and ranges come from the opcode database's format table
+- **Resource ids** — hover on a `0x7f...` literal names the resource (`id/login_button`) from the project's `res/values/public.xml`, go-to-definition opens the entry; the table reloads when apktool rewrites the file
+- **Implementations, document highlight, folding ranges** — implementors and overrides of a method, occurrences of a symbol or register in its file, foldable methods and directive blocks
+- **Label diagnostics** — a jump to an undefined label and a duplicate label are errors
+- **Hierarchies from any reference**; **completion** offers inherited members and ranks classes; **member hovers** name the declaring class and count the references
+- **Workspace folders** added or removed during the session are indexed and dropped
+- **MCP** — tools are bounded and validated, two new ones (`smali_read_method`, `smali_list_package`), an unknown tool is the JSON-RPC error the protocol specifies
+- **Logging** — warnings on stderr by default, `--log-file` instead of files in the working directory, `--verbose`
 
 ### Changed
 
-- **Toolchain modernized** — Gradle 9.6.1, `com.gradleup.shadow` 9.5.1, Kotlin 2.4.10; any JDK 17+ builds the project (Gradle 9's own floor — no pinned toolchain, no forced downloads), while `release=17` + `-Xjdk-release=17` keep the artifact's bytecode *and* API surface Java-17 compatible regardless of build JDK; CI builds/releases on Temurin 25 and runs tests on a JDK 17 + 25 matrix to keep the floor honest
-- **Dependencies updated** — lsp4j 0.24.0, MCP Kotlin SDK 0.14.0, JUnit 6.1.2, coroutines 1.11.0, Gson 2.14.0, SLF4J 2.0.18, Logback 1.5.38, ANTLR 4.13.2 (lsp4j 1.0.0 deliberately deferred: its LSP-3.18 `Either` type changes on `Diagnostic.message`/`TextDocumentEdit.edits` are breaking with no feature benefit here)
-- **Shadow jar 25% smaller (13 MB → 9.7 MB)** — jar contents are now governed at the dependency level: the ANTLR *tool* (build-time codegen, StringTemplate, ICU) and the MCP SDK's Ktor transports (with their kotlin-reflect and jansi baggage) are excluded from the runtime classpath itself instead of via fragile path lists — this also drops the excluded artifacts' metadata debris the old path excludes missed
-- `StringPool.clear()` re-seeds the pre-interned common strings, so MCP re-indexing keeps the hot-path fast lookups
+- **The parser is hand-written** — a lexer and statement parser replace the ANTLR grammar, its listener and the generated parser: the same model byte for byte on every fixture file, 3.6–4.6× faster single-threaded (0.04 ms per file), four to six times less allocation, cold start about twice as fast; a statement cut short at a line end is reported where it stopped, one bad line costs one diagnostic, and no input can overflow the stack
+- **Undefined-class warnings** are reported only for classes in packages the workspace defines; the classes an app references but does not ship (`org.xmlpull`, an optional Conscrypt, a Firebase connector behind a runtime check) are not mistakes — 652 false warnings on the three fixture apps went to zero
+- **One writer thread** applies every mutation; requests wait for the writes sent before them, so an answer never sees a half-applied edit; cancelled requests stop
+- **Definitions and selection ranges** point at the name token; references list every declaration of the member and start from its root declaration; only members a call can bind to are its references
+- **Diagnostics underline the offending token** (syntax errors, undefined classes, code lenses span the declaration line)
+- **Memory** — ProtonMail (19,637 files) holds 174 MB of live heap after indexing and the 76 K-file app 657 MB (from 288 MB and 1.05 GB): instructions, declarations, labels, references and class tokens keep positions as ints, modifiers are shared sets, usage lists are packed ints trimmed after the scan, member keys share the pooled strings
+- **Heap returned to the OS** — the free ratios are set in-process and a periodic concurrent cycle, armed by activity, uncommits the scan's garbage: committed heap 1.2 GB → 400 MB on ProtonMail and 3 GB → 1.6 GB on the large app a minute after indexing, with no launch flag
+- **Toolchain** — Gradle 9.8.1, Kotlin 2.4.21, lsp4j 1.0.0, MCP Kotlin SDK 0.15.0, JUnit 6.1.3, coroutines, Gson, SLF4J and Logback at their latest; any JDK 17+ builds the project; the shadow jar carries no grammar runtime (9.0 MB)
+
+### Fixed
+
+- Label operations scoped to the containing method (rename, definition and hover for `:cond_0` resolved against methods in file order)
+- Rename rejected for SDK and unindexed members; arrays of workspace classes no longer flagged; a primitive-array owner is not a class reference
+- Ghost class evicted when a watched file's class is renamed in place; the index follows the editor's buffer, then the disk again on close; percent-encoded file URIs are the same file; a watcher is registered for `.smali` files
+- Members used through a subclass resolve to the member the declaring class owns; fields inherited from interfaces resolve; incoming calls include calls through subclasses and supertypes; implementations of `Object` are not every class
+- Bundled copies of SDK-prefixed classes (`androidx.*`, `kotlin.*`) are workspace classes and navigable
+- Parsing accepts `synchronized`, debug-info forms of `.param` and `.local`, digit-leading and all-digit member names, keyword-, literal- and opcode-spelled member names, byte/short literal suffixes, primitive-array method owners (`[I->clone()`), `invoke-custom`, `invoke-polymorphic` and method-handle constants; string and char literals lex against their own delimiter; columns are UTF-16 code units; unparseable top-level constructs are reported instead of truncating the file
+- Indexing survives a silent client, a bad file and a symlink loop; the `rootUri` workspace is indexed; progress cannot abort indexing; capability registration that throws does not stop initialization
+- Exit status 1 when no shutdown request preceded exit; MCP stdout no longer corrupted by a logging banner
 
 ### Internal
 
-- Regression tests for label scoping, SDK rename guard, workspace-class arrays, and watched-file class renames
-- Corrected stale docs (opcode DB coverage claim, ReferenceProvider complexity note); removed a dead `unused_` filter
-- Removed the unused jacoco plugin — its agent taxed every test run while no workflow or doc ever consumed a report
-- Enabled Gradle's configuration cache (warm no-op builds ~300 ms); repaired jmh benchmark compilation and jar packaging
-- CI test jobs no longer build the shadow jar first (tests never used it)
+- The real-APK invariants, the grammar corpus, stdio drives of the LSP and MCP binaries, the AST fingerprint and the mutation and fuzz corpora are the gate for every change
+- Enabled Gradle's configuration cache; removed the unused jacoco plugin; CI test jobs no longer build the shadow jar first
 
 ## [1.5.0] - 2026-04-21
 
