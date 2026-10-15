@@ -174,16 +174,16 @@ Measured on three apktool projects (Mastodon v2.13.4, ProtonMail 7.11.5 and a 76
 
 | | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
 | --- | --- | --- | --- |
-| Index the workspace (parallel, cold) | 1.6 s | 2.7 s | 8.8 s |
+| Index the workspace (parallel, cold) | 0.8 s | 1.6 s | 6 s |
 | Heap after indexing (AST + index, string literals included) | — | 178 MB | 659 MB |
 | Committed heap a minute after indexing, idle | — | 400 MB | 1.6 GB |
-| Re-parse and re-index one file on edit, p95 | — | 0.7 ms | 0.7 ms |
+| Re-parse and re-index one file on edit, p95 | — | 0.2 ms | 0.6 ms |
 | Workspace symbol search, per query | — | 4–14 ms | 19–25 ms |
 
 - Definition, hover, references, rename and code lens are index lookups: well under a millisecond each
 - Every file of all three apps parses with zero syntax errors and no lost members (98,686 files)
 - Every workspace invoke and field access resolves to its declaration, as checked by the fixture-invariant tests
-- Single-thread parse throughput: 0.14 ms per file (ProtonMail, 2.7 s for all files)
+- Single-thread parse throughput: 0.04 ms per file (ProtonMail, 0.77 s for all 126 MB; 165 MB/s)
 
 ## Building
 
@@ -198,12 +198,12 @@ Output: `build/libs/smali-lsp-<version>.jar`
 ## Architecture
 
 ```
-ANTLR4 Grammar → SmaliParser → ASTBuilder → WorkspaceIndex → LSP/MCP Providers
+SmaliTextParser (hand-written) → SmaliParser → WorkspaceIndex → LSP/MCP Providers
                                                 ↑
                                     WorkspaceScanner (parallel)
 ```
 
-- **Parser**: ANTLR4 with SLL prediction; the AST is built by a parse listener and records the span of every navigable token
+- **Parser**: a hand-written lexer and statement parser, 0.04 ms per file; the AST records the span of every navigable token, and a syntax error costs one diagnostic and one line
 - **Index**: files by canonical URI, class hierarchy sets, and packed usage lists retired per file by a generation counter, so a re-index is O(file)
 - **Providers**: resolve the caret from the AST (`SmaliFile.symbolAt`) and answer from the index; one writer thread applies edits, requests wait for the edits sent before them
 - **Scanner**: one coroutine worker per core
@@ -226,8 +226,8 @@ The integration category uses apktool projects under `test-data/` when present (
 
 Copyright (C) 2026 Surendrajat
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE), except files under `src/main/antlr/` which are MIT licensed (see header in each file).
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ## Credits
 
-- @psygate for https://github.com/psygate/smali-antlr4-grammar
+- @psygate for https://github.com/psygate/smali-antlr4-grammar, the grammar the parser's operand table was derived from

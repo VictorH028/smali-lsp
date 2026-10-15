@@ -5,8 +5,8 @@ reasons behind the main design choices. Numbers in this document come from three
 projects: Mastodon v2.13.4 (2,517 files), ProtonMail 7.11.5 (19,637 files) and a 76,532-file
 production app, measured on a 12-core Apple Silicon laptop with JDK 21.
 
-**Codebase**: 28 Kotlin source files (~6,400 lines), 2 ANTLR grammars (1,546 lines),
-96 test files (~21,000 lines).
+**Codebase**: 30 Kotlin source files (~7,400 lines), no grammar: the front end is a
+hand-written parser; 97 test files (~21,000 lines).
 
 ---
 
@@ -46,36 +46,53 @@ for every open file, so a half-built index never floods a file with false warnin
 
 ## 2. Parsing
 
-### 2.1 Grammar (`SmaliLexer.g4`, `SmaliParser.g4`)
+### 2.1 The front end (`SmaliTextParser.kt`, `InstructionShapes.kt`)
 
-ANTLR 4, SLL prediction only. The grammar accepts every opcode of the Dalvik instruction set
-(224 opcode tokens), all directives, `invoke-custom`, `invoke-polymorphic`,
-`const-method-handle`, `const-method-type`, typed literal suffixes and the debug forms of
-`.param`/`.local`. The start rule ends in `EOF`, so a file is either parsed to the end or
-reports a syntax error; a silently truncated AST, which once hid 912 methods of ProtonMail's
-uniffi bindings, cannot recur. `GrammarCorpusTest` parses every fixture file and fails on any
-syntax error or on a file whose `.method`/`.field` count does not match the AST: 98,686 files,
-zero errors.
+A hand-written lexer and statement parser, 0.04 ms per file single-threaded. Smali is a list
+of statements, one per line in everything baksmali writes, so the parser reads a statement at
+a time: a directive, a `:label`, or an instruction whose operands are fixed by its opcode.
+`InstructionShapes` maps each of the 224 opcodes to one of 26 operand shapes (`R_LITERAL`,
+`LIST_METHOD`, `RR_FIELD`, …), a table derived mechanically from the grammar this parser
+replaced, so it accepts exactly what the grammar accepted: every directive, `invoke-custom`,
+`invoke-polymorphic`, `const-method-handle`, `const-method-type`, typed literal suffixes, the
+debug forms of `.param`/`.local`, member names spelled like opcodes, keywords or digits.
 
-**SLL only**: the smali grammar is unambiguous; no file in the corpus needs LL prediction.
+Whitespace, including newlines, separates tokens the way the assembler's lexer treats it, so a
+hand-written statement may still wrap. Tokens are spans into the source, never objects: the
+lexer advances a cursor and leaves the current token's kind and bounds in fields, and the
+parser slices names and descriptors straight out of the text and interns them. Positions are
+UTF-16 string indices, so every LSP column is exact, including lines with astral characters.
 
-### 2.2 `SmaliParser.kt` and `StringCharStream`
+**Errors and recovery.** A syntax error is reported on the offending token, with the token's
+length, and parsing resumes at the next line (at the offending token itself when it begins a
+line, since the statement before it ended early). One bad line costs one diagnostic, not the
+rest of the file; a method cut off by the next declaration or by the end of the file is
+closed there and kept. On 10,500 fixture files broken in nine ways (unknown opcode, missing
+`;`, deleted `.end method`, garbage line, field without a type, missing brace, unterminated
+string, missing comma, unknown directive) the parser agreed with the grammar on every case:
+error or not, the first error's line, and the number of methods recovered.
+
+**Why not the grammar.** The ANTLR lexer allocated a token object for each of 16 million
+tokens and the parser a tree it then threw away: 29 to 31 times the source size in garbage,
+45 MB/s. The hand-written front end runs at 165–170 MB/s with 6 to 7 times the source
+allocated, 3.6× faster on ProtonMail and 4.6× on the large app, and the scan is no longer
+GC-bound. The swap was verified by the per-file AST fingerprint over all 98,686 fixture files
+(byte-identical to the grammar's output) and by the parser tests that pin every accepted
+spelling.
+
+`GrammarCorpusTest` still parses every fixture file and fails on any syntax error or on a
+file whose `.method`/`.field` count does not match the AST: 98,686 files, zero errors.
+
+### 2.2 `SmaliParser.kt`
 
 ```
-content → BOM strip → ".class" fast reject → StringCharStream → Lexer → Parser(+ASTBuilder) → SmaliFile
+content → BOM strip → ".class" fast reject → SmaliTextParser → SmaliFile + syntax errors
 ```
 
-`StringCharStream` feeds the lexer UTF-16 code units, so every token offset is a string index
-and every LSP column is exact, including lines with astral characters. Lexer and parser errors
-are collected as `SyntaxError(line, column, message)`.
+Errors are collected as `SyntaxError(line, column, message, length)`, never thrown: a broken
+method still yields the class around it.
 
-### 2.3 `ASTBuilder.kt`: a parse listener
-
-The builder is attached with `addParseListener`, so the model is built while the parser runs
-instead of by a second walk over the finished tree. Every rule callback is an `exit` hook
-(children and stop token exist only then); the few `enter` hooks maintain a depth counter.
-Text is sliced straight out of the source by token offset (`src()`), which replaced
-`ParserRuleContext.getText()`'s per-level string building, the single biggest parse cost.
+### 2.3 What the model holds
 
 What is captured:
 
@@ -101,7 +118,7 @@ thousands of files is one `String`; the pool is bounded (500 K entries) and per 
 
 | | ProtonMail (19,637 files) | 76 K-file app |
 |---|---|---|
-| Single-thread parse, all files | 2.7 s (0.14 ms/file) | ~11 s |
+| Single-thread parse, all files | 0.77 s (0.04 ms/file, 165 MB/s) | 3.8 s (170 MB/s) |
 | AST heap after GC | 116 MB (5.9 KB/file) | 388 MB |
 
 Interning the instruction strings took the ProtonMail AST from 470 MB to 293 MB for 2 to 5 %
@@ -170,7 +187,7 @@ and removal scanned every usage set the file touched, so a keystroke in a file t
 | Index heap after GC | 371 MB → 90 MB → **62 MB** | 1,331 MB → 328 MB → **271 MB** |
 | AST + index | 841 MB → 281 MB → **178 MB** | 2,850 MB → 1,027 MB → **659 MB** |
 | Index build, single thread | 0.95 s → 0.52 s | 3.4 s → 1.4 s |
-| didChange (re-parse + re-index one file), p95 | 58 ms → **0.6 ms** | 340 ms → **0.8 ms** |
+| didChange (re-parse + re-index one file), p95 | 58 ms → 0.6 ms → **0.2 ms** | 340 ms → 0.8 ms → **0.6 ms** |
 | didChange, worst of 200 files | 0.9 s → 18 ms | 7.5 s → 9 ms |
 
 The second step: the method and field tables are keyed by `MemberKey` (owner, name,
@@ -202,8 +219,7 @@ server on 12 cores, including file reads:
 
 | | Mastodon | ProtonMail | 76 K-file app |
 |---|---|---|---|
-| Cold | 1.6 s | 2.7 s | 8.8 s |
-| Warm re-index | 0.4 s | 1.0 s | 7.5 s |
+| Cold | 0.8 s | 1.6 s | 6 s |
 
 ### 3.4 String literals
 
@@ -370,12 +386,13 @@ only one index is built at a time.
 
 ## 7. Design decisions
 
-- **ANTLR, not a hand-written parser.** The grammar is 1.5 K lines against an estimated 3 K
-  for a hand-written parser, and ANTLR's error recovery keeps a file with one bad line
-  navigable. Parsing is 0.14 ms per file; the one-time scan of a 76 K-file app is 9 s.
-- **A parse listener, not a tree walk.** Building the model during the parse and slicing text
-  by offset halved the parse pipeline (5.1 s → 2.7 s on ProtonMail) without changing a byte of
-  output, verified by a per-file fingerprint of every AST.
+- **A hand-written parser, not a grammar.** The project started on an ANTLR grammar, moved
+  the model building into a parse listener (5.1 s → 2.7 s on ProtonMail), and then replaced
+  the grammar altogether: an object per token and a parse tree per file cost 30× the source in
+  garbage for a format that is a list of lines. The replacement is 1.2 K lines of Kotlin against
+  1.5 K lines of grammar, a 760-line listener and a generated parser, parses 3.6–4.6× faster, and its operand
+  table is derived from the grammar so nothing accepted was lost; the per-file AST
+  fingerprint over the corpus proved the output byte-identical before the grammar was removed.
 - **Spans in the AST.** One int per member reference gives exact token ranges; the alternative,
   re-reading lines and matching names with `indexOf`, mis-resolved duplicated names and needed
   file reads for closed documents.
@@ -434,12 +451,10 @@ only one index is built at a time.
 
 | File | Lines | Role |
 |------|-------|------|
-| SmaliParser.g4 | 1,062 | parser grammar |
 | DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
-| ASTBuilder.kt | 748 | parse listener building the model |
+| SmaliTextParser.kt | 1,160 | the front end: lexer, statement parser, model building |
 | McpMode.kt | 537 | MCP server |
 | WorkspaceIndex.kt | 515 | the index |
-| SmaliLexer.g4 | 484 | lexer grammar |
 | SmaliLanguageServer.kt | 317 | the LSP server: handshake, indexing, capabilities |
 | WorkspaceSymbolProvider.kt | 254 | workspace symbol search |
 | SmaliTextDocumentService.kt | 252 | document lifecycle and requests |
@@ -454,14 +469,14 @@ only one index is built at a time.
 | Symbol.kt | 140 | `symbolAt` and the symbol kinds |
 | RenameProvider.kt | 130 | rename |
 | CallHierarchyProvider.kt | 127 | call hierarchy |
-| SmaliParser.kt | 126 | parser entry |
+| InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
+| SmaliParser.kt | 50 | parser entry |
 | SmaliWorkspaceService.kt | 113 | watched files, workspace symbols |
 | CodeLensProvider.kt | 88 | reference counts |
 | DocumentSymbolProvider.kt | 82 | outline |
 | WriteQueue.kt | 71 | the writer thread and the request helper |
 | DefinitionProvider.kt | 68 | definition |
 | Cli.kt | 64 | command line, usage, version |
-| StringCharStream.kt | 55 | UTF-16 char stream |
 | UsageList.kt | 53 | packed usage sites |
 | StringPool.kt | 53 | per-index interning |
 | Logging.kt | 39 | logback setup |
