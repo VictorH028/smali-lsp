@@ -33,6 +33,27 @@ class CodeLensProviderTest {
     }
 
     @Test
+    fun `the class line counts references and subtypes`() {
+        indexContent("file:///test/Foo.smali", ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;\n.method public constructor <init>()V\n    .registers 1\n    return-void\n.end method\n")
+        indexContent("file:///test/Bar.smali", ".class public Lcom/example/Bar;\n.super Lcom/example/Foo;\n.method public constructor <init>()V\n    .registers 1\n    invoke-direct {p0}, Lcom/example/Foo;-><init>()V\n    return-void\n.end method\n")
+        indexContent("file:///test/Shape.smali", ".class public interface abstract Lcom/example/Shape;\n.super Ljava/lang/Object;\n")
+        indexContent("file:///test/Circle.smali", ".class public Lcom/example/Circle;\n.super Ljava/lang/Object;\n.implements Lcom/example/Shape;\n")
+
+        val foo = provider.provideCodeLenses("file:///test/Foo.smali")
+        val classLenses = foo.filter { it.range.start.line == 0 }
+        assertEquals(2, classLenses.size, "references and subclasses: $classLenses")
+        assertEquals(Range(Position(0, 0), Position(0, ".class public Lcom/example/Foo;".length)), classLenses[0].range)
+        assertEquals("class", (classLenses[0].data as JsonObject)["memberType"].asString)
+        assertEquals("2 references", provider.resolveCodeLens(classLenses[0]).command.title, "Bar's `.super` and its call")
+        assertEquals("1 subclass", classLenses[1].command.title, "already resolved")
+
+        assertEquals("1 implementation", provider.provideCodeLenses("file:///test/Shape.smali").filter { it.range.start.line == 0 }[1].command.title)
+        val bar = provider.provideCodeLenses("file:///test/Bar.smali").filter { it.range.start.line == 0 }
+        assertEquals(1, bar.size, "nothing extends Bar, so no subtype lens")
+        assertEquals("0 references", provider.resolveCodeLens(bar[0]).command.title)
+    }
+
+    @Test
     fun `provides code lens for methods`() {
         val content = """
             .class public Lcom/example/Foo;

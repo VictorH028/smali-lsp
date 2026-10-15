@@ -8,10 +8,11 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 /**
  * Provides code lens (inline reference counts) for smali classes.
  *
- * Shows "N references" above each method and field definition; a lens's range is the
- * declaration line, as the protocol asks. Uses lazy resolution: provideCodeLenses returns
- * unresolved lenses (cheap), resolveCodeLens computes the actual count only when a lens
- * becomes visible.
+ * Shows "N references" above the class and each method and field definition, and beside the
+ * class how many classes extend or implement it; a lens's range is the declaration line, as
+ * the protocol asks. Uses lazy resolution: provideCodeLenses returns unresolved lenses
+ * (cheap), resolveCodeLens computes the actual count only when a lens becomes visible. The
+ * subtype count is one map lookup, so it comes resolved.
  *
  * LSP Requests: textDocument/codeLens, codeLens/resolve
  */
@@ -28,6 +29,16 @@ class CodeLensProvider(
         val file = index.findFileByUri(uri) ?: return emptyList()
         val className = file.classDefinition.name
         val lenses = mutableListOf<CodeLens>()
+
+        val classDef = file.classDefinition
+        val classLine = Span(classDef.nameSpan.line, classDef.range.start.character, classDef.nameSpan.end).toRange()
+        lenses.add(CodeLens(classLine, null, classData(className, "class")))
+        val isInterface = "interface" in classDef.modifiers
+        val subtypes = if (isInterface) index.getDirectImplementors(className).size else index.getDirectSubclasses(className).size
+        if (subtypes > 0) {
+            val noun = if (isInterface) "implementation" else "subclass"
+            lenses.add(CodeLens(classLine, Command("$subtypes $noun${if (subtypes != 1) (if (isInterface) "s" else "es") else ""}", ""), classData(className, "subtypes")))
+        }
 
         for (method in file.methods) {
             val data = JsonObject()
@@ -55,6 +66,7 @@ class CodeLensProvider(
      * Called lazily by the client when the lens scrolls into view.
      */
     fun resolveCodeLens(lens: CodeLens): CodeLens {
+        if (lens.command != null) return lens
         val data = lens.data
         if (data == null || data !is JsonObject) {
             lens.command = Command("? references", "")
@@ -67,6 +79,7 @@ class CodeLensProvider(
         val descriptor = data.get("descriptor")?.asString ?: ""
 
         val count = when (memberType) {
+            "class" -> references.findClassReferences(className, includeDeclaration = false).size
             "method" -> countMethodReferences(className, memberName, descriptor)
             "field" -> countFieldReferences(className, memberName, data.get("fieldType")?.asString ?: "")
             else -> 0
@@ -77,6 +90,13 @@ class CodeLensProvider(
             ""
         )
         return lens
+    }
+
+    /** The data of a lens on the class line; the class is its own "member" so that clients and tests keying lenses by member name see it. */
+    private fun classData(className: String, memberType: String): JsonObject = JsonObject().apply {
+        addProperty("className", className)
+        addProperty("memberName", className)
+        addProperty("memberType", memberType)
     }
 
     /** Calls that dispatch to this declaration or to an override below it; the lens on an override counts its own callers, not the whole hierarchy's. */
