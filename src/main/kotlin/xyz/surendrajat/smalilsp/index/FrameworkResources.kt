@@ -1,6 +1,10 @@
 package xyz.surendrajat.smalilsp.index
 
-/** Names of the framework's public resource ids (`android.R`, `0x01…`), from the bundled `android-public.txt` (`./gradlew generateAndroidPublic`). */
+/**
+ * Names of the framework's public resource ids (`android.R`, `0x01…`), from the bundled
+ * `android-public.txt` (`./gradlew generateAndroidPublic`). Public ids never change between
+ * releases, so one table serves every app.
+ */
 object FrameworkResources {
     private val table: Pair<IntArray, Array<String>> by lazy { load() }
 

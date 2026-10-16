@@ -12,7 +12,8 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
  * Hints after literals ([Literals]): what a resource id names, else the decimal of a hex number.
- * None for -9..9, bytes and shorts, lines baksmali already commented, or ids nothing names.
+ * None for -9..9 (obvious), bytes and shorts (array data, not numbers to read), lines baksmali
+ * already commented (`# 1.0f`), or resource-shaped ids nothing names (decimal would be noise).
  */
 object InlayHints {
 
