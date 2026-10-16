@@ -148,4 +148,17 @@ class ResourceLiteralsTest {
         assertNull(HoverProvider(index).provideHover("file:///Main.smali", source.positionOf("const v0, 0x7f0a0012", "0x7f0a0012", 3)))
         assertEquals(emptyList(), DefinitionProvider(index).findDefinition("file:///Main.smali", source.positionOf("const v0, 0x7f0a0012", "0x7f0a0012", 3)))
     }
+
+    @Test
+    fun `framework ids are named from the bundled table, with nowhere to go`() {
+        val index = WorkspaceIndex()
+        val fw = source.replace("const v0, 0x7f0a9999", "const v0, 0x10100c4").replace("const/4 v1, 0x5", "const v1, 0x101ffff")
+        index.openSource("file:///Main.smali", fw)
+        val hover = assertNotNull(HoverProvider(index).provideHover("file:///Main.smali", fw.positionOf("0x10100c4", "0x10100c4", 3))).contents.right.value
+        assertTrue(hover.contains("`android:attr/orientation`") && hover.contains("android.R.attr.orientation"), hover)
+        assertEquals(emptyList(), DefinitionProvider(index).findDefinition("file:///Main.smali", fw.positionOf("0x10100c4", "0x10100c4", 3)))
+        assertNull(HoverProvider(index).provideHover("file:///Main.smali", fw.positionOf("0x101ffff", "0x101ffff", 3)), "not a public id")
+        val lines = fw.lines()
+        assertEquals(listOf("android:attr/orientation"), InlayHints.hints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(lines.size - 1, 0))).map { it.label.left }, "no project table needed")
+    }
 }

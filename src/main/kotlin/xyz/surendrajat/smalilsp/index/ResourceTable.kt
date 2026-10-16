@@ -6,10 +6,16 @@ import org.eclipse.lsp4j.Range
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-/** One `<public type="id" name="login" id="0x7f0a0012" />` entry of an apktool project's `res/values/public.xml`. */
+/**
+ * One `<public type="id" name="login" id="0x7f0a0012" />` entry of an apktool project's
+ * `res/values/public.xml`, or a framework resource from the bundled table, which has no file ([uri] empty).
+ */
 class Resource(val id: Int, val type: String, val name: String, val uri: String, val line: Int, val start: Int, val end: Int) {
-    /** `id/login`, the way `R.id.login` reads in smali hovers. */
-    val qualifiedName: String get() = "$type/$name"
+    /** An `android.R` resource: named by [FrameworkResources], defined nowhere in the project. */
+    val isFramework: Boolean get() = uri.isEmpty()
+
+    /** `id/login`, the way `R.id.login` reads in smali hovers; `android:attr/hint` for a framework resource. */
+    val qualifiedName: String get() = if (isFramework) "android:$type/$name" else "$type/$name"
 
     /** The `public.xml` entry. */
     val location: Location get() = Location(uri, Range(Position(line, start), Position(line, end)))
@@ -31,9 +37,20 @@ class ResourceTable {
     private val values = ConcurrentHashMap<String, ResourceValue>()   // "type/name"
     private val roots = ConcurrentHashMap<String, File>()              // public.xml uri → project root
 
+    private val framework = ConcurrentHashMap<Int, Resource>()
+
     val size: Int get() = byId.size
 
-    operator fun get(id: Int): Resource? = byId[id]
+    /** The project's resource with [id], else the framework's, else null. */
+    operator fun get(id: Int): Resource? = byId[id] ?: frameworkResource(id)
+
+    /** The `android.R` resource an `0x01TTEEEE` id names, built once per id from the bundled table. */
+    private fun frameworkResource(id: Int): Resource? {
+        if (id ushr 24 != 0x01) return null
+        framework[id]?.let { return it }
+        val name = FrameworkResources.name(id) ?: return null
+        return framework.computeIfAbsent(id) { Resource(id, name.substringBefore('/'), name.substringAfter('/'), "", -1, 0, 0) }
+    }
 
     /** The value a values file gives [resource], when it has one (strings, colors, dimensions, integers, booleans). */
     fun valueOf(resource: Resource): ResourceValue? = values[resource.qualifiedName]
@@ -139,6 +156,9 @@ class ResourceTable {
 
         /** The ids an app's own resources use: package 0x7f. */
         fun isResourceId(value: Long): Boolean = value in 0x7f000000L..0x7fffffffL
+
+        /** An app id or a framework id (`android.R`, package 0x01). */
+        fun isAnyResourceId(value: Long): Boolean = isResourceId(value) || FrameworkResources.isFrameworkId(value)
 
         /** The `public.xml` of an apktool project rooted at [root], whether or not it exists. */
         fun publicXml(root: File): File = File(root, "res/values/public.xml")

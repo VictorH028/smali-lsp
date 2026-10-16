@@ -352,8 +352,11 @@ whose declarations are unreachable.
   plus the values the default `res/values/*.xml` files give strings, colors, dimensions,
   integers and booleans. Hover on a `0x7f...` literal names the resource (`id/login_button`)
   and shows its value; definition opens the value's line, the file a layout or drawable is, or
-  the `public.xml` entry. The literal is read from the line on demand, like registers, so the
-  AST is untouched.
+  the `public.xml` entry. `android.R` ids (`0x01TTEEEE`) are named by `FrameworkResources`, a
+  bundled table of the framework's 14,516 public ids (`src/main/resources/android-public.txt`,
+  written by `test-tmp/probes/gen_android_public.py` from the `public.xml` of the framework
+  apktool ships; public ids never change, so one table serves every app). The literal is read
+  from the line on demand, like registers, so the AST is untouched.
 - **Inlay hints**: `InlayHints` scans the requested lines once with `Literals.find`, which
   reads the one literal a line can carry: the last operand of an instruction, a `.field` value,
   an annotation element, an `.array-data` element, a `.sparse-switch` key or the `.packed-switch`
@@ -503,7 +506,9 @@ only one index is built at a time.
 | DocumentSymbolProvider.kt | 82 | outline |
 | WriteQueue.kt | 71 | the writer thread and the request helper |
 | DefinitionProvider.kt | 68 | definition |
+| Literals.kt | 72 | the one literal a line carries |
 | InlayHints.kt | 66 | resource names and decimal values after literals |
+| FrameworkResources.kt | 50 | the bundled `android.R` names |
 | Cli.kt | 64 | command line, usage, version |
 | UsageList.kt | 53 | packed usage sites |
 | StringPool.kt | 53 | per-index interning |

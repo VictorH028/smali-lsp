@@ -17,8 +17,8 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
  * `.field` values, annotation elements, `.array-data` elements and switch keys. Values -9..9
  * need no help, bytes and shorts (`0x41t`, `0x1s`) are data rather than numbers to read, a
  * literal baksmali annotated itself (`0x3f800000    # 1.0f`) keeps its comment, and a
- * resource-shaped id the table does not know (an `android.R` one, or a project without
- * `public.xml`) is not a number anyone wants in decimal. The lines are scanned on demand: the
+ * resource-shaped id nothing names (a project without `public.xml`, a non-public framework id)
+ * is not a number anyone wants in decimal. `android.R` ids come from the bundled framework table. The lines are scanned on demand: the
  * AST keeps no literals.
  */
 object InlayHints {
@@ -34,12 +34,12 @@ object InlayHints {
             val text = literal.token.text
             if (!isHex(text) || text.endsWith('t') || text.endsWith('s') || text.endsWith('S')) continue
             val value = InstructionText.literalValue(text) ?: continue
-            val hint = if (ResourceTable.isResourceId(value)) {
+            val hint = if (ResourceTable.isAnyResourceId(value)) {
                 val resource = index.resources[value.toInt()] ?: continue
                 ResourceLiterals.hint(index, resource)
             } else {
                 if (literal.kind == Literals.Kind.Instruction && !carriesNumber(literal.opcode!!)) continue
-                if (value in -9L..9L || looksLikeResourceId(value)) continue
+                if (value in -9L..9L) continue
                 if (line.indexOf('#', literal.token.end) >= 0) continue
                 Hint("= $value", null)
             }
@@ -63,7 +63,4 @@ object InlayHints {
     private fun carriesNumber(opcode: String): Boolean =
         opcode == "const" || opcode.startsWith("const/") || opcode.startsWith("const-wide") ||
             opcode.endsWith("/lit8") || opcode.endsWith("/lit16")
-
-    /** The `android.R` id range (`0x01TTEEEE`); app ids are [ResourceTable.isResourceId]. */
-    private fun looksLikeResourceId(value: Long): Boolean = value in 0x01010000L..0x01ffffffL
 }

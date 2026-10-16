@@ -99,6 +99,7 @@ class InlayHintsTest {
                 line("const-wide/high16 v2") to "= 4611686018427387904",
                 line("mul-int/lit8") to "= 31",
                 line("and-int/lit16") to "= 255",
+                line("const v0, 0x1010000") to "android:attr/theme",
                 line(".field public static B") to "= 100",
                 line("value = 0x1f") to "= 31",
                 line(".packed-switch 0x10") to "= 16",
@@ -106,7 +107,7 @@ class InlayHintsTest {
                 exactLine("0x3e8") to "= 1000"
             ),
             hints,
-            "const and lit operands, a field value, an annotation element, switch keys and an int array element"
+            "const and lit operands, a framework id, a field value, an annotation element, switch keys and an int array element"
         )
     }
 
@@ -124,7 +125,7 @@ class InlayHintsTest {
     @Test
     fun `small values, decimal literals, commented floats, strings, switch tables and unknown resource ids get nothing`() {
         val hints = hints(WorkspaceIndex())
-        for (text in listOf("const/4 v0, 0x5", "# 1.0f", "# 3.14", "const v0, 0x7f0a0012", "const v0, 0x1010000", "0x7f0a9999", "const/16 v0, 1000", "add-int/lit8", "const-string", "packed-switch v0", ".field public static A", ".field public static C", ".field public static D", "0x7f0a0012 -> ", "ids = {", ".array-data 4")) {
+        for (text in listOf("const/4 v0, 0x5", "# 1.0f", "# 3.14", "const v0, 0x7f0a0012", "0x7f0a9999", "const/16 v0, 1000", "add-int/lit8", "const-string", "packed-switch v0", ".field public static A", ".field public static C", ".field public static D", "0x7f0a0012 -> ", "ids = {", ".array-data 4")) {
             assertNull(hints[line(text)], text)
         }
         for (text in listOf("0x7f0a0012", "0x5", "0x41t")) assertNull(hints[exactLine(text)], "array element $text")

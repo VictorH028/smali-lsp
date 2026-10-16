@@ -23,6 +23,7 @@ apk*
 !DESIGN.md
 *.sh
 *.txt
+!src/main/resources/android-public.txt
 !.github/
 docs
 *.py

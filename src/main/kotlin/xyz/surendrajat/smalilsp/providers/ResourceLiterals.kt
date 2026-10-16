@@ -15,7 +15,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 /**
  * Resource ids where they appear in code: a `const` operand, a `.field` value, an `.array-data`
  * element, a switch key or an annotation element whose value the workspace's `public.xml`
- * names (see [Literals]). Literals are not in the AST, so the line is decoded on demand, as
+ * names, or the bundled framework table for `android.R` ids (see [Literals]). Literals are not in the AST, so the line is decoded on demand, as
  * registers are. Hover shows the name and the value the values files give it, definition opens
  * the value's line (or the file the resource is), and [InlayHints] puts name and value after
  * the literal.
@@ -24,7 +24,6 @@ object ResourceLiterals {
 
     /** The resource the literal under the caret names, if any. */
     fun at(index: WorkspaceIndex, uri: String, position: Position): Resource? {
-        if (index.resources.size == 0) return null
         val line = index.getLineContent(uri, position.line) ?: return null
         return resourceOf(index, line)?.takeIf { (_, literalStart, literalEnd) -> position.character in literalStart..literalEnd }?.first
     }
@@ -33,12 +32,15 @@ object ResourceLiterals {
     private fun resourceOf(index: WorkspaceIndex, line: String): Triple<Resource, Int, Int>? {
         val literal = Literals.find(line)?.token ?: return null
         val value = InstructionText.literalValue(literal.text) ?: return null
-        if (!ResourceTable.isResourceId(value)) return null
+        if (!ResourceTable.isAnyResourceId(value)) return null
         val resource = index.resources[value.toInt()] ?: return null
         return Triple(resource, literal.start, literal.end)
     }
 
     fun hover(index: WorkspaceIndex, resource: Resource): Hover {
+        if (resource.isFramework) {
+            return Hover(MarkupContent(MarkupKind.MARKDOWN, "**Resource:** `${resource.qualifiedName}` (`0x${Integer.toHexString(resource.id)}`)\n\n*Android framework resource* - `android.R.${resource.type}.${resource.name}`"))
+        }
         val value = index.resources.valueOf(resource)
         val file = if (value == null) index.resources.fileOf(resource) else null
         val md = buildString {
@@ -53,8 +55,9 @@ object ResourceLiterals {
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    /** Where the resource is defined: its value's line, else the file it is, else its `public.xml` entry. */
+    /** Where the resource is defined: its value's line, else the file it is, else its `public.xml` entry; a framework resource is defined nowhere in the project. */
     fun definition(index: WorkspaceIndex, resource: Resource): List<Location> {
+        if (resource.isFramework) return emptyList()
         index.resources.valueOf(resource)?.let { return listOf(it.location) }
         index.resources.fileOf(resource)?.let { return listOf(Location(it.toPath().toUri().toString(), Range(Position(0, 0), Position(0, 0)))) }
         return listOf(resource.location)
