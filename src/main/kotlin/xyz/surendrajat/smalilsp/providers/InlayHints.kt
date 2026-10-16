@@ -11,19 +11,12 @@ import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
- * Inlay hints say what a literal is. After a resource id, the resource's name and value
- * (`string/app_name = "Mail"`); after any other hex literal, its decimal value (`= 1000`).
- * Literals are wherever baksmali writes them ([Literals]): `const*` and `*-int/lit*` operands,
- * `.field` values, annotation elements, `.array-data` elements and switch keys. Values -9..9
- * need no help, bytes and shorts (`0x41t`, `0x1s`) are data rather than numbers to read, a
- * literal baksmali annotated itself (`0x3f800000    # 1.0f`) keeps its comment, and a
- * resource-shaped id nothing names (a project without `public.xml`, a non-public framework id)
- * is not a number anyone wants in decimal. `android.R` ids come from the bundled framework table. The lines are scanned on demand: the
- * AST keeps no literals.
+ * Hints after literals ([Literals]): what a resource id names, else the decimal of a hex number.
+ * None for -9..9, bytes and shorts, lines baksmali already commented, or ids nothing names.
  */
 object InlayHints {
 
-    /** The hints for the lines of [lines] within [range], in line order. */
+    /** Hints for [lines] within [range]. */
     fun hints(index: WorkspaceIndex, lines: List<String>, range: Range): List<InlayHint> {
         val out = ArrayList<InlayHint>()
         val scanner = InstructionScanner()
@@ -51,7 +44,7 @@ object InlayHints {
         return out
     }
 
-    /** A hint's text and its tooltip, if the text was cut short. */
+    /** Label and optional tooltip. */
     class Hint(val label: String, val tooltip: String?)
 
     private fun isHex(text: String): Boolean {
@@ -59,7 +52,7 @@ object InlayHints {
         return text.startsWith("0x", at) || text.startsWith("0X", at)
     }
 
-    /** The literal is the value the instruction loads or computes with: `const*` (not a string or class) and `*-int/lit8`, `*-int/lit16`. */
+    /** `const*` (not string or class) and `*-int/lit8`/`lit16`: the literal is the number used. */
     private fun carriesNumber(opcode: String): Boolean =
         opcode == "const" || opcode.startsWith("const/") || opcode.startsWith("const-wide") ||
             opcode.endsWith("/lit8") || opcode.endsWith("/lit16")

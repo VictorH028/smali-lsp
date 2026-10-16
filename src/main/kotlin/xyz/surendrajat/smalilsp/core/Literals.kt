@@ -1,20 +1,14 @@
 package xyz.surendrajat.smalilsp.core
 
-/**
- * The one numeric literal a smali line can carry, found where baksmali writes it: the last
- * operand of an instruction (`const v0, 0x7f0a0012`), the value of a `.field … = 0x…` or of an
- * annotation element (`value = 0x…`), an `.array-data` element, a `.sparse-switch` key
- * (`0x… -> :label`) or the first key of `.packed-switch`. Literals are not in the AST, so
- * resource hover and inlay hints read them from the line.
- */
+/** The one numeric literal a line carries: an instruction's last operand, a `.field` or annotation value, an `.array-data` element or a switch key. Not in the AST, so read from the line. */
 object Literals {
 
     enum class Kind { Instruction, Field, Annotation, Element, SwitchKey, PackedSwitch }
 
-    /** A literal's token, where it sits, and the opcode when it is an instruction's operand. */
+    /** [opcode] is set for an instruction operand. */
     class Literal(val token: TextToken, val kind: Kind, val opcode: String? = null)
 
-    /** The literal of [line], or null when the line has none; [scanner] is reused across lines. */
+    /** The literal of [line], or null; [scanner] is reused across lines. */
     fun find(line: String, scanner: InstructionScanner = InstructionScanner()): Literal? {
         var i = 0
         while (i < line.length && isBlank(line[i])) i++
@@ -35,7 +29,7 @@ object Literals {
         else -> null
     }
 
-    /** `name = 0x…` of an annotation element; null when the second token is not `=`, which leaves the line to the instruction scanner. */
+    /** `name = 0x…` of an annotation element; null hands the line to the instruction scanner. */
     private fun assignment(line: String, start: Int): Literal? {
         var i = start
         while (i < line.length && !isBlank(line[i])) i++
@@ -43,7 +37,7 @@ object Literals {
         return if (i < line.length && line[i] == '=') token(line, i + 1, Kind.Annotation) else null
     }
 
-    /** An `.array-data` element, or a `.sparse-switch` key when `->` follows it. */
+    /** An `.array-data` element, or a `.sparse-switch` key when `->` follows. */
     private fun bare(line: String, start: Int): Literal? {
         val literal = token(line, start, Kind.Element) ?: return null
         var i = literal.token.end
@@ -57,7 +51,7 @@ object Literals {
         return Literal(literal, Kind.Instruction, scanner.opcode)
     }
 
-    /** The token at or after [from] (blanks skipped) up to the next blank, comma or comment, when it starts like a number: an optional `-`, then a digit. */
+    /** The number token at [from] (blanks skipped), up to a blank, comma or comment. */
     private fun token(line: String, from: Int, kind: Kind): Literal? {
         var start = from
         while (start < line.length && isBlank(line[start])) start++

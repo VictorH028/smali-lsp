@@ -5,13 +5,10 @@ import xyz.surendrajat.smalilsp.core.ConstStringInstruction
 import xyz.surendrajat.smalilsp.core.Symbol
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
-/**
- * The string operand of a `const-string`. The AST keeps the value but not the literal's
- * columns, so whether the caret is on it is read from the line: at or after the opening quote.
- */
+/** The string operand of a `const-string`; the AST has no columns for it, so the caret counts from the opening quote. */
 object StringLiterals {
 
-    /** The instruction whose string literal the caret is on, if [symbol] is on a `const-string` and the caret is not on its opcode or register. */
+    /** The `const-string` whose literal the caret is on, else null. */
     fun at(index: WorkspaceIndex, uri: String, position: Position, symbol: Symbol?): ConstStringInstruction? {
         val instruction = (symbol as? Symbol.OnInstruction)?.instruction as? ConstStringInstruction ?: return null
         val line = index.getLineContent(uri, position.line) ?: return null

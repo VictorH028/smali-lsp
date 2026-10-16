@@ -12,14 +12,7 @@ import xyz.surendrajat.smalilsp.index.Resource
 import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
-/**
- * Resource ids where they appear in code: a `const` operand, a `.field` value, an `.array-data`
- * element, a switch key or an annotation element whose value the workspace's `public.xml`
- * names, or the bundled framework table for `android.R` ids (see [Literals]). Literals are not in the AST, so the line is decoded on demand, as
- * registers are. Hover shows the name and the value the values files give it, definition opens
- * the value's line (or the file the resource is), and [InlayHints] puts name and value after
- * the literal.
- */
+/** Resource ids in code (any literal [Literals] finds), named by the project's `public.xml` or the framework table. */
 object ResourceLiterals {
 
     /** The resource the literal under the caret names, if any. */
@@ -55,7 +48,7 @@ object ResourceLiterals {
         return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
-    /** Where the resource is defined: its value's line, else the file it is, else its `public.xml` entry; a framework resource is defined nowhere in the project. */
+    /** The value's line, else the resource's file, else its `public.xml` entry; nothing for a framework resource. */
     fun definition(index: WorkspaceIndex, resource: Resource): List<Location> {
         if (resource.isFramework) return emptyList()
         index.resources.valueOf(resource)?.let { return listOf(it.location) }
