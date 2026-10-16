@@ -22,8 +22,16 @@ class InlayHintsTest {
     private val source = """
         .class public Lcom/app/Lits;
         .super Ljava/lang/Object;
+        .field public static A:I = 0x7f0a0012
+        .field public static B:I = 0x64
+        .field public static C:B = 0x41t
+        .field public static D:Ljava/lang/String; = "0x3e8"
         .method public run()V
             .registers 4
+            .annotation build Lcom/app/Marker;
+                value = 0x1f
+                ids = { 0x7f0a0012 }
+            .end annotation
             const/4 v0, 0x5
             const/16 v0, 0x3e8
             const v0, -0x80
@@ -41,19 +49,38 @@ class InlayHintsTest {
             and-int/lit16 v0, v0, 0xff
             const-string v0, "0x3e8"
             packed-switch v0, :pswitch_data_0
+            sparse-switch v0, :sswitch_data_0
+            fill-array-data v0, :array_0
             return-void
             :pswitch_data_0
             .packed-switch 0x10
                 :pswitch_0
             .end packed-switch
+            :sswitch_data_0
+            .sparse-switch
+                0x7f0a0012 -> :sswitch_0
+                0x64 -> :sswitch_0
+            .end sparse-switch
             :pswitch_0
+            :sswitch_0
             return-void
+            :array_0
+            .array-data 4
+                0x7f0a0012
+                0x3e8
+                0x5
+            .end array-data
+            :array_1
+            .array-data 1
+                0x41t
+            .end array-data
         .end method
     """.trimIndent()
     private val lines = source.lines()
     private val whole = Range(Position(0, 0), Position(lines.size - 1, 0))
 
     private fun line(text: String): Int = lines.indexOfFirst { it.contains(text) }.also { require(it >= 0) { text } }
+    private fun exactLine(text: String): Int = lines.indexOfFirst { it.trim() == text }.also { require(it >= 0) { text } }
 
     private fun hints(index: WorkspaceIndex, range: Range = whole): Map<Int, String> {
         index.openSource("file:///Lits.smali", source)
@@ -71,9 +98,15 @@ class InlayHintsTest {
                 line("const-wide/16 v2, 0x3e8") to "= 1000",
                 line("const-wide/high16 v2") to "= 4611686018427387904",
                 line("mul-int/lit8") to "= 31",
-                line("and-int/lit16") to "= 255"
+                line("and-int/lit16") to "= 255",
+                line(".field public static B") to "= 100",
+                line("value = 0x1f") to "= 31",
+                line(".packed-switch 0x10") to "= 16",
+                line("0x64 -> ") to "= 100",
+                exactLine("0x3e8") to "= 1000"
             ),
-            hints
+            hints,
+            "const and lit operands, a field value, an annotation element, switch keys and an int array element"
         )
     }
 
@@ -91,9 +124,10 @@ class InlayHintsTest {
     @Test
     fun `small values, decimal literals, commented floats, strings, switch tables and unknown resource ids get nothing`() {
         val hints = hints(WorkspaceIndex())
-        for (text in listOf("const/4 v0, 0x5", "# 1.0f", "# 3.14", "const v0, 0x7f0a0012", "const v0, 0x1010000", "0x7f0a9999", "const/16 v0, 1000", "add-int/lit8", "const-string", "packed-switch v0", ".packed-switch 0x10")) {
+        for (text in listOf("const/4 v0, 0x5", "# 1.0f", "# 3.14", "const v0, 0x7f0a0012", "const v0, 0x1010000", "0x7f0a9999", "const/16 v0, 1000", "add-int/lit8", "const-string", "packed-switch v0", ".field public static A", ".field public static C", ".field public static D", "0x7f0a0012 -> ", "ids = {", ".array-data 4")) {
             assertNull(hints[line(text)], text)
         }
+        for (text in listOf("0x7f0a0012", "0x5", "0x41t")) assertNull(hints[exactLine(text)], "array element $text")
     }
 
     @Test
@@ -110,6 +144,9 @@ class InlayHintsTest {
         assertTrue(string.label.left.startsWith("string/app_name = \"long long") && string.label.left.endsWith("…\""), string.label.left)
         assertEquals("${"long ".repeat(12)}name", string.tooltip.left, "the whole value when the label was cut")
         assertEquals("= 1000", hints.getValue(line("const/16 v0, 0x3e8")).label.left, "numbers still get their value")
+        assertEquals("id/login_button", hints.getValue(line(".field public static A")).label.left, "a field value")
+        assertEquals("id/login_button", hints.getValue(line("0x7f0a0012 -> ")).label.left, "a sparse-switch key")
+        assertEquals("id/login_button", hints.getValue(exactLine("0x7f0a0012")).label.left, "an array element")
     }
 
     @Test

@@ -107,6 +107,19 @@ class ResourceLiteralsTest {
     }
 
     @Test
+    fun `a field value, an array element and a switch key name their resource too`() {
+        val index = workspace()
+        val other = ".class public Lcom/app/Table;\n.super Ljava/lang/Object;\n.field public static A:I = 0x7f0a0012\n.method public run()V\n    .registers 1\n    sparse-switch v0, :sswitch_data_0\n    return-void\n    :sswitch_data_0\n    .sparse-switch\n        0x7f0b0000 -> :sswitch_0\n        0x64 -> :sswitch_0\n    .end sparse-switch\n    :sswitch_0\n    return-void\n    :array_0\n    .array-data 4\n        0x7f0d0003\n    .end array-data\n.end method\n"
+        index.openSource("file:///Table.smali", other)
+        val hovers = HoverProvider(index)
+        assertTrue(assertNotNull(hovers.provideHover("file:///Table.smali", other.positionOf(".field public static A", "0x7f0a0012", 3))).contents.right.value.contains("`id/login_button`"))
+        assertTrue(assertNotNull(hovers.provideHover("file:///Table.smali", other.positionOf("0x7f0b0000 ->", "0x7f0b0000", 3))).contents.right.value.contains("`layout/activity_main`"))
+        assertTrue(assertNotNull(hovers.provideHover("file:///Table.smali", other.positionOf("0x7f0d0003", "0x7f0d0003", 3))).contents.right.value.contains("**Value:** #ff3366"))
+        assertNull(hovers.provideHover("file:///Table.smali", other.positionOf("0x64 ->", "0x64", 1)), "a plain key")
+        assertEquals(ResourceTable.publicXml(root).toPath().toUri().toString(), DefinitionProvider(index).findDefinition("file:///Table.smali", other.positionOf(".field public static A", "0x7f0a0012", 3)).single().uri)
+    }
+
+    @Test
     fun `an id the table does not know and an ordinary literal give nothing`() {
         val index = workspace()
         assertNull(HoverProvider(index).provideHover("file:///Main.smali", source.positionOf("0x7f0a9999", "0x7f0a9999", 2)))

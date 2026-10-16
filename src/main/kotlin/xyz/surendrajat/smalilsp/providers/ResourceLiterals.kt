@@ -6,18 +6,19 @@ import org.eclipse.lsp4j.MarkupContent
 import org.eclipse.lsp4j.MarkupKind
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
-import xyz.surendrajat.smalilsp.core.InstructionScanner
 import xyz.surendrajat.smalilsp.core.InstructionText
+import xyz.surendrajat.smalilsp.core.Literals
 import xyz.surendrajat.smalilsp.index.Resource
 import xyz.surendrajat.smalilsp.index.ResourceTable
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 /**
- * Resource ids where they appear in code: the literal of a `const`, `const/high16` or
- * `const/16` whose value the workspace's `public.xml` names. Literals are not in the AST, so
- * the line is decoded on demand, as registers are. Hover shows the name and the value the
- * values files give it, definition opens the value's line (or the file the resource is), and
- * [InlayHints] puts name and value after the literal.
+ * Resource ids where they appear in code: a `const` operand, a `.field` value, an `.array-data`
+ * element, a switch key or an annotation element whose value the workspace's `public.xml`
+ * names (see [Literals]). Literals are not in the AST, so the line is decoded on demand, as
+ * registers are. Hover shows the name and the value the values files give it, definition opens
+ * the value's line (or the file the resource is), and [InlayHints] puts name and value after
+ * the literal.
  */
 object ResourceLiterals {
 
@@ -30,9 +31,7 @@ object ResourceLiterals {
 
     /** The resource a line's literal names, with the literal's columns. */
     private fun resourceOf(index: WorkspaceIndex, line: String): Triple<Resource, Int, Int>? {
-        val scanner = InstructionScanner()
-        if (!scanner.scan(line)) return null
-        val literal = scanner.literal ?: return null
+        val literal = Literals.find(line)?.token ?: return null
         val value = InstructionText.literalValue(literal.text) ?: return null
         if (!ResourceTable.isResourceId(value)) return null
         val resource = index.resources[value.toInt()] ?: return null

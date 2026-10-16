@@ -354,11 +354,13 @@ whose declarations are unreachable.
   and shows its value; definition opens the value's line, the file a layout or drawable is, or
   the `public.xml` entry. The literal is read from the line on demand, like registers, so the
   AST is untouched.
-- **Inlay hints**: `InlayHints` scans the requested lines once. A `0x7f...` id the table
-  knows becomes its name and value; any other hex literal of a `const*` or `*-int/lit*`
-  instruction becomes its decimal value (`= 1000`). Values -9..9, decimal literals, resource-
-  shaped ids the table does not know, and lines baksmali already annotated (`0x3f800000    #
-  1.0f`) get nothing.
+- **Inlay hints**: `InlayHints` scans the requested lines once with `Literals.find`, which
+  reads the one literal a line can carry: the last operand of an instruction, a `.field` value,
+  an annotation element, an `.array-data` element, a `.sparse-switch` key or the `.packed-switch`
+  first key. A `0x7f...` id the table knows becomes its name and value; any other hex literal
+  becomes its decimal value (`= 1000`). Values -9..9, decimal literals, bytes and shorts
+  (`0x41t`), resource-shaped ids the table does not know, and lines baksmali already annotated
+  (`0x3f800000    # 1.0f`) get nothing. Resource hover and definition read the same literal.
 - **Strings**: `const-string` sites are indexed by value like member usages, so references
   on a string are every load of the same value and its hover carries the count.
 - **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
