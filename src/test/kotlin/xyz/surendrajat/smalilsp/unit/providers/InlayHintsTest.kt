@@ -142,8 +142,8 @@ class InlayHintsTest {
         val hints = InlayHints.hints(index, lines, whole).associateBy { it.position.line }
         assertEquals("id/login_button", hints.getValue(line("const v0, 0x7f0a0012")).label.left)
         val string = hints.getValue(line("0x7f0a9999"))
-        assertTrue(string.label.left.startsWith("string/app_name = \"long long") && string.label.left.endsWith("…\""), string.label.left)
-        assertEquals("${"long ".repeat(12)}name", string.tooltip.left, "the whole value when the label was cut")
+        assertTrue(string.label.left.startsWith("\"long long") && string.label.left.endsWith("…\""), string.label.left)
+        assertEquals("string/app_name = \"${"long ".repeat(12)}name\"", string.tooltip.left, "name and the whole value when the label was cut")
         assertEquals("= 1000", hints.getValue(line("const/16 v0, 0x3e8")).label.left, "numbers still get their value")
         assertEquals("id/login_button", hints.getValue(line(".field public static A")).label.left, "a field value")
         assertEquals("id/login_button", hints.getValue(line("0x7f0a0012 -> ")).label.left, "a sparse-switch key")

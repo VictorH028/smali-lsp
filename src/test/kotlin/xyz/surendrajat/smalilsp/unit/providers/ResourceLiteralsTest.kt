@@ -92,13 +92,15 @@ class ResourceLiteralsTest {
     }
 
     @Test
-    fun `inlay hints name the resource and its value after the literal`() {
+    fun `inlay hints show the value when there is one, the name otherwise`() {
         val index = workspace()
         val stringSource = source.replace("const v0, 0x7f0a9999", "const v0, 0x7f0c0001")
         index.openSource("file:///Main.smali", stringSource)
         val lines = stringSource.lines()
         val hints = InlayHints.hints(index, lines, org.eclipse.lsp4j.Range(Position(0, 0), Position(lines.size - 1, 0)))
-        assertEquals(listOf("id/login_button", "layout/activity_main", "string/app_name = \"Proton & Mail\""), hints.map { it.label.left })
+        assertEquals(listOf("id/login_button", "layout/activity_main", "\"Proton & Mail\""), hints.map { it.label.left })
+        assertEquals("string/app_name", hints[2].tooltip.left, "the name moves to the tooltip")
+        assertNull(hints[0].tooltip)
         val first = hints[0]
         assertEquals(4, first.position.line)
         assertEquals(lines[4].length, first.position.character, "right after the literal")

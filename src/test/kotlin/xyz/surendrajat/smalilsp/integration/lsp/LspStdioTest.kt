@@ -264,7 +264,8 @@ class LspStdioTest {
             val hints = client.result("textDocument/inlayHint", mapOf("textDocument" to client.textDocument(resUri), "range" to mapOf("start" to mapOf("line" to 0, "character" to 0), "end" to mapOf("line" to 7, "character" to 0)))).asJsonArray
             assertEquals(2, hints.size(), hints.toString())
             val hint = hints[0].asJsonObject
-            assertEquals("string/app_name = \"Hello\"", hint["label"].asString)
+            assertEquals("\"Hello\"", hint["label"].asString)
+            assertEquals("string/app_name", hint["tooltip"].asString)
             assertEquals(4, hint.getAsJsonObject("position")["line"].asInt)
             assertEquals("= 1000", hints[1].asJsonObject["label"].asString)
             assertEquals(5, hints[1].asJsonObject.getAsJsonObject("position")["line"].asInt)

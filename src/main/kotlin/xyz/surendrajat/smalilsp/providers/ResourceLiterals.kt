@@ -56,10 +56,11 @@ object ResourceLiterals {
         return listOf(resource.location)
     }
 
-    /** The inlay hint for a literal naming [resource]: `name` or `name = value`, the whole value as the tooltip when it was cut short. */
+    /** The value when there is one (name in the tooltip), else the name. */
     fun hint(index: WorkspaceIndex, resource: Resource): InlayHints.Hint {
-        val value = index.resources.valueOf(resource) ?: return InlayHints.Hint(resource.qualifiedName, null)
-        return InlayHints.Hint("${resource.qualifiedName} = ${shown(resource.type, value.value, 40)}", value.value.takeIf { it.length > 40 })
+        val value = index.resources.valueOf(resource)?.value ?: return InlayHints.Hint(resource.qualifiedName, null)
+        val tooltip = if (value.length > HINT_LIMIT) "${resource.qualifiedName} = ${shown(resource.type, value, 500)}" else resource.qualifiedName
+        return InlayHints.Hint(shown(resource.type, value, HINT_LIMIT), tooltip)
     }
 
     private fun shown(type: String, value: String, limit: Int): String {
@@ -68,4 +69,6 @@ object ResourceLiterals {
     }
 
     private fun relative(resource: Resource, uri: String): String = "res/values/" + uri.substringAfterLast('/')
+
+    private const val HINT_LIMIT = 40
 }
