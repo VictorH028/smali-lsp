@@ -152,3 +152,31 @@ tasks.register<Copy>("installApklab") {
     into(providers.gradleProperty("apklabDir").orElse(providers.systemProperty("user.home").map { "$it/.apklab" }))
     rename { "smali-lsp-dev.jar" }
 }
+
+// Regenerates src/main/resources/android-public.txt (android.R names) from a decoded framework:
+//   apktool d --no-src -o fw ~/Library/apktool/framework/1.apk
+//   ./gradlew generateAndroidPublic -PframeworkPublicXml=fw/res/values/public.xml -PframeworkLabel="framework-res.apk bundled with apktool 3.0.2 (Android 16)"
+tasks.register("generateAndroidPublic") {
+    group = "build setup"
+    description = "Writes src/main/resources/android-public.txt from a framework public.xml"
+    val input = providers.gradleProperty("frameworkPublicXml")
+    val label = providers.gradleProperty("frameworkLabel").orElse("the Android framework")
+    val output = layout.projectDirectory.file("src/main/resources/android-public.txt")
+    doLast {
+        val xml = File(input.orNull ?: throw GradleException("pass -PframeworkPublicXml=<decoded framework>/res/values/public.xml"))
+        val entry = Regex("""<public type="([a-z]+)" name="([^"\s]+)" id="0x([0-9a-f]{8})"""")
+        val entries = xml.readLines().mapNotNull { line -> entry.find(line)?.destructured?.let { (type, name, id) -> Triple(id.toLong(16).toInt(), type, name) } }.sortedBy { it.first }
+        if (entries.isEmpty() || entries.any { it.first ushr 24 != 0x01 }) throw GradleException("$xml is not a framework public.xml")
+        val out = StringBuilder()
+        out.append("# Android framework public resource ids (package 0x01): ${entries.size} entries from the public.xml of the\n")
+        out.append("# ${label.get()}; AOSP, Apache License 2.0.\n")
+        out.append("# Regenerate with ./gradlew generateAndroidPublic (see build.gradle.kts). Sections: [type-hex type]; lines: entry-hex name.\n")
+        var section = -1
+        for ((id, type, name) in entries) {
+            val typeId = (id ushr 16) and 0xff
+            if (typeId != section) { out.append("[%02x %s]\n".format(typeId, type)); section = typeId }
+            out.append("%04x %s\n".format(id and 0xffff, name))
+        }
+        output.asFile.writeText(out.toString())
+    }
+}

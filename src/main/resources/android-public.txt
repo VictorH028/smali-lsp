@@ -1,6 +1,6 @@
 # Android framework public resource ids (package 0x01): 14516 entries from the public.xml of the
 # framework-res.apk bundled with apktool 3.0.2 (Android 16); AOSP, Apache License 2.0.
-# Regenerate with test-tmp/probes/gen_android_public.py (see DESIGN.md). Sections: [type-hex type]; lines: entry-hex name.
+# Regenerate with ./gradlew generateAndroidPublic (see build.gradle.kts). Sections: [type-hex type]; lines: entry-hex name.
 [01 attr]
 0000 theme
 0001 label
