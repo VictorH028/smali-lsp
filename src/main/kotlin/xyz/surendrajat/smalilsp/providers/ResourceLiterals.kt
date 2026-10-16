@@ -21,6 +21,9 @@ object ResourceLiterals {
         return resourceOf(index, line)?.takeIf { (_, literalStart, literalEnd) -> position.character in literalStart..literalEnd }?.first
     }
 
+    /** The resource [line]'s literal names, if any. */
+    fun onLine(index: WorkspaceIndex, line: String): Resource? = resourceOf(index, line)?.first
+
     /** The resource a line's literal names, with the literal's columns. */
     private fun resourceOf(index: WorkspaceIndex, line: String): Triple<Resource, Int, Int>? {
         val literal = Literals.find(line)?.token ?: return null
@@ -54,6 +57,12 @@ object ResourceLiterals {
         index.resources.valueOf(resource)?.let { return listOf(it.location) }
         index.resources.fileOf(resource)?.let { return listOf(Location(it.toPath().toUri().toString(), Range(Position(0, 0), Position(0, 0)))) }
         return listOf(resource.location)
+    }
+
+    /** `name = value` (value cut at 80), or the name. */
+    fun describe(index: WorkspaceIndex, resource: Resource): String {
+        val value = index.resources.valueOf(resource)?.value ?: return resource.qualifiedName
+        return "${resource.qualifiedName} = ${shown(resource.type, value, 80)}"
     }
 
     /** The value when there is one (name in the tooltip), else the name. */

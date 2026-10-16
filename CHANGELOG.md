@@ -22,7 +22,7 @@ drives of every request at thousands of positions, and the MCP tools.
 - **Label diagnostics** — a jump to an undefined label and a duplicate label are errors
 - **Hierarchies from any reference**; **completion** offers inherited members and ranks classes; **member hovers** name the declaring class and count the references
 - **Workspace folders** added or removed during the session are indexed and dropped
-- **MCP** — tools are bounded and validated, two new ones (`smali_read_method`, `smali_list_package`), an unknown tool is the JSON-RPC error the protocol specifies
+- **MCP** — tools are bounded and validated, two new ones (`smali_read_method`, which names resource ids in a trailing comment, and `smali_list_package`), an unknown tool is the JSON-RPC error the protocol specifies
 - **Logging** — warnings on stderr by default, `--log-file` instead of files in the working directory, `--verbose`
 
 ### Changed

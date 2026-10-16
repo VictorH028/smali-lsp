@@ -405,7 +405,7 @@ would return a tool result marked as an error.
 | `smali_call_graph` | callers and callees of a method |
 | `smali_xref_summary` | subclasses, implementors, callers, accessors, referencing classes |
 | `smali_type_hierarchy` | supertypes and subtypes |
-| `smali_read_method` | one method's numbered source lines |
+| `smali_read_method` | one method's numbered source lines, resource ids named in a trailing comment |
 | `smali_list_package` | the classes under a package prefix and its sub-packages |
 
 Arguments are validated by type (a wrongly typed one is a tool error naming it), tool

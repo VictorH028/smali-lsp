@@ -68,7 +68,7 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | `smali_call_graph`       | Incoming/outgoing call graph for a method                                        |
 | `smali_xref_summary`     | Cross-reference report (subclasses, implementors, callers, accessors, referencing classes) |
 | `smali_type_hierarchy`   | Supertypes and subtypes for a class (inheritance chain)                          |
-| `smali_read_method`      | One method's source lines, numbered                                              |
+| `smali_read_method`      | One method's source lines, numbered; resource ids get their name and value       |
 | `smali_list_package`     | Classes under a package prefix and its sub-packages                              |
 
 </details>

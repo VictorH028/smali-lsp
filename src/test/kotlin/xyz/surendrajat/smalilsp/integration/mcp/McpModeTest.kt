@@ -977,6 +977,11 @@ class McpModeTest {
 
     @Test
     fun `definitions by position and by member, bounded references, read_method and list_package`() {
+        File(testProjectDir, "res/values").mkdirs()
+        File(testProjectDir, "res/values/public.xml").writeText("<resources>\n    <public type=\"string\" name=\"app_name\" id=\"0x7f0c0001\" />\n    <public type=\"id\" name=\"go\" id=\"0x7f0a0002\" />\n</resources>\n")
+        File(testProjectDir, "res/values/strings.xml").writeText("<resources>\n    <string name=\"app_name\">Hello</string>\n</resources>\n")
+        File(testProjectDir, "smali/org/res").mkdirs()
+        File(testProjectDir, "smali/org/res/Res.smali").writeText(".class public Lorg/res/Res;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 3\n    const v0, 0x7f0c0001\n    const v1, 0x7f0a0002\n    const v2, 0x1010150\n    const/16 v2, 0x3e8\n    return-void\n.end method\n")
         val process = startMcpProcess()
         try {
             val (stdin, stdout) = initializeSession(process)
@@ -1011,6 +1016,16 @@ class McpModeTest {
             assertEquals(lines.indexOfFirst { it.contains(".method public increment") } + 1, read.get("start_line").asInt)
             val source = read.get("source").asString
             assertTrue(source.startsWith("${read.get("start_line").asInt}: .method public increment()V") && source.trimEnd().endsWith(".end method"), source)
+
+            // Resource ids are named in a trailing comment; other literals are left alone
+            val res = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 407, "smali_read_method", mapOf("class_name" to "Lorg/res/Res;", "method_name" to "run"))
+            )).asJsonObject.get("source").asString.lines()
+            assertEquals("3: .method public run()V", res[0])
+            assertEquals("5:     const v0, 0x7f0c0001  # string/app_name = \"Hello\"", res[2])
+            assertEquals("6:     const v1, 0x7f0a0002  # id/go", res[3])
+            assertEquals("7:     const v2, 0x1010150  # android:attr/hint", res[4])
+            assertEquals("8:     const/16 v2, 0x3e8", res[5])
 
             // Packages
             val pkg = JsonParser.parseString(getToolResultText(

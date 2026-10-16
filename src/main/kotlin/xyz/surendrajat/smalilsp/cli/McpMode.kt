@@ -46,6 +46,7 @@ import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.DiagnosticProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
+import xyz.surendrajat.smalilsp.providers.ResourceLiterals
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
 import xyz.surendrajat.smalilsp.util.Types
@@ -511,7 +512,8 @@ class McpMode {
 
         server.tool(
             "smali_read_method",
-            "The source text of one method, with 1-based line numbers, so a method can be read without loading its whole file.",
+            "The source text of one method, with 1-based line numbers, so a method can be read without loading its whole file. " +
+                "A line whose literal is a resource id ends with a comment naming it (# string/app_name = \"Hello\").",
             Arg("class_name", "Fully qualified class name (e.g., 'Lcom/example/MyClass;')"),
             Arg("method_name", "Method name (e.g., 'onCreate')"),
             Arg("descriptor", "Method descriptor (e.g., '(Landroid/os/Bundle;)V'). If omitted, the first method with that name.", required = false)
@@ -529,7 +531,10 @@ class McpMode {
             }
             val first = method.range.start.line
             val last = minOf(method.range.end.line, lines.size - 1)
-            val source = (first..last).joinToString("\n") { i -> "${i + 1}: ${lines[i]}" }
+            val source = (first..last).joinToString("\n") { i ->
+                val note = ResourceLiterals.onLine(s.index, lines[i])?.let { "  # ${ResourceLiterals.describe(s.index, it)}" } ?: ""
+                "${i + 1}: ${lines[i]}$note"
+            }
             json(mapOf("class" to className, "method" to "${method.name}${method.descriptor}", "uri" to classFile.uri, "start_line" to first + 1, "end_line" to last + 1, "source" to source))
         }
 
