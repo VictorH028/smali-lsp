@@ -13,9 +13,12 @@ import io.modelcontextprotocol.kotlin.sdk.types.Method
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
+import kotlin.system.exitProcess
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.io.Buffer
+import kotlinx.io.RawSource
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
@@ -96,15 +99,23 @@ class McpMode {
         )
         registerTools(server)
 
-        val transport = StdioServerTransport(System.`in`.asSource().buffered(), System.out.asSink().buffered()) {}
+        val closed = Job()
+        val input = EofSignal(System.`in`.asSource()) { closed.complete() }.buffered()
+        val transport = StdioServerTransport(input, System.out.asSink().buffered()) {}
         runBlocking {
             val mcpSession = server.createSession(transport)
             answerUnknownToolsWithProtocolError(mcpSession)
             logger.info("MCP server started")
-            val done = Job()
-            mcpSession.onClose { done.complete() }
-            done.join()
+            mcpSession.onClose { closed.complete() }
+            closed.join()
         }
+        exitProcess(0)
+    }
+
+    /** The SDK's transport stops reading at the end of input but never closes the session, so the end is signalled here and the process exits. */
+    private class EofSignal(private val source: RawSource, private val onEof: () -> Unit) : RawSource {
+        override fun readAtMostTo(sink: Buffer, byteCount: Long): Long = source.readAtMostTo(sink, byteCount).also { if (it == -1L) onEof() }
+        override fun close() = source.close()
     }
 
     /**

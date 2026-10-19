@@ -36,7 +36,7 @@ main() → parseArgs → configureLogging → startLsp() | McpMode().run()
 |------|--------------|
 | `initialize` | Capabilities are answered at once. Workspace folders are taken from `workspaceFolders`, else `rootUri`, else `rootPath`. |
 | `initialized` | A `**/*.smali` file watcher is registered when the client supports dynamic registration. Indexing starts in the background, with `window/workDoneProgress` only for clients that advertise it; a client that rejects the progress token still gets indexed. |
-| `shutdown` / `exit` | `exit` returns 0 after a `shutdown` request and 1 otherwise, as the protocol asks. |
+| `shutdown` / `exit` | `exit` returns 0 after a `shutdown` request and 1 otherwise, as the protocol asks; a client that closes the connection without `exit` gets the same statuses, so a dead editor leaves no server behind. MCP mode exits when its input ends (the SDK's transport stops reading at EOF but never closes the session). |
 
 Requests arriving during indexing are answered from whatever is indexed so far. Semantic
 diagnostics (unresolved classes) are suppressed until indexing completes, then re-published

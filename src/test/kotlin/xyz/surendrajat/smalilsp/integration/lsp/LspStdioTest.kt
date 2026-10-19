@@ -249,6 +249,22 @@ class LspStdioTest {
     }
 
     @Test
+    fun `the server exits when the client closes the connection`() {
+        writeWorkspace()
+        LspStdioClient().use { client ->
+            client.initializeAndIndex(initParams(client))
+            client.closeInput()
+            assertEquals(1, client.waitForExit(20), "no shutdown request: status 1")
+        }
+        LspStdioClient().use { client ->
+            client.initializeAndIndex(initParams(client))
+            client.request("shutdown")
+            client.closeInput()
+            assertEquals(0, client.waitForExit(20), "after a shutdown request: status 0")
+        }
+    }
+
+    @Test
     fun `resource ids and literals come back as inlay hints and hover over stdio`() {
         writeWorkspace()
         workspace.resolve("res/values").toFile().mkdirs()

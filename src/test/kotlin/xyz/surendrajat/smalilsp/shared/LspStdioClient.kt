@@ -163,6 +163,9 @@ class LspStdioClient(private val rejectProgress: Boolean = false) : AutoCloseabl
 
     fun isAlive(): Boolean = process.isAlive
 
+    /** Closes the server's stdin, as a client that died does. */
+    fun closeInput() = stdin.close()
+
     override fun close() {
         if (process.isAlive) process.destroyForcibly()
     }

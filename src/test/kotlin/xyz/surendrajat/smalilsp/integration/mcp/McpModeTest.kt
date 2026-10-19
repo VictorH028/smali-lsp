@@ -976,6 +976,19 @@ class McpModeTest {
     }
 
     @Test
+    fun `the server exits when the client closes its input`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, _) = initializeSession(process)
+            stdin.close()
+            assertTrue(process.waitFor(20, TimeUnit.SECONDS), "the process ends after EOF on stdin")
+            assertEquals(0, process.exitValue())
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
     fun `definitions by position and by member, bounded references, read_method and list_package`() {
         File(testProjectDir, "res/values").mkdirs()
         File(testProjectDir, "res/values/public.xml").writeText("<resources>\n    <public type=\"string\" name=\"app_name\" id=\"0x7f0c0001\" />\n    <public type=\"id\" name=\"go\" id=\"0x7f0a0002\" />\n</resources>\n")

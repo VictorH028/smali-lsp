@@ -30,8 +30,10 @@ internal fun startLsp() {
     val client = launcher.remoteProxy
     server.connect(client)
 
-    // Start listening - blocks until connection closes
-    launcher.startListening()
+    // Returns when the client closes the connection. A client that follows the protocol sends
+    // exit first and never gets here; one that died must not leave the server running.
+    launcher.startListening().get()
+    exitProcess(server.exitCode)
 }
 
 /**
@@ -330,13 +332,12 @@ class SmaliLanguageServer : LanguageServer {
         return CompletableFuture.completedFuture(null)
     }
     
-    /**
-     * Exit server. The spec asks for status 0 after a shutdown request and 1 otherwise,
-     * so an editor can tell a clean stop from a server that died mid-session.
-     */
+    /** 0 after a shutdown request and 1 otherwise, as the protocol asks, so an editor can tell a clean stop from a server that died mid-session. */
+    val exitCode: Int get() = if (shutdownRequested) 0 else 1
+
     override fun exit() {
         logger.info("Server exiting")
-        exitProcess(if (shutdownRequested) 0 else 1)
+        exitProcess(exitCode)
     }
     
     override fun getTextDocumentService(): TextDocumentService {

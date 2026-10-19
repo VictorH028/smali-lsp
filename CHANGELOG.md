@@ -40,6 +40,7 @@
 - Ghost class evicted when a watched file's class is renamed; percent-encoded URIs are the same file; a watcher is registered for `.smali` files
 - Members used through a subclass, fields inherited from interfaces and calls through subtypes resolve; implementations of `Object` are not every class
 - The parser accepts every form baksmali writes: `synchronized`, debug-info `.param`/`.local`, digit-leading names, byte and short suffixes, `invoke-custom`, `invoke-polymorphic`, method handles
+- The server exits when the client closes the connection without `exit`, and MCP mode when its input ends; neither lingered before
 - Indexing survives a silent client, a bad file and a symlink loop; MCP stdout no longer corrupted by a logging banner
 - A removed workspace folder drops its resources with its files
 
