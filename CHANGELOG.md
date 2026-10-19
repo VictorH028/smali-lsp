@@ -2,56 +2,45 @@
 
 ## Unreleased
 
-A hand-written parser replaces the ANTLR grammar, the index and AST hold a third of the memory
-they did, the server gives idle memory back to the OS, and editing gets register-aware hover,
-assembler-level diagnostics and resource-id navigation. Every change is verified
-against three decompiled apps (98,686 files) with a per-file AST fingerprint, real-server
-drives of every request at thousands of positions, and the MCP tools.
-
 ### Added
 
-- **Register hover and highlight** — hover on `p1` says which parameter it carries (`this`, the second register of a wide one), on `v3` which local slot, with the `.param`/`.local` debug names and the method's frame; document highlight on a register marks every use in the method, writes apart from reads
-- **Assembler checks for hand edits** — a register the method does not declare or that the instruction form cannot address (`move` v0..v15, five sub-v16 registers for `invoke-*` unless `/range`), a literal that does not fit (`const/4` holds -8..7), a `move-result` not right after a call; widths and ranges come from the opcode database's format table
-- **Resource ids** — hover on a `0x7f...` literal names the resource (`id/login_button`) from the project's `res/values/public.xml` and shows the string, color or dimension value from `res/values/*.xml`; go-to-definition opens the value's line, the layout or drawable file, or the `public.xml` entry; inlay hints show the value, or the name when there is none, after every such literal in a `const`, a `.field` value, an `.array-data` element (the styleable arrays), a switch key or an annotation; the table reloads when apktool rewrites the file
-- **Framework resources** — `0x0101…` ids (`android.R`) are named from a bundled table of the framework's 14,516 public resources (`android:attr/hint`) in hover and inlay hints, without any SDK on the machine
-- **Literal values** — inlay hints put the decimal value after every other hex literal (`const/16 v0, 0x3e8  = 1000`, `mul-int/lit8 v0, v0, 0x1f  = 31`), in instructions, `.field` values, `.array-data` elements, switch keys and annotation elements; values -9..9, bytes, shorts and literals baksmali already commented (`# 1.0f`) are left alone
-- **Strings** — find references on a `const-string` lists every load of the same value in the workspace; hover shows the text and the count
-- **Frame hover** — hover on `.registers`/`.locals` maps the frame: which `vN` the locals, `this` and each parameter occupy, with the `.param` names; a method hover names the register each parameter arrives in
-- **Class code lens** — the `.class` line shows the class's reference count and how many classes extend or implement it
-- **Implementations, document highlight, folding ranges** — implementors and overrides of a method, occurrences of a symbol or register in its file, foldable methods and directive blocks
-- **Label diagnostics** — a jump to an undefined label and a duplicate label are errors
-- **Hierarchies from any reference**; **completion** offers inherited members and ranks classes; **member hovers** name the declaring class and count the references
-- **Workspace folders** added or removed during the session are indexed and dropped
-- **MCP** — tools are bounded and validated, two new ones (`smali_read_method`, which names resource ids in a trailing comment, and `smali_list_package`), an unknown tool is the JSON-RPC error the protocol specifies
-- **Logging** — warnings on stderr by default, `--log-file` instead of files in the working directory, `--verbose`
+- Register hover and document highlight: which parameter or local a register is, every use in the method with writes apart from reads
+- Frame hover on `.registers`/`.locals`; method hovers name the register each parameter arrives in
+- Assembler checks for hand edits: undeclared or unaddressable registers, literals that do not fit, a misplaced `move-result`
+- Resource ids: hover, definition and inlay hints for `0x7f…` literals from the project's `res/values`, with their values; `android.R` ids named from a bundled framework table
+- Inlay hints with the decimal value of other hex literals
+- References and hover for string literals
+- Code lens on the class line: references, subclass and implementation counts
+- Implementations, document highlight and folding ranges
+- Diagnostics for undefined and duplicate labels
+- Completion of inherited members, ranked class names; hierarchies from any reference
+- Workspace folders added or removed during the session
+- MCP: `smali_read_method` (resource ids annotated) and `smali_list_package`; bounded, validated arguments; an unknown tool is a JSON-RPC error
+- `--verbose` and `--log-file`; warnings on stderr by default
 
 ### Changed
 
-- **The parser is hand-written** — a lexer and statement parser replace the ANTLR grammar, its listener and the generated parser: the same model byte for byte on every fixture file, 3.6–4.6× faster single-threaded (0.04 ms per file), four to six times less allocation, cold start about twice as fast; a statement cut short at a line end is reported where it stopped, one bad line costs one diagnostic, and no input can overflow the stack
-- **Undefined-class warnings** are reported only for classes in packages the workspace defines; the classes an app references but does not ship (`org.xmlpull`, an optional Conscrypt, a Firebase connector behind a runtime check) are not mistakes — 652 false warnings on the three fixture apps went to zero
-- **One writer thread** applies every mutation; requests wait for the writes sent before them, so an answer never sees a half-applied edit; cancelled requests stop
-- **Definitions and selection ranges** point at the name token; references list every declaration of the member and start from its root declaration; only members a call can bind to are its references
-- **Diagnostics underline the offending token** (syntax errors, undefined classes, code lenses span the declaration line)
-- **Memory** — ProtonMail (19,637 files) holds 174 MB of live heap after indexing and the 76 K-file app 657 MB (from 288 MB and 1.05 GB): instructions, declarations, labels, references and class tokens keep positions as ints, modifiers are shared sets, usage lists are packed ints trimmed after the scan, member keys share the pooled strings
-- **Heap returned to the OS** — the free ratios are set in-process and a periodic concurrent cycle, armed by activity, uncommits the scan's garbage: committed heap 1.2 GB → 400 MB on ProtonMail and 3 GB → 1.6 GB on the large app a minute after indexing, with no launch flag
-- **Toolchain** — Gradle 9.8.1, Kotlin 2.4.21, lsp4j 1.0.0, MCP Kotlin SDK 0.15.0, JUnit 6.1.3, coroutines, Gson, SLF4J and Logback at their latest; any JDK 17+ builds the project; the shadow jar carries no grammar runtime (9.0 MB)
+- A hand-written parser replaces the ANTLR grammar: the same model byte for byte on 98,686 fixture files, 3.6–4.6× faster, cold start about twice as fast, no input can overflow the stack
+- Memory: 178 MB of heap after indexing ProtonMail and 659 MB for a 76 K-file app (from 288 MB and 1.05 GB); idle heap is returned to the OS
+- Undefined-class warnings only for classes in packages the workspace defines
+- One writer thread applies every edit; requests wait for the edits sent before them; cancelled requests stop
+- Definitions point at the name token; references follow the member family (overrides, calls through subclasses)
+- Toolchain: Gradle 9.8.1, Kotlin 2.4.21, lsp4j 1.0.0, MCP Kotlin SDK 0.15.0; any JDK 17+ builds the project
 
 ### Fixed
 
-- The opcode and registers of an instruction no longer answer go-to-definition, references, implementation or document highlight with the instruction's member (editors underlined the whole instruction as a link); only the owner, member and type tokens do
-- Label operations scoped to the containing method (rename, definition and hover for `:cond_0` resolved against methods in file order)
-- Rename rejected for SDK and unindexed members; arrays of workspace classes no longer flagged; a primitive-array owner is not a class reference
-- Ghost class evicted when a watched file's class is renamed in place; the index follows the editor's buffer, then the disk again on close; percent-encoded file URIs are the same file; a watcher is registered for `.smali` files
-- Members used through a subclass resolve to the member the declaring class owns; fields inherited from interfaces resolve; incoming calls include calls through subclasses and supertypes; implementations of `Object` are not every class
-- Bundled copies of SDK-prefixed classes (`androidx.*`, `kotlin.*`) are workspace classes and navigable
-- Parsing accepts `synchronized`, debug-info forms of `.param` and `.local`, digit-leading and all-digit member names, keyword-, literal- and opcode-spelled member names, byte/short literal suffixes, primitive-array method owners (`[I->clone()`), `invoke-custom`, `invoke-polymorphic` and method-handle constants; string and char literals lex against their own delimiter; columns are UTF-16 code units; unparseable top-level constructs are reported instead of truncating the file
-- Indexing survives a silent client, a bad file and a symlink loop; the `rootUri` workspace is indexed; progress cannot abort indexing; capability registration that throws does not stop initialization
-- Exit status 1 when no shutdown request preceded exit; MCP stdout no longer corrupted by a logging banner
+- The opcode and registers of an instruction are no longer go-to-definition links; only the owner, member and type tokens navigate
+- Label operations scoped to the containing method
+- Rename rejected for SDK and unindexed members; arrays of workspace classes no longer flagged
+- Ghost class evicted when a watched file's class is renamed; percent-encoded URIs are the same file; a watcher is registered for `.smali` files
+- Members used through a subclass, fields inherited from interfaces and calls through subtypes resolve; implementations of `Object` are not every class
+- The parser accepts every form baksmali writes: `synchronized`, debug-info `.param`/`.local`, digit-leading names, byte and short suffixes, `invoke-custom`, `invoke-polymorphic`, method handles
+- Indexing survives a silent client, a bad file and a symlink loop; exit status 1 without a shutdown request; MCP stdout no longer corrupted by a logging banner
 
 ### Internal
 
-- The real-APK invariants, the grammar corpus, stdio drives of the LSP and MCP binaries, the AST fingerprint and the mutation and fuzz corpora are the gate for every change
-- Enabled Gradle's configuration cache; removed the unused jacoco plugin; CI test jobs no longer build the shadow jar first
+- Real-APK invariants, stdio drives of both binaries, an AST fingerprint and fuzz corpora gate every change
+- Gradle configuration cache on; jacoco removed; CI test jobs no longer build the jar first
 
 ## [1.5.0] - 2026-04-21
 
