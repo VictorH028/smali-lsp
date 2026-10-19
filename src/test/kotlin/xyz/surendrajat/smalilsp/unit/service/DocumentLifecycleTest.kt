@@ -90,6 +90,8 @@ class DocumentLifecycleTest {
         val folder = File(dir, "lib").apply { mkdirs() }
         val file = File(folder, "Lib.smali").apply { writeText(".class public Lcom/Lib;\n.super Ljava/lang/Object;") }
         index.indexFile(SmaliParser().parse(file.toPath().toUri().toString(), file.readText())!!)
+        val publicXml = xyz.surendrajat.smalilsp.index.ResourceTable.publicXml(folder).apply { parentFile.mkdirs(); writeText("<resources>\n    <public type=\"id\" name=\"go\" id=\"0x7f0a0001\" />\n</resources>\n") }
+        assertEquals(1, index.resources.load(publicXml))
         val added = mutableListOf<String>()
         workspace.onFoldersAdded = { folders -> added.addAll(folders.map { it.uri }) }
 
@@ -97,6 +99,7 @@ class DocumentLifecycleTest {
         workspace.didChangeWorkspaceFolders(org.eclipse.lsp4j.DidChangeWorkspaceFoldersParams(org.eclipse.lsp4j.WorkspaceFoldersChangeEvent(listOf(org.eclipse.lsp4j.WorkspaceFolder("file:///elsewhere", "new")), listOf(org.eclipse.lsp4j.WorkspaceFolder(folderUri, "lib")))))
         workspace.awaitWrites()
         assertNull(index.findClass("Lcom/Lib;"), "the closed folder's class is gone")
+        assertEquals(0, index.resources.size, "and so are its resources")
         assertEquals(listOf("file:///elsewhere"), added)
     }
 }

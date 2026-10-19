@@ -42,14 +42,17 @@ class SmaliWorkspaceService(
     /** Receives the folders the client adds, so the server can index them; the server sets it. */
     var onFoldersAdded: (List<WorkspaceFolder>) -> Unit = {}
 
-    /** A closed folder's files leave the index; an opened folder is indexed like the initial ones. */
+    /** A closed folder's files and resources leave the index; an opened folder is indexed like the initial ones. */
     override fun didChangeWorkspaceFolders(params: DidChangeWorkspaceFoldersParams) {
         val removed = params.event.removed
         val added = params.event.added
         logger.info("Workspace folders changed: ${added.size} added, ${removed.size} removed")
         if (removed.isNotEmpty()) {
             writes.submit("didChangeWorkspaceFolders") {
-                for (folder in removed) logger.info("Removed ${index.removeFilesUnder(folder.uri)} file(s) under ${folder.uri}")
+                for (folder in removed) {
+                    logger.info("Removed ${index.removeFilesUnder(folder.uri)} file(s) under ${folder.uri}")
+                    try { index.resources.removeUnder(File(URI(folder.uri))) } catch (_: Exception) { }
+                }
             }
         }
         if (added.isNotEmpty()) onFoldersAdded(added)
