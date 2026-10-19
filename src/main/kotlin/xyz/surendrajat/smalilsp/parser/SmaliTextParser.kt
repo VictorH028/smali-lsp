@@ -562,11 +562,6 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         return anyType()
     }
 
-    private fun referenceOrArrayType(): String {
-        if (kind != T.TYPE && kind != T.LBRACK) fail("Expected a class or array type, not ${describe()}")
-        return anyType()
-    }
-
     /** `[` (any number of them) then a class, primitive, primitive sequence or compound literal. */
     private fun arrayType() {
         while (kind == T.LBRACK) advance()

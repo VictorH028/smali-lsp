@@ -4,7 +4,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
-import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Files

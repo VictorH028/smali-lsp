@@ -2,11 +2,9 @@ package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
-import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.Types
 
 /** One declaration of a member: the file and the name token. */
 data class MemberDeclaration(val file: SmaliFile, val nameSpan: Span, val isRoot: Boolean, val modifiers: Set<String> = emptySet())
