@@ -141,6 +141,11 @@ tasks.shadowJar {
     manifest {
         attributes["Main-Class"] = "xyz.surendrajat.smalilsp.MainKt"
     }
+
+    // Build metadata the dependencies ship and nothing reads at runtime
+    exclude("META-INF/maven/**", "META-INF/proguard/**", "META-INF/com.android.tools/**", "META-INF/*.version", "META-INF/**/verification.properties")
+    // logback's servlet hook: there is no servlet container here
+    exclude("ch/qos/logback/classic/servlet/**", "META-INF/services/jakarta.servlet.ServletContainerInitializer")
 }
 
 // Live testing in APKLab: copies the fat jar to ~/.apklab/smali-lsp-dev.jar (or -PapklabDir=<dir>).
