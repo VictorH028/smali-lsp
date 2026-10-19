@@ -85,7 +85,7 @@ GC-bound. The swap was verified by the per-file AST fingerprint over all 98,686 
 (byte-identical to the grammar's output) and by the parser tests that pin every accepted
 spelling.
 
-`GrammarCorpusTest` still parses every fixture file and fails on any syntax error or on a
+`ParserCorpusTest` still parses every fixture file and fails on any syntax error or on a
 file whose `.method`/`.field` count does not match the AST: 98,686 files, zero errors.
 
 ### 2.2 `SmaliParser.kt`
@@ -462,7 +462,7 @@ only one index is built at a time.
 
 - `*.unit.*` (467 tests, ~4 s), `*.regression.*` (74, ~1 s), `*.integration.*` (136, ~65 s with
   the fixtures present; one skip). Run the categories separately: each fork holds a parsed app.
-- `GrammarCorpusTest`: every fixture file parses without syntax errors and without losing a
+- `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
   `.method` or `.field`.
 - `RealApkInvariantsTest`: properties that hold for any apktool project (every invoke in the
   workspace resolves, hierarchy sets agree with `.super`/`.implements`, usage locations name
@@ -481,36 +481,47 @@ only one index is built at a time.
 
 | File | Lines | Role |
 |------|-------|------|
+| SmaliTextParser.kt | 1,164 | the front end: lexer, statement parser, model building |
 | DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
-| SmaliTextParser.kt | 1,160 | the front end: lexer, statement parser, model building |
-| McpMode.kt | 537 | MCP server |
-| WorkspaceIndex.kt | 515 | the index |
-| SmaliLanguageServer.kt | 317 | the LSP server: handshake, indexing, capabilities |
-| WorkspaceSymbolProvider.kt | 254 | workspace symbol search |
-| SmaliTextDocumentService.kt | 252 | document lifecycle and requests |
-| DataStructures.kt | 252 | the AST model |
-| Types.kt | 222 | descriptor and class-name helpers |
-| HoverProvider.kt | 238 | hover |
-| ReferenceProvider.kt | 195 | references and member families |
-| DiagnosticProvider.kt | 188 | diagnostics |
-| CompletionProvider.kt | 185 | completion |
-| WorkspaceScanner.kt | 142 | parallel scan |
-| TypeHierarchyProvider.kt | 140 | type hierarchy |
+| McpMode.kt | 661 | MCP server |
+| WorkspaceIndex.kt | 570 | the index |
+| DataStructures.kt | 425 | the AST model |
+| SmaliLanguageServer.kt | 349 | the LSP server: handshake, indexing, capabilities |
+| SmaliTextDocumentService.kt | 283 | document lifecycle and requests |
+| HoverProvider.kt | 237 | hover |
+| ReferenceProvider.kt | 228 | references and member families |
+| Types.kt | 221 | descriptor and class-name helpers |
+| InstructionText.kt | 219 | instruction scanner and register frame |
+| WorkspaceSymbolProvider.kt | 218 | workspace symbol search |
+| CompletionProvider.kt | 188 | completion |
+| DiagnosticProvider.kt | 183 | diagnostics |
+| ResourceTable.kt | 166 | `public.xml` and values per workspace root |
+| AssemblerChecks.kt | 162 | assembler checks for hand edits |
+| Registers.kt | 151 | register hover, highlight and the frame hover |
+| WorkspaceScanner.kt | 141 | parallel scan |
 | Symbol.kt | 140 | `symbolAt` and the symbol kinds |
 | RenameProvider.kt | 130 | rename |
-| CallHierarchyProvider.kt | 127 | call hierarchy |
-| InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
-| SmaliParser.kt | 50 | parser entry |
-| SmaliWorkspaceService.kt | 113 | watched files, workspace symbols |
+| CallHierarchyProvider.kt | 124 | call hierarchy |
+| DocumentHighlightProvider.kt | 122 | document highlight |
+| SmaliWorkspaceService.kt | 121 | watched files, workspace symbols |
 | CodeLensProvider.kt | 108 | reference and subtype counts |
-| DocumentSymbolProvider.kt | 82 | outline |
-| WriteQueue.kt | 71 | the writer thread and the request helper |
-| DefinitionProvider.kt | 68 | definition |
-| Literals.kt | 72 | the one literal a line carries |
-| InlayHints.kt | 66 | resource names and decimal values after literals |
-| FrameworkResources.kt | 50 | the bundled `android.R` names |
+| TypeHierarchyProvider.kt | 105 | type hierarchy |
+| InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
+| JvmTuning.kt | 89 | heap settings applied in-process |
+| ResourceLiterals.kt | 83 | resource hover, definition and hints |
+| WriteQueue.kt | 73 | the writer thread and the request helper |
+| DocumentSymbolProvider.kt | 73 | outline |
+| StringPool.kt | 72 | per-index interning |
+| Literals.kt | 66 | the one literal a line carries |
 | Cli.kt | 64 | command line, usage, version |
-| UsageList.kt | 53 | packed usage sites |
-| StringPool.kt | 53 | per-index interning |
+| DefinitionProvider.kt | 63 | definition |
+| InlayHints.kt | 60 | resource names and decimal values after literals |
+| UsageList.kt | 60 | packed usage sites |
+| LabelMap.kt | 58 | packed labels and label references |
+| SmaliParser.kt | 51 | parser entry |
+| FrameworkResources.kt | 48 | the bundled `android.R` names |
+| ImplementationProvider.kt | 46 | implementations |
 | Logging.kt | 39 | logback setup |
-| Main.kt | 31 | entry point |
+| Main.kt | 33 | entry point |
+| FoldingRangeProvider.kt | 22 | folding ranges |
+| StringLiterals.kt | 18 | the string operand under the caret |

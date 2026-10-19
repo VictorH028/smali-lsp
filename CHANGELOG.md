@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Breaking
+
+- `--verbose` raises the log level to INFO on stderr instead of enabling file logging; `--log-file <path>` writes a file; nothing is written to the working directory
+- Exit status 1 when the client exits without a shutdown request
+- The opcode and registers of an instruction are no longer navigation targets; only the owner, member and type tokens are
+- MCP: `smali_find_references` and `smali_list_package` return at most `max_results` (default 500) with a `total`; an unknown tool is a JSON-RPC error
+
 ### Added
 
 - Register hover and document highlight: which parameter or local a register is, every use in the method with writes apart from reads
@@ -15,8 +22,7 @@
 - Diagnostics for undefined and duplicate labels
 - Completion of inherited members, ranked class names; hierarchies from any reference
 - Workspace folders added or removed during the session
-- MCP: `smali_read_method` (resource ids annotated) and `smali_list_package`; bounded, validated arguments; an unknown tool is a JSON-RPC error
-- `--verbose` and `--log-file`; warnings on stderr by default
+- MCP: `smali_read_method` (resource ids annotated) and `smali_list_package`; arguments are validated
 
 ### Changed
 
@@ -29,13 +35,13 @@
 
 ### Fixed
 
-- The opcode and registers of an instruction are no longer go-to-definition links; only the owner, member and type tokens navigate
 - Label operations scoped to the containing method
 - Rename rejected for SDK and unindexed members; arrays of workspace classes no longer flagged
 - Ghost class evicted when a watched file's class is renamed; percent-encoded URIs are the same file; a watcher is registered for `.smali` files
 - Members used through a subclass, fields inherited from interfaces and calls through subtypes resolve; implementations of `Object` are not every class
 - The parser accepts every form baksmali writes: `synchronized`, debug-info `.param`/`.local`, digit-leading names, byte and short suffixes, `invoke-custom`, `invoke-polymorphic`, method handles
-- Indexing survives a silent client, a bad file and a symlink loop; exit status 1 without a shutdown request; MCP stdout no longer corrupted by a logging banner
+- Indexing survives a silent client, a bad file and a symlink loop; MCP stdout no longer corrupted by a logging banner
+- A removed workspace folder drops its resources with its files
 
 ### Internal
 
