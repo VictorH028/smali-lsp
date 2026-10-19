@@ -11,23 +11,8 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
 /**
- * Provides workspace-wide symbol search.
- * 
- * Features:
- * - Fuzzy matching on symbol names
- * - Case-insensitive search
- * - Searches classes, methods, and fields
- * - Fast performance (< 500ms for 4000+ files)
- * 
- * LSP Request: workspace/symbol
- * 
- * Search Algorithm:
- * 1. If query is empty, return all symbols (up to limit)
- * 2. Normalize query to lowercase for case-insensitive matching
- * 3. Check if symbol name contains query substring
- * 4. Support fuzzy matching: "FBAdapter" matches "FeedbackAdapter"
- * 5. Rank results by match quality (exact > prefix > contains)
- * 6. Return up to 500 results for performance
+ * Workspace symbol search over classes, methods and fields: case-insensitive, fuzzy, and the
+ * best 500 kept while scanning so a large workspace never sorts a full result list.
  */
 class WorkspaceSymbolProvider(
     private val index: WorkspaceIndex
@@ -124,19 +109,7 @@ class WorkspaceSymbolProvider(
         return results
     }
     
-    /**
-     * Match a symbol name against a query.
-     * 
-     * Returns match score (higher is better):
-     * - 1000: Exact match (case-insensitive)
-     * - 500 + length bonus: Prefix match (shorter symbols score higher)
-     * - 100 + length bonus: Contains match (shorter symbols score higher)
-     * - 10: Fuzzy match (only for queries >= 3 chars)
-     * - null: No match
-     * 
-     * The length bonus ensures shorter symbol names rank higher:
-     * - Searching "q" returns class "q" before "queryString"
-     */
+    /** Match score, higher is better: 1000 exact, 500 prefix, 100 contains (both plus a bonus for shorter names, so `q` beats `queryString`), 10 fuzzy for queries of 3+ characters; null for no match. */
     private fun matchSymbol(symbolName: String, query: String): Int? {
         if (query.isEmpty()) return 10 // Everything matches empty query
 
@@ -156,14 +129,7 @@ class WorkspaceSymbolProvider(
         return at >= 0 && at + query.length <= className.length - 1
     }
     
-    /**
-     * Fuzzy match: check if all query letters appear in order in symbol.
-     * 
-     * Examples:
-     * - "FBA" matches "FeedBackAdapter"
-     * - "onCrt" matches "onCreate"
-     * - "str" matches "StringBuilder"
-     */
+    /** Every query letter appears in order in the symbol: `onCrt` matches `onCreate`. */
     private fun fuzzyMatch(symbol: String, query: String): Boolean {
         var symbolIdx = 0
         var queryIdx = 0

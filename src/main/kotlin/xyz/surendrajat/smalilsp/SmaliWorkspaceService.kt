@@ -19,17 +19,7 @@ import java.net.URI
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
-/**
- * Workspace Service for Smali Language Server.
- * 
- * Handles workspace-level events:
- * - Configuration changes
- * - File system watchers
- * - Workspace symbol search
- * 
- * Provides:
- * - workspace/symbol: Search for symbols across the entire workspace
- */
+/** Workspace-level notifications (folders, watched files, configuration) and the workspace symbol search. */
 class SmaliWorkspaceService(
     private val index: WorkspaceIndex,
     private val writes: WriteQueue = WriteQueue(),
@@ -71,16 +61,7 @@ class SmaliWorkspaceService(
         // No configuration options yet
     }
     
-    /**
-     * Watched files changed on disk.
-     *
-     * Open files are kept in sync by didChange, but a file that was deleted,
-     * created, or edited externally (e.g. by apktool regenerating a project)
-     * will not trigger didChange — without handling this, go-to-definition
-     * navigates to ghost URIs that no longer exist, and references to new
-     * classes fail to resolve until the user opens them manually. Files that
-     * are open in the editor are left to the editor.
-     */
+    /** Watched files changed on disk: apktool regenerating a project, an external edit, a delete. Files open in the editor are left to didChange. */
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
         if (params.changes.isEmpty()) return
         logger.debug("didChangeWatchedFiles: {} change(s)", params.changes.size)

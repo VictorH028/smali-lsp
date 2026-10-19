@@ -10,14 +10,7 @@ import xyz.surendrajat.smalilsp.core.methodAt
 import xyz.surendrajat.smalilsp.core.touches
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
-/**
- * Provides call hierarchy (incoming/outgoing calls) for smali methods.
- *
- * LSP Requests:
- * - textDocument/prepareCallHierarchy
- * - callHierarchy/incomingCalls
- * - callHierarchy/outgoingCalls
- */
+/** Call hierarchy: a method's callers (through subclasses and supertypes too) and the methods it calls. */
 class CallHierarchyProvider(
     private val index: WorkspaceIndex
 ) {

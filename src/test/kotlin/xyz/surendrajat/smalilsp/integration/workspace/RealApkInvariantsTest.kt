@@ -36,7 +36,7 @@ import java.util.Random
  * every fixture directory found there. Nothing here depends on a particular app version:
  * no file names, no absolute counts, no latency thresholds. Fixtures with more files than
  * [maxFiles] are skipped because the test forks run with a 1 GB heap (the parser-only
- * `GrammarCorpusTest` still covers them).
+ * `ParserCorpusTest` still covers them).
  *
  * Replaces the version-pinned real-APK suites (RealWorldTest, ComprehensiveRealWorldTest,
  * ProtonMailValidationTest, GotoDefinitionCoverageTest, GenericAPKStressTest, the

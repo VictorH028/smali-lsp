@@ -4,16 +4,7 @@ import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.util.Types
 
-/**
- * Provides document outline/symbols in IDEs.
- * 
- * Shows hierarchical view:
- * - Class
- *   - Methods
- *   - Fields
- * 
- * Enables quick navigation in Explorer sidebar.
- */
+/** Document outline: the class with its methods and fields, name tokens as selection ranges. */
 class DocumentSymbolProvider {
     
     /**

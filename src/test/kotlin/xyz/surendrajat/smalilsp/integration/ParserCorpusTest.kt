@@ -10,16 +10,12 @@ import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * Grammar corpus check over every decompiled APK under `test-data/`.
- *
- * baksmali output is valid smali by construction, so every file must parse without a
- * syntax error, and the AST builder must see every `.method` and `.field` directive that
- * is in the source. A shortfall means the parser gave up part-way through a file — the
- * failure that hid 912 methods on ProtonMail until `EOF` was added to the start rule.
- *
- * Skips when no fixture directory is present. Parses each file once, in parallel.
+ * Parser corpus check over every decompiled APK under `test-data/`. baksmali output is valid
+ * smali by construction, so every file must parse without a syntax error and keep every
+ * `.method` and `.field` the source has; a shortfall means the parser gave up part-way
+ * through a file (the failure that once hid 912 methods on ProtonMail). Skips without fixtures.
  */
-class GrammarCorpusTest {
+class ParserCorpusTest {
 
     private val methodDirective = Regex("""^\.method\b""", RegexOption.MULTILINE)
     private val fieldDirective = Regex("""^\.field\b""", RegexOption.MULTILINE)

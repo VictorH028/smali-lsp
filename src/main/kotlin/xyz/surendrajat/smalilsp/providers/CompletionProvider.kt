@@ -6,17 +6,7 @@ import xyz.surendrajat.smalilsp.data.DalvikOpcodeDatabase
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
-/**
- * Provides completion suggestions for smali files.
- *
- * Completion contexts:
- * - Class names (L-prefix types in any context)
- * - Method names (after ->)
- * - Field names (after ->)
- * - Opcodes (at instruction start)
- *
- * LSP Request: textDocument/completion
- */
+/** Completion: class names after `L`, members after `->` (inherited ones too), opcodes at the start of a line. */
 class CompletionProvider(
     private val index: WorkspaceIndex
 ) {

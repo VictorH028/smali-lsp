@@ -15,13 +15,7 @@ import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.util.Types
 import org.slf4j.LoggerFactory
 
-/**
- * Provides diagnostic information for Smali files.
- * 
- * Two types of diagnostics:
- * 1. Syntax errors from parser (ANTLR errors)
- * 2. Semantic errors from analysis (undefined references, etc.)
- */
+/** Diagnostics: syntax errors from the parser, label and assembler checks, and undefined classes once the index can tell. */
 class DiagnosticProvider(
     private val parser: SmaliParser,
     private val index: WorkspaceIndex

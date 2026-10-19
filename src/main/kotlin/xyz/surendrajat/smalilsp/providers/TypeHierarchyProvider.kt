@@ -7,14 +7,7 @@ import xyz.surendrajat.smalilsp.core.symbolAt
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
-/**
- * Provides type hierarchy (supertypes/subtypes) for smali classes.
- *
- * LSP Requests:
- * - textDocument/prepareTypeHierarchy
- * - typeHierarchy/supertypes
- * - typeHierarchy/subtypes
- */
+/** Type hierarchy from a class declaration or any class reference: supertypes and subtypes. */
 class TypeHierarchyProvider(
     private val index: WorkspaceIndex
 ) {
