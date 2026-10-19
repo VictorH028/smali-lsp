@@ -93,8 +93,15 @@ jobs:
       - name: Build release JAR
         run: ./gradlew shadowJar
 
+      - name: Link to the changelog entry
+        id: changelog
+        run: |
+          heading=$(grep -m1 "^## \[${GITHUB_REF_NAME#v}\]" CHANGELOG.md | sed 's/^## //')
+          anchor=$(echo "$heading" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9 -]//g' -e 's/ /-/g')
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md#${anchor}" >> "$GITHUB_OUTPUT"
+
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
           files: build/libs/smali-lsp-*.jar
-          generate_release_notes: true
+          body: "Changes: ${{ steps.changelog.outputs.url }}"
