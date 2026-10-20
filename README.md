@@ -173,7 +173,7 @@ Measured on three apktool projects on a 12-core Apple Silicon laptop, JDK 21:
 | | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
 | --- | --- | --- | --- |
 | Index the workspace (cold) | 0.8 s | 1.6 s | 6 s |
-| Heap after indexing | — | 118 MB | 447 MB |
+| Heap after indexing | — | 109 MB | 415 MB |
 | Re-index one file on edit, p95 | — | 0.2 ms | 0.6 ms |
 | Workspace symbol search | — | 4–14 ms | 19–25 ms |
 

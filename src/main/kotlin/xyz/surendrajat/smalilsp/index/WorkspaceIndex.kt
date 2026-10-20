@@ -24,10 +24,10 @@ import java.util.concurrent.atomic.AtomicLong
  * old entry. Declarations are answered from the file itself; only usages have tables of their
  * own.
  *
- * Usage tables are [UsageList]s: packed ints, no object per site. Every file has an id and a
- * generation. Re-indexing a file bumps its generation, which retires all of its earlier
- * entries at once instead of walking every symbol the file touched. Retired entries are
- * skipped on read and dropped by a compaction once they make up a quarter of the tables.
+ * Usage tables are [UsageList]s: packed ints, no object per site. Every indexing of a file gets
+ * a fresh id and retires the previous one, which retires all of the file's earlier entries at
+ * once instead of walking every symbol the file touched. Retired entries are skipped on read
+ * and dropped by a compaction once they make up a quarter of the tables.
  *
  * Thread-safe: the scanner indexes files concurrently while requests are answered.
  */
@@ -47,11 +47,14 @@ class WorkspaceIndex {
     private val methodCount = AtomicInteger(0)
     private val fieldCount = AtomicInteger(0)
 
-    // ---- file ids and generations (grown under fileLock; readers bounds-check their snapshot) ----
+    // ---- file ids (grown under fileLock; readers bounds-check their snapshot) ----
+    // A file gets a fresh id each time it is indexed; retiring the old id retires every usage
+    // site it added, so a site carries no generation. Ids are never reused.
     private val fileLock = Any()
     private val fileIds = ConcurrentHashMap<String, Int>()
+    private var nextId = 0
     @Volatile private var urisById = arrayOfNulls<String>(1024)
-    @Volatile private var generation = AtomicIntegerArray(1024)
+    @Volatile private var alive = AtomicIntegerArray(1024)
     @Volatile private var contributions = AtomicIntegerArray(1024)
 
     // ---- hierarchy ----
@@ -93,14 +96,13 @@ class WorkspaceIndex {
      */
     fun indexFile(file: SmaliFile, keepBody: Boolean = true) {
         val uri = canonicalUri(file.uri)
-        val id = fileId(uri)
+        val id = freshId(uri)
         val stored = if (keepBody) file else file.withoutBody()
         if (keepBody) bodiless.remove(uri) else bodiless.add(uri)
         synchronized(bodies) { bodies.remove(uri) }
         val strings = distinctStrings(file)
         filesByUri.put(uri, stored)?.let { retract(it, uri) }   // retract takes the old file's strings out of the side map
         fileStrings[uri] = strings
-        val gen = retireUsages(id)
 
         val className = file.classDefinition.name
         uriByClass[className] = uri
@@ -116,7 +118,7 @@ class WorkspaceIndex {
 
         var added = 0
         forEachUsage(file) { list, line, start, end ->
-            list.add(id, gen, line, start, end)
+            list.add(id, line, start, end)
             added++
         }
         totalEntries.addAndGet(added.toLong())
@@ -132,7 +134,7 @@ class WorkspaceIndex {
         val key = canonicalUri(uri)
         val file = filesByUri.remove(key) ?: return false
         retract(file, key)
-        retireUsages(fileId(key))
+        synchronized(fileLock) { fileIds.remove(key)?.let { retire(it) } }
         bodiless.remove(key)
         synchronized(bodies) { bodies.remove(key) }
         return true
@@ -167,28 +169,26 @@ class WorkspaceIndex {
         updateStringValueCounts(fileStrings.remove(uri) ?: distinctStrings(file), delta = -1)
     }
 
-    /** Moves the file to a new generation, retiring every usage entry it added so far. */
-    private fun retireUsages(id: Int): Int = synchronized(fileLock) {
-        staleEntries.addAndGet(contributions.getAndSet(id, 0).toLong())
-        generation.incrementAndGet(id)
+    /** A new id for [uri]; the id it had before, if any, is retired with every usage site it added. */
+    private fun freshId(uri: String): Int = synchronized(fileLock) {
+        val id = nextId++
+        if (id >= urisById.size) {
+            val n = urisById.size * 2
+            urisById = urisById.copyOf(n)
+            alive = grow(alive, n)
+            contributions = grow(contributions, n)
+        }
+        urisById[id] = uri
+        alive.set(id, 1)
+        fileIds.put(uri, id)?.let { retire(it) }
+        id
     }
 
-    private fun fileId(uri: String): Int {
-        fileIds[uri]?.let { return it }
-        synchronized(fileLock) {
-            fileIds[uri]?.let { return it }
-            val id = fileIds.size
-            if (id >= urisById.size) {
-                val n = urisById.size * 2
-                urisById = urisById.copyOf(n)
-                generation = grow(generation, n)
-                contributions = grow(contributions, n)
-            }
-            urisById[id] = uri
-            generation.set(id, 1)
-            fileIds[uri] = id
-            return id
-        }
+    /** Called with [fileLock] held: the id's sites become stale and its URI reference is dropped. */
+    private fun retire(id: Int) {
+        alive.set(id, 0)
+        urisById[id] = null
+        staleEntries.addAndGet(contributions.getAndSet(id, 0).toLong())
     }
 
     private fun grow(old: AtomicIntegerArray, n: Int): AtomicIntegerArray {
@@ -262,16 +262,16 @@ class WorkspaceIndex {
 
     /**
      * Drops retired entries once they make up a quarter of the tables. Called with [fileLock]
-     * held, so the generation array cannot be replaced (grown) while entries are judged
-     * against it: an entry of a file id beyond the captured array would look retired.
+     * held, so the alive array cannot be replaced (grown) while entries are judged against it:
+     * an entry of a file id beyond the captured array would look retired.
      */
     private fun maybeCompact() {
         val stale = staleEntries.get()
         if (stale < 100_000 || stale * 4 < totalEntries.get()) return
-        val gen = generation
+        val live = alive
         var dropped = 0L
         for (table in listOf(methodUsages, fieldUsages, classRefs, stringUsages)) {
-            for (list in table.values) dropped += list.compact(gen)
+            for (list in table.values) dropped += list.compact(live)
         }
         totalEntries.addAndGet(-dropped)
         staleEntries.set(0)
@@ -458,16 +458,16 @@ class WorkspaceIndex {
     private fun UsageList?.toLocations(cancel: CancelChecker? = null): List<Location> {
         if (this == null) return emptyList()
         val entries = snapshot()
-        val gen = generation
+        val live = alive
         val uris = urisById
         val out = ArrayList<Location>(entries.size / UsageList.STRIDE)
         var i = 0
         while (i < entries.size) {
             if (cancel != null && i % (UsageList.STRIDE * 4096) == 0) cancel.checkCanceled()
             val fileId = entries[i]
-            if (fileId < gen.length() && gen.get(fileId) == entries[i + 1]) {
-                val line = entries[i + 2]
-                out.add(Location(uris[fileId], Range(Position(line, entries[i + 3]), Position(line, entries[i + 4]))))
+            if (fileId < live.length() && live.get(fileId) != 0) {
+                val line = entries[i + 1]
+                out.add(Location(uris[fileId], Range(Position(line, entries[i + 2]), Position(line, entries[i + 3]))))
             }
             i += UsageList.STRIDE
         }

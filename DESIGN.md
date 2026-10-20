@@ -186,13 +186,17 @@ and request times unchanged. Field keys include the type, since DEX allows two f
 have no table: `findMethod`/`findField` look in the class's `SmaliFile` and walk up the
 hierarchy, and return the name-token location.
 
-### 3.2 `UsageList` and generations
+### 3.2 `UsageList` and file ids
 
-A usage list is a packed `IntArray`, five ints per site: file id, the file's generation when
-the site was added, line, start column, end column. Every file has an id and a generation.
-Re-indexing a file bumps its generation, which retires all of its earlier entries in O(1)
-instead of walking every symbol the file touched. Readers skip retired entries; a compaction
-drops them once they make up a quarter of all entries (and at least 100 K), amortized O(1).
+A usage list is a packed `IntArray`, four ints per site: file id, line, start column, end
+column. Every indexing of a file gets a fresh id and retires the file's previous id, which
+retires all of its earlier entries in O(1) instead of walking every symbol the file touched;
+a site is stale exactly when its id is no longer alive, so it carries no generation. Ids are
+never reused (an `alive` flag and a contribution count per id, grown under one lock). Readers
+skip retired entries; a compaction drops them once they make up a quarter of all entries (and
+at least 100 K), amortized O(1). Dropping the generation column took the packed sites from
+43.8 to 35.4 MB on ProtonMail (live heap 119 → 109 MB) and the large app's live heap from
+448 to 415 MB, with scan and request times unchanged.
 
 Why: the previous `ConcurrentHashMap<String, Set<Location>>` tables cost ~130 bytes per site
 and removal scanned every usage set the file touched, so a keystroke in a file that calls
@@ -233,7 +237,7 @@ large app.
 
 `maxOf(2, cores)` coroutine workers drain a bounded channel of files, each reading, parsing
 and indexing its file. The index is safe for concurrent `indexFile` calls: maps are concurrent,
-usage lists synchronize per symbol, generations are bumped under one lock. Through the real
+usage lists synchronize per symbol, file ids are allocated and retired under one lock. Through the real
 server on 12 cores, including file reads:
 
 | | Mastodon | ProtonMail | 76 K-file app |
@@ -242,8 +246,8 @@ server on 12 cores, including file reads:
 
 ### 3.4 String literals
 
-`const-string` values go into a usage table like members (value → sites), retired by the file's
-generation like everything else, so a search after an edit never rebuilds anything. The search
+`const-string` values go into a usage table like members (value → sites), retired with the
+file's id like everything else, so a search after an edit never rebuilds anything. The search
 is a case-insensitive `contains` over the table, allocation-free. `getStats().strings` is a
 count map kept incrementally. The table costs about 7 MB on ProtonMail and 20 MB on the
 76 K-file app.

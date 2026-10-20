@@ -3,22 +3,21 @@ package xyz.surendrajat.smalilsp.index
 import java.util.concurrent.atomic.AtomicIntegerArray
 
 /**
- * The sites that use one symbol, packed five ints per site: file id, the file's generation
- * when the site was added, line, start column, end column. A site whose file has moved on to
- * a newer generation is stale; readers skip it and [compact] drops it.
+ * The sites that use one symbol, packed four ints per site: file id, line, start column, end
+ * column. A file gets a fresh id each time it is indexed and the old id is retired, so a site
+ * is stale exactly when its file id is no longer alive; readers skip it and [compact] drops it.
  */
 internal class UsageList {
     private var data = EMPTY
     private var size = 0
 
     @Synchronized
-    fun add(fileId: Int, generation: Int, line: Int, start: Int, end: Int) {
+    fun add(fileId: Int, line: Int, start: Int, end: Int) {
         if (size + STRIDE > data.size) data = data.copyOf(maxOf(size + STRIDE * 2, size + size / 2))
         data[size] = fileId
-        data[size + 1] = generation
-        data[size + 2] = line
-        data[size + 3] = start
-        data[size + 4] = end
+        data[size + 1] = line
+        data[size + 2] = start
+        data[size + 3] = end
         size += STRIDE
     }
 
@@ -32,15 +31,15 @@ internal class UsageList {
     @Synchronized
     fun snapshot(): IntArray = data.copyOf(size)
 
-    /** Drops every stale entry; returns how many were dropped. */
+    /** Drops every entry whose file id is not [alive] (non-zero); returns how many were dropped. */
     @Synchronized
-    fun compact(generation: AtomicIntegerArray): Int {
+    fun compact(alive: AtomicIntegerArray): Int {
         var write = 0
         var read = 0
         var dropped = 0
         while (read < size) {
             val fileId = data[read]
-            if (fileId < generation.length() && generation.get(fileId) == data[read + 1]) {
+            if (fileId < alive.length() && alive.get(fileId) != 0) {
                 if (write != read) System.arraycopy(data, read, data, write, STRIDE)
                 write += STRIDE
             } else {
@@ -54,7 +53,7 @@ internal class UsageList {
     }
 
     companion object {
-        const val STRIDE = 5
+        const val STRIDE = 4
         private val EMPTY = IntArray(0)
     }
 }
