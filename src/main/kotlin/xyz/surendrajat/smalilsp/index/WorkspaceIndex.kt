@@ -5,6 +5,7 @@ import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
+import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.util.StringPool
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
@@ -72,15 +73,33 @@ class WorkspaceIndex {
     private val documentContents = ConcurrentHashMap<String, String>()
     private val documentLines = ConcurrentHashMap<String, List<String>>()
 
+    // ---- bodies: files stored without instructions, re-parsed on demand and kept for a while ----
+    private val bodiless = ConcurrentHashMap.newKeySet<String>()
+    private val bodies = object : LinkedHashMap<String, SmaliFile>(BODY_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SmaliFile>): Boolean = size > BODY_CACHE
+    }
+    /** The distinct string literals each file loads, kept apart from the body so a shell can be retracted. */
+    private val fileStrings = ConcurrentHashMap<String, Array<String>>()
+
     // ======================================================================
     // Indexing
     // ======================================================================
 
-    /** Indexes a file; a file already indexed under the same URI is replaced. Thread-safe. */
-    fun indexFile(file: SmaliFile) {
+    /**
+     * Indexes a file; a file already indexed under the same URI is replaced. With [keepBody] false
+     * the index stores the declarations only and parses the file again when a request needs its
+     * body: the instruction lists are most of the AST's memory and matter only for open files
+     * and the occasional call-hierarchy lookup. Thread-safe.
+     */
+    fun indexFile(file: SmaliFile, keepBody: Boolean = true) {
         val uri = canonicalUri(file.uri)
         val id = fileId(uri)
-        filesByUri.put(uri, file)?.let { retract(it, uri) }
+        val stored = if (keepBody) file else file.withoutBody()
+        if (keepBody) bodiless.remove(uri) else bodiless.add(uri)
+        synchronized(bodies) { bodies.remove(uri) }
+        val strings = distinctStrings(file)
+        filesByUri.put(uri, stored)?.let { retract(it, uri) }   // retract takes the old file's strings out of the side map
+        fileStrings[uri] = strings
         val gen = retireUsages(id)
 
         val className = file.classDefinition.name
@@ -93,7 +112,7 @@ class WorkspaceIndex {
         }
         methodCount.addAndGet(file.methods.size)
         fieldCount.addAndGet(file.fields.size)
-        updateStringValueCounts(file, delta = 1)
+        updateStringValueCounts(strings, delta = 1)
 
         var added = 0
         forEachUsage(file) { list, line, start, end ->
@@ -114,7 +133,17 @@ class WorkspaceIndex {
         val file = filesByUri.remove(key) ?: return false
         retract(file, key)
         retireUsages(fileId(key))
+        bodiless.remove(key)
+        synchronized(bodies) { bodies.remove(key) }
         return true
+    }
+
+    /** Drops the stored body of a file that is no longer open; the next request for it parses the file again. */
+    fun dropBody(uri: String) {
+        val key = canonicalUri(uri)
+        if (key in bodiless) return
+        val file = filesByUri[key] ?: return
+        if (filesByUri.replace(key, file, file.withoutBody())) bodiless.add(key)
     }
 
     /** Removes every indexed file under [folderUri] (a workspace folder the client closed); returns how many. */
@@ -135,7 +164,7 @@ class WorkspaceIndex {
         for (iface in file.classDefinition.interfaces) implementorsIndex[iface]?.remove(className)
         methodCount.addAndGet(-file.methods.size)
         fieldCount.addAndGet(-file.fields.size)
-        updateStringValueCounts(file, delta = -1)
+        updateStringValueCounts(fileStrings.remove(uri) ?: distinctStrings(file), delta = -1)
     }
 
     /** Moves the file to a new generation, retiring every usage entry it added so far. */
@@ -248,15 +277,17 @@ class WorkspaceIndex {
         staleEntries.set(0)
     }
 
-    private fun updateStringValueCounts(file: SmaliFile, delta: Int) {
-        for (method in file.methods) {
-            for (instr in method.instructions) {
-                if (instr is ConstStringInstruction) {
-                    stringValueCounts.compute(instr.value) { _, existing ->
-                        val next = (existing ?: 0) + delta
-                        if (next > 0) next else null
-                    }
-                }
+    private fun distinctStrings(file: SmaliFile): Array<String> {
+        val values = LinkedHashSet<String>()
+        for (method in file.methods) for (instr in method.instructions) if (instr is ConstStringInstruction) values.add(instr.value)
+        return values.toTypedArray()
+    }
+
+    private fun updateStringValueCounts(values: Array<String>, delta: Int) {
+        for (value in values) {
+            stringValueCounts.compute(value) { _, existing ->
+                val next = (existing ?: 0) + delta
+                if (next > 0) next else null
             }
         }
     }
@@ -273,9 +304,30 @@ class WorkspaceIndex {
     /** URI of the file defining [className]. */
     fun getUri(className: String): String? = uriByClass[className]
 
-    fun findFileByUri(uri: String): SmaliFile? = filesByUri[uri] ?: filesByUri[canonicalUri(uri)]
+    /** The file with its body: as stored when it is open or was indexed with its body, else parsed again from the open text or the disk. */
+    fun findFileByUri(uri: String): SmaliFile? {
+        var key = uri
+        var stored = filesByUri[key]
+        if (stored == null) {
+            key = canonicalUri(uri)
+            stored = filesByUri[key] ?: return null
+        }
+        if (key !in bodiless) return stored
+        return body(key) ?: stored
+    }
 
-    fun findClassNameByUri(uri: String): String? = findFileByUri(uri)?.classDefinition?.name
+    /** The file as stored, which for a file that is not open is its declarations only. Enough for anything that does not read instructions or labels. */
+    fun findDeclarations(uri: String): SmaliFile? = filesByUri[uri] ?: filesByUri[canonicalUri(uri)]
+
+    private fun body(key: String): SmaliFile? {
+        synchronized(bodies) { bodies[key]?.let { return it } }
+        val text = documentContents[key] ?: try { File(URI(key)).readText(Charsets.UTF_8) } catch (_: Exception) { return null }
+        val parsed = SmaliParser(strings).parse(key, text) ?: return null
+        synchronized(bodies) { bodies[key] = parsed }
+        return parsed
+    }
+
+    fun findClassNameByUri(uri: String): String? = findDeclarations(uri)?.classDefinition?.name
 
     /** Classes whose last path segment is [simpleName] (`Outer$Inner` for nested classes). */
     fun findClassesBySimpleName(simpleName: String): List<SmaliFile> =
@@ -523,6 +575,9 @@ class WorkspaceIndex {
     private fun simpleKey(className: String): String = className.removePrefix("L").removeSuffix(";").substringAfterLast('/')
 
     companion object {
+        /** Re-parsed bodies kept for requests that come in bursts on the same closed file. */
+        private const val BODY_CACHE = 32
+
         /**
          * One spelling per file. `file:/x` (java.io.File) and `file://x` become `file:///x`, and
          * percent-encoding is normalized through the path: VS Code sends `Foo%24Bar.smali` for the

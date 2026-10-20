@@ -395,7 +395,7 @@ class McpMode {
             uriArg
         ) { args, s ->
             val uri = args.require("uri")
-            val file = s!!.index.findFileByUri(uri) ?: throw ToolError("File not found in index: $uri")
+            val file = s!!.index.findDeclarations(uri) ?: throw ToolError("File not found in index: $uri")
             val className = file.classDefinition.name
             val symbols = mutableListOf<Map<String, Any?>>()
             symbols.add(mapOf(

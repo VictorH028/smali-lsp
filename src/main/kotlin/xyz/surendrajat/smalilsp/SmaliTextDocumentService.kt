@@ -170,9 +170,9 @@ class SmaliTextDocumentService(
             return
         }
         val text = file.readText(Charsets.UTF_8)
-        if (text == buffer) return
+        if (text == buffer) { index.dropBody(uri); return }
         val parsed = parser.parse(uri, text)
-        if (parsed != null) index.indexFile(parsed) else index.removeFile(uri)
+        if (parsed != null) index.indexFile(parsed, keepBody = false) else index.removeFile(uri)
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {
@@ -196,7 +196,7 @@ class SmaliTextDocumentService(
 
     override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<MutableList<Either<SymbolInformation, DocumentSymbol>>> =
         writes.request("documentSymbol", { params.textDocument.uri }, { mutableListOf() }) {
-            val file = index.findFileByUri(params.textDocument.uri) ?: return@request mutableListOf()
+            val file = index.findDeclarations(params.textDocument.uri) ?: return@request mutableListOf()
             documentSymbolProvider.provideDocumentSymbols(file).map { Either.forRight<SymbolInformation, DocumentSymbol>(it) }.toMutableList()
         }
 

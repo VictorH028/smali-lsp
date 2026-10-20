@@ -54,6 +54,8 @@ class RealApkInvariantsTest {
         val index = WorkspaceIndex()
         lateinit var scanFailed: Pair<Int, Int> // succeeded, failed
         val files: List<SmaliFile> get() = index.getFilesView().sortedBy { it.uri }
+        /** The file with its instructions: the index keeps declarations only for files that are not open, as the server does. */
+        fun body(file: SmaliFile): SmaliFile = index.findFileByUri(file.uri) ?: file
         fun uriOf(f: File) = f.toURI().toString()
     }
 
@@ -149,7 +151,7 @@ class RealApkInvariantsTest {
         val index = fx.index
         var invokes = 0; var fields = 0
         val missing = mutableListOf<String>()
-        for (file in fx.files) for (m in file.methods) for (ins in m.instructions) {
+        for (file in fx.files) for (m in fx.body(file).methods) for (ins in m.instructions) {
             when (ins) {
                 is InvokeInstruction -> if (index.hasClass(ins.className)) {
                     invokes++
@@ -219,7 +221,7 @@ class RealApkInvariantsTest {
             if (!found.containsAll(expected)) bad.add("${file.classDefinition.name}->${method.name}: ${expected.size} usages, ${found.size} returned")
         }
         // a call site of an SDK method: references from the call site are the SDK method's usages
-        val sdkFile = files.firstOrNull { f -> f.methods.any { m -> m.instructions.any { it is InvokeInstruction && it.className == "Ljava/lang/Object;" && it.methodName == "<init>" } } }
+        val sdkFile = files.asSequence().map { fx.body(it) }.firstOrNull { f -> f.methods.any { m -> m.instructions.any { it is InvokeInstruction && it.className == "Ljava/lang/Object;" && it.methodName == "<init>" } } }
         if (sdkFile != null) {
             val ins = sdkFile.methods.flatMap { it.instructions }.filterIsInstance<InvokeInstruction>().first { it.className == "Ljava/lang/Object;" && it.methodName == "<init>" }
             val line = index.getLineContent(sdkFile.uri, ins.range.start.line)!!
@@ -324,7 +326,7 @@ class RealApkInvariantsTest {
         }
         // const-class operands naming workspace classes
         var constClass = 0
-        outer@ for (file in files) for (m in file.methods) for (ins in m.instructions) {
+        outer@ for (file in files) for (m in fx.body(file).methods) for (ins in m.instructions) {
             if (ins is TypeInstruction && ins.opcode == "const-class" && index.hasClass(ins.className)) {
                 val line = index.getLineContent(file.uri, ins.range.start.line) ?: continue
                 val col = line.indexOf(ins.className); if (col < 0) continue
@@ -374,7 +376,7 @@ class RealApkInvariantsTest {
         val references = ReferenceProvider(fx.index)
         val probes = sample(60, fx.files.size, 8).mapNotNull { i ->
             val file = fx.files[i]
-            val call = file.methods.asSequence().flatMap { it.instructions.asSequence() }.filterIsInstance<InvokeInstruction>().firstOrNull { it.nameSpan != null } ?: return@mapNotNull null
+            val call = fx.body(file).methods.asSequence().flatMap { it.instructions.asSequence() }.filterIsInstance<InvokeInstruction>().firstOrNull { it.nameSpan != null } ?: return@mapNotNull null
             file.uri to Position(call.targetLine, call.nameSpan!!.start + 1)
         }
         assumeTrue(probes.isNotEmpty())
@@ -429,16 +431,17 @@ class RealApkInvariantsTest {
         val probeMethod = probe.methods.first { m -> index.findMethodUsages(probe.classDefinition.name, m.name, m.descriptor).isNotEmpty() }
         val usagesBefore = index.findMethodUsages(probe.classDefinition.name, probeMethod.name, probeMethod.descriptor).toSet()
 
-        for (i in sample(200, files.size, 8)) index.indexFile(files[i])
-        index.indexFile(probe)
+        // Re-index from the files' bodies, as the server does from a fresh parse; the stored entries are declarations only
+        for (i in sample(200, files.size, 8)) index.indexFile(fx.body(files[i]), keepBody = false)
+        index.indexFile(fx.body(probe), keepBody = false)
         assertEquals(before, index.getStats(), "${fx.dir.name}: stats changed after re-indexing files")
         assertEquals(usagesBefore, index.findMethodUsages(probe.classDefinition.name, probeMethod.name, probeMethod.descriptor).toSet(), "${fx.dir.name}: usages changed after re-index")
 
         // remove a file and add it back
-        val victim = files[sample(1, files.size, 9).first()]
+        val victim = fx.body(files[sample(1, files.size, 9).first()])
         assertTrue(index.removeFile(victim.uri))
         assertEquals(before.classes - 1, index.getStats().classes)
-        index.indexFile(victim)
+        index.indexFile(victim, keepBody = false)
         assertEquals(before, index.getStats(), "${fx.dir.name}: stats changed after remove + re-add")
     }
 }

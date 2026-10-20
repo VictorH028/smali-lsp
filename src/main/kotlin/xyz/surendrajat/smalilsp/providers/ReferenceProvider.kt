@@ -117,7 +117,7 @@ class ReferenceProvider(
         }
 
         for (usageUri in workspaceIndex.findClassUsages(className)) {
-            val usageFile = workspaceIndex.findFileByUri(usageUri) ?: continue
+            val usageFile = workspaceIndex.findDeclarations(usageUri) ?: continue
             val definition = usageFile.classDefinition
             if (definition.superClass == className) {
                 locations.add(Location(usageFile.uri, definition.superClassRange ?: definition.range))

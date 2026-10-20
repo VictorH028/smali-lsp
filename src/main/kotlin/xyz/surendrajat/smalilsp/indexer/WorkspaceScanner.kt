@@ -105,7 +105,7 @@ class WorkspaceScanner(
         
         val smaliFile = parser.parse(uri, content)
             ?: throw IllegalStateException("Parse returned null for $uri")
-        index.indexFile(smaliFile)
+        index.indexFile(smaliFile, keepBody = false)
     }
     
     /**
