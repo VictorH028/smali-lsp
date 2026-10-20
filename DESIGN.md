@@ -163,7 +163,7 @@ that token, as editors expect.
 
 | Structure | Key | Value |
 |-----------|-----|-------|
-| `filesByUri` | canonical `file:///…` URI | `SmaliFile` |
+| `filesByUri` | canonical `file:///…` URI | `SmaliFile`: with its body while the file is open, declarations only otherwise |
 | `uriByClass` | `Lcom/Foo;` | canonical URI of its definition (last indexed wins) |
 | `subclassIndex`, `implementorsIndex` | parent / interface | direct subclasses / implementors |
 | `simpleNameIndex` | `Outer$Inner` | full class names |
@@ -174,7 +174,15 @@ that token, as editors expect.
 
 Files are keyed by canonical URI: the scanner's and the client's forms of one file are one
 entry, and a file whose class name changes on edit replaces its old entry instead of leaving a
-ghost class. Field keys include the type, since DEX allows two fields of one name. Declarations
+ghost class. The instruction lists are most of the AST's memory (60 of ProtonMail's 113 MB) and
+matter only for the open files and the occasional call-hierarchy lookup, so the scanner, the
+watcher and `didClose` index a file without its body (`indexFile(file, keepBody = false)`):
+the usage tables are built from the full parse, then `withoutBody()` is stored. `findFileByUri`
+parses such a file again from the disk (or the open text) when a request needs its body and
+keeps the last 32 bodies; `findDeclarations` returns what is stored. The distinct string
+literals of each file live in a side map so a declarations-only entry can still be retracted.
+Live heap after indexing: ProtonMail 198 → 118 MB, the 76 K-file app 711 → 447 MB, with scan
+and request times unchanged. Field keys include the type, since DEX allows two fields of one name. Declarations
 have no table: `findMethod`/`findField` look in the class's `SmaliFile` and walk up the
 hierarchy, and return the name-token location.
 
@@ -216,7 +224,10 @@ heap (about 0.4 s of CPU per gigabyte), so it is not left running: every request
 notification re-arms it, and a cycle that followed no activity disarms it. Measured on the
 real server over stdio: committed heap 1,256 → 400 MB on ProtonMail and 2,992 → 1,556 MB on
 the large app, a minute after indexing, with the scan time unchanged and a remark pause of 2
-to 4 ms; a JVM without these flags is left as it is.
+to 4 ms; a JVM without these flags is left as it is. The initial scan's garbage does not wait
+for that minute: one explicit full collection right after the scan (`compactAfterScan`, 46 ms
+on ProtonMail) compacts and uncommits it at once, to 200 MB on ProtonMail and 664 MB on the
+large app.
 
 ### 3.3 Scanning (`WorkspaceScanner.kt`)
 
