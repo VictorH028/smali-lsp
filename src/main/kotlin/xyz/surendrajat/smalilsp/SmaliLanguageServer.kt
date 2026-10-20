@@ -283,6 +283,7 @@ class SmaliLanguageServer : LanguageServer {
                 try {
                     indexWorkspace(pendingWorkspaceFolders)
                     index.trimUsages()
+                    JvmTuning.compactAfterScan()
                 } catch (e: Throwable) {
                     logger.error("Failed to index workspace", e)
                 } finally {

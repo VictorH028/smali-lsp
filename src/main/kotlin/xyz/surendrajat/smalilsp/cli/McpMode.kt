@@ -231,6 +231,7 @@ class McpMode {
                 val index = WorkspaceIndex()
                 val result = WorkspaceScanner(index).scanDirectory(dir) { _, _ -> }
                 index.trimUsages()
+                JvmTuning.compactAfterScan()
                 index.resources.load(ResourceTable.publicXml(dir))
                 session = Session(dir.absolutePath, index)
                 index to result
