@@ -4,79 +4,68 @@ import org.eclipse.lsp4j.Diagnostic
 import org.eclipse.lsp4j.DiagnosticSeverity
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
+import xyz.surendrajat.smalilsp.core.ConstStringInstruction
+import xyz.surendrajat.smalilsp.core.FieldAccessInstruction
+import xyz.surendrajat.smalilsp.core.InvokeInstruction
+import xyz.surendrajat.smalilsp.core.JumpInstruction
 import xyz.surendrajat.smalilsp.core.SmaliFile
+import xyz.surendrajat.smalilsp.core.TypeInstruction
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 import org.slf4j.LoggerFactory
 
-/**
- * Provides diagnostic information for Smali files.
- * 
- * Two types of diagnostics:
- * 1. Syntax errors from parser (ANTLR errors)
- * 2. Semantic errors from analysis (undefined references, etc.)
- */
+/** Diagnostics: syntax errors from the parser, label and assembler checks, and undefined classes once the index can tell. */
 class DiagnosticProvider(
     private val parser: SmaliParser,
     private val index: WorkspaceIndex
 ) {
     private val logger = LoggerFactory.getLogger(DiagnosticProvider::class.java)
     
-    /**
-     * Compute all diagnostics for a file.
-     * Includes both syntax and semantic errors.
-     * 
-     * @param uri File URI
-     * @param content File content
-     * @return List of diagnostics to display
-     */
-    fun computeDiagnostics(uri: String, content: String): List<Diagnostic> {
-        val diagnostics = mutableListOf<Diagnostic>()
-        
-        // 1. Parse with error recovery to get syntax errors
-        val parseResult = parseWithErrorRecovery(uri, content)
-        diagnostics.addAll(parseResult.syntaxDiagnostics)
-        
-        // 2. If we have an AST (even partial), check semantic errors
-        parseResult.smaliFile?.let { file ->
-            diagnostics.addAll(computeSemanticDiagnostics(uri, file))
-        }
-        
-        return diagnostics
-    }
-    
+    /** Every diagnostic for [content]: syntax errors from the parser, then the semantic checks on whatever AST it produced. */
+    fun computeDiagnostics(uri: String, content: String): List<Diagnostic> =
+        computeDiagnosticsFromParseResult(uri, parser.parseWithErrors(uri, content), content.lines())
+
     /**
      * Compute diagnostics from an already-parsed result.
      * Avoids re-parsing when the caller already has a ParseResult (e.g. didChange).
      */
-    fun computeDiagnosticsFromParseResult(uri: String, parseResult: SmaliParser.ParseResult): List<Diagnostic> {
+    fun computeDiagnosticsFromParseResult(uri: String, parseResult: SmaliParser.ParseResult, lines: List<String>? = null): List<Diagnostic> {
         val diagnostics = mutableListOf<Diagnostic>()
         diagnostics.addAll(convertSyntaxErrors(parseResult.syntaxErrors))
         parseResult.smaliFile?.let { file ->
+            diagnostics.addAll(localDiagnostics(file, lines))
             diagnostics.addAll(computeSemanticDiagnostics(uri, file))
         }
         return diagnostics
     }
 
     /**
-     * Compute only syntax diagnostics from a parse result.
-     * Used during indexing when semantic checks would produce false positives.
+     * Syntax errors and the file-local checks only: what can be reported while the workspace is
+     * still being indexed, when a check against the index would flag classes not yet seen.
      */
-    fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult): List<Diagnostic> {
-        return convertSyntaxErrors(parseResult.syntaxErrors)
-    }
+    fun computeSyntaxDiagnosticsFromParseResult(parseResult: SmaliParser.ParseResult, lines: List<String>? = null): List<Diagnostic> =
+        convertSyntaxErrors(parseResult.syntaxErrors) + (parseResult.smaliFile?.let { localDiagnostics(it, lines) } ?: emptyList())
 
     /**
-     * Parse file with error recovery enabled.
-     * Collects syntax errors but continues parsing.
+     * Checks that need nothing but the file: a jump to a label the method does not define, a
+     * label defined twice, and, when the text is at hand, what the assembler would reject
+     * ([AssemblerChecks]).
      */
-    private fun parseWithErrorRecovery(uri: String, content: String): ParseResult {
-        val parseResult = parser.parseWithErrors(uri, content)
-        return ParseResult(
-            smaliFile = parseResult.smaliFile,
-            syntaxDiagnostics = convertSyntaxErrors(parseResult.syntaxErrors)
-        )
+    fun localDiagnostics(file: SmaliFile, lines: List<String>? = null): List<Diagnostic> {
+        val diagnostics = mutableListOf<Diagnostic>()
+        if (lines != null) diagnostics.addAll(AssemblerChecks.diagnostics(file, lines))
+        for (method in file.methods) {
+            for (ref in method.labelRefs) {
+                if (ref.name !in method.labels) {
+                    diagnostics.add(createDiagnostic(ref.span.toRange(), "Label ':${ref.name}' is not defined in this method", DiagnosticSeverity.Error, "undefined-label"))
+                }
+            }
+            for (label in method.duplicateLabels) {
+                diagnostics.add(createDiagnostic(label.range, "Label ':${label.name}' is defined more than once in this method", DiagnosticSeverity.Error, "duplicate-label"))
+            }
+        }
+        return diagnostics
     }
 
     private fun convertSyntaxErrors(errors: List<SmaliParser.SyntaxError>): List<Diagnostic> {
@@ -85,7 +74,7 @@ class DiagnosticProvider(
             createDiagnostic(
                 range = Range(
                     Position(line, error.charPositionInLine),
-                    Position(line, error.charPositionInLine + 10)
+                    Position(line, error.charPositionInLine + error.length)
                 ),
                 message = error.message,
                 severity = DiagnosticSeverity.Error,
@@ -100,16 +89,15 @@ class DiagnosticProvider(
      */
     private fun computeSemanticDiagnostics(uri: String, file: SmaliFile): List<Diagnostic> {
         val diagnostics = mutableListOf<Diagnostic>()
+        val ownPackage = Types.packageOf(file.classDefinition.name)
+        fun isKnownClass(className: String) = isKnownClass(className, ownPackage)
         
         // Check superclass exists
         file.classDefinition.superClass?.let { superClass ->
-            if (!index.hasClass(superClass) && !ClassUtils.isSDKClass(superClass)) {
+            if (!isKnownClass(superClass)) {
                 diagnostics.add(
                     createDiagnostic(
-                        range = Range(
-                            Position(file.classDefinition.range.start.line, 0),
-                            Position(file.classDefinition.range.end.line, 100)
-                        ),
+                        range = file.classDefinition.superClassRange ?: file.classDefinition.nameSpan.toRange(),
                         message = "Superclass '$superClass' not found in workspace or SDK",
                         severity = DiagnosticSeverity.Warning,
                         code = "undefined-class"
@@ -120,13 +108,10 @@ class DiagnosticProvider(
         
         // Check interfaces exist
         file.classDefinition.interfaces.forEach { interfaceName ->
-            if (!index.hasClass(interfaceName) && !ClassUtils.isSDKClass(interfaceName)) {
+            if (!isKnownClass(interfaceName)) {
                 diagnostics.add(
                     createDiagnostic(
-                        range = Range(
-                            Position(file.classDefinition.range.start.line, 0),
-                            Position(file.classDefinition.range.end.line, 100)
-                        ),
+                        range = file.classDefinition.interfaceRanges[interfaceName] ?: file.classDefinition.nameSpan.toRange(),
                         message = "Interface '$interfaceName' not found in workspace or SDK",
                         severity = DiagnosticSeverity.Warning,
                         code = "undefined-class"
@@ -135,64 +120,30 @@ class DiagnosticProvider(
             }
         }
         
-        // Check method invocations
-        file.methods.forEach { method ->
-            method.instructions?.forEach { instruction ->
+        // Check the classes instructions name
+        for (method in file.methods) {
+            for (instruction in method.instructions) {
+                val className: String
+                val range: Range
                 when (instruction) {
-                    is xyz.surendrajat.smalilsp.core.InvokeInstruction -> {
-                        if (!index.hasClass(instruction.className) && !ClassUtils.isSDKClass(instruction.className)) {
-                            diagnostics.add(
-                                createDiagnostic(
-                                    range = instruction.range,
-                                    message = "Class '${instruction.className}' not found in workspace or SDK",
-                                    severity = DiagnosticSeverity.Warning,
-                                    code = "undefined-class"
-                                )
-                            )
-                        }
-                    }
-                    is xyz.surendrajat.smalilsp.core.FieldAccessInstruction -> {
-                        if (!index.hasClass(instruction.className) && !ClassUtils.isSDKClass(instruction.className)) {
-                            diagnostics.add(
-                                createDiagnostic(
-                                    range = instruction.range,
-                                    message = "Class '${instruction.className}' not found in workspace or SDK",
-                                    severity = DiagnosticSeverity.Warning,
-                                    code = "undefined-class"
-                                )
-                            )
-                        }
-                    }
-                    is xyz.surendrajat.smalilsp.core.TypeInstruction -> {
-                        if (!index.hasClass(instruction.className) && !ClassUtils.isSDKClass(instruction.className)) {
-                            diagnostics.add(
-                                createDiagnostic(
-                                    range = instruction.range,
-                                    message = "Class '${instruction.className}' not found in workspace or SDK",
-                                    severity = DiagnosticSeverity.Warning,
-                                    code = "undefined-class"
-                                )
-                            )
-                        }
-                    }
-                    is xyz.surendrajat.smalilsp.core.JumpInstruction -> {
-                        // JumpInstructions reference labels within the same method
-                        // Label validation could be added here if needed
-                    }
-                    is xyz.surendrajat.smalilsp.core.ConstStringInstruction -> {
-                        // String literals don't need diagnostics
-                    }
+                    is InvokeInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range }
+                    is FieldAccessInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range }
+                    is TypeInstruction -> { className = instruction.className; range = instruction.typeSpan?.toRange() ?: instruction.range }
+                    is JumpInstruction, is ConstStringInstruction -> continue   // labels are checked above; string literals need nothing
+                }
+                if (!isKnownClass(className)) {
+                    diagnostics.add(createDiagnostic(range, "Class '$className' not found in workspace or SDK", DiagnosticSeverity.Warning, "undefined-class"))
                 }
             }
         }
         
         // Check field references
         file.fields.forEach { field ->
-            val typeClass = extractTypeClass(field.type)
-            if (typeClass != null && !index.hasClass(typeClass) && !ClassUtils.isSDKClass(typeClass)) {
+            val typeClass = Types.className(field.type)
+            if (typeClass != null && !isKnownClass(typeClass)) {
                 diagnostics.add(
                     createDiagnostic(
-                        range = field.range,
+                        range = field.typeSpan.toRange(),
                         message = "Type '$typeClass' not found in workspace or SDK",
                         severity = DiagnosticSeverity.Information,
                         code = "undefined-class"
@@ -203,23 +154,24 @@ class DiagnosticProvider(
         
         return diagnostics
     }
-    
-    /**
-     * Extract class from type descriptor.
-     * Example: "Ljava/lang/String;" → "Ljava/lang/String;"
-     * Example: "[Lcom/example/Foo;" → "Lcom/example/Foo;"
-     */
-    private fun extractTypeClass(type: String): String? {
-        // Remove array markers
-        val baseType = type.replace("[", "")
         
-        // Only class types start with L
-        return if (baseType.startsWith("L")) baseType else null
-    }
-    
     /**
-     * Create a diagnostic with standard formatting.
+     * A class reference is reported only when it looks like a mistake: the class is not in the
+     * workspace, not a platform class, and its package is one the workspace defines classes in.
+     * A decompiled app also references classes it does not ship, such as `org.xmlpull` from the
+     * platform or an optional library like Conscrypt behind a runtime check, and those are not
+     * errors; a hand-edited name inside the app's own packages is. The file's own package counts
+     * as the workspace's whether or not the file is indexed yet. Array brackets are stripped:
+     * a check-cast to `[Lcom/app/Foo;` is checked against the index key `Lcom/app/Foo;`.
      */
+    private fun isKnownClass(className: String, ownPackage: String): Boolean {
+        if (Types.isSdkClass(className)) return true
+        val base = className.trimStart('[')
+        if (index.hasClass(base)) return true
+        val pkg = Types.packageOf(base)
+        return pkg != ownPackage && !index.hasPackage(pkg)
+    }
+
     private fun createDiagnostic(
         range: Range,
         message: String,
@@ -228,14 +180,4 @@ class DiagnosticProvider(
     ): Diagnostic {
         return Diagnostic(range, message, severity, "smali-lsp", code)
     }
-    
-    /**
-     * Result of parsing with error recovery.
-     */
-    private data class ParseResult(
-        val smaliFile: SmaliFile?,
-        val syntaxDiagnostics: List<Diagnostic>
-    )
 }
-
-

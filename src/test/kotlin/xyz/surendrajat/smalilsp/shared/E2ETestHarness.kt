@@ -5,9 +5,6 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.services.LanguageServer
 import java.util.concurrent.TimeUnit
 
-import xyz.surendrajat.smalilsp.shared.E2ETestHarness
-import xyz.surendrajat.smalilsp.shared.TestLSPClient
-import xyz.surendrajat.smalilsp.shared.TestWorkspace
 /**
  * Test harness for E2E testing of the Smali LSP server.
  * Manages server lifecycle, client connection, and provides convenient methods for common operations.
@@ -42,11 +39,8 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         
         // Send initialize request
         val initParams = InitializeParams().apply {
-            rootUri = workspace.rootUri
             capabilities = clientCapabilities
-            if (workspaceFolders != null) {
-                setWorkspaceFolders(workspaceFolders)
-            }
+            setWorkspaceFolders(workspaceFolders ?: listOf(WorkspaceFolder(workspace.rootUri, "root")))
         }
         
         server.initialize(initParams).get(30, TimeUnit.SECONDS)
@@ -55,10 +49,10 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         server.initialized(InitializedParams())
         
         isInitialized = true
-        
-        // Give server time to start indexing
-        Thread.sleep(500)
-        
+
+        // Indexing runs in the background; wait for it so every request sees the full index.
+        server.indexingDone.get(60, TimeUnit.SECONDS)
+
         return this
     }
     
@@ -68,7 +62,7 @@ class E2ETestHarness(val workspace: TestWorkspace) {
     private fun createDefaultClientCapabilities(): ClientCapabilities {
         return ClientCapabilities().apply {
             workspace = WorkspaceClientCapabilities().apply {
-                workspaceEdit = WorkspaceEditCapabilities(true)
+                workspaceEdit = WorkspaceEditCapabilities().apply { documentChanges = true }
                 didChangeConfiguration = DidChangeConfigurationCapabilities(true)
                 didChangeWatchedFiles = DidChangeWatchedFilesCapabilities(true)
             }
@@ -89,10 +83,8 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         server.textDocumentService.didOpen(DidOpenTextDocumentParams(
             TextDocumentItem(uri, languageId, version, content)
         ))
-        
-        // Give server time to process
-        Thread.sleep(100)
-        
+        server.awaitWrites()
+
         return uri
     }
     
@@ -104,19 +96,9 @@ class E2ETestHarness(val workspace: TestWorkspace) {
             VersionedTextDocumentIdentifier(uri, version),
             listOf(TextDocumentContentChangeEvent(newContent))
         ))
-        
-        // Give server time to process
-        Thread.sleep(100)
+        server.awaitWrites()
     }
     
-    /**
-     * Close a file
-     */
-    fun closeFile(uri: String) {
-        server.textDocumentService.didClose(DidCloseTextDocumentParams(
-            TextDocumentIdentifier(uri)
-        ))
-    }
     
     // ===== Language Features =====
     
@@ -237,32 +219,6 @@ class E2ETestHarness(val workspace: TestWorkspace) {
         return client.waitForDiagnostics(uri, timeoutMs)
     }
     
-    // ===== Helpers =====
-    
-    /**
-     * Wait for indexing to complete (simple sleep-based)
-     */
-    fun waitForIndexing(seconds: Int = 5) {
-        Thread.sleep(seconds * 1000L)
-    }
-    
-    /**
-     * Get workspace statistics
-     */
-    fun getWorkspaceStats(): TestWorkspace.WorkspaceStats {
-        return workspace.getStats()
-    }
-    
-    /**
-     * Measure operation time
-     */
-    fun <T> measureTime(operation: () -> T): Pair<T, Long> {
-        val start = System.currentTimeMillis()
-        val result = operation()
-        val elapsed = System.currentTimeMillis() - start
-        return result to elapsed
-    }
-    
     // ===== Shutdown =====
     
     /**
@@ -280,19 +236,11 @@ class E2ETestHarness(val workspace: TestWorkspace) {
             return
         }
         
-        try {
-            server.shutdown().get(5, TimeUnit.SECONDS)
-            // DO NOT call server.exit() - it calls System.exit(0) which kills the JVM!
-            isShutdown = true
-        } catch (e: Exception) {
-            println("Error during shutdown: ${e.message}")
-        }
+        server.shutdown().get(5, TimeUnit.SECONDS)
+        // Not server.exit(): it calls System.exit, which would end the test JVM
+        isShutdown = true
     }
     
-    /**
-     * Check if server is initialized
-     */
-    fun checkInitialized(): Boolean = isInitialized
     
     /**
      * Cleanup (shutdown + cleanup workspace if temp)

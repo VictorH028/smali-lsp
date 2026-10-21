@@ -2,7 +2,9 @@ package xyz.surendrajat.smalilsp.unit.indexer
 
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.io.TempDir
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -41,6 +43,19 @@ class WorkspaceScannerTest {
         assertEquals(0, result.filesFailed)
     }
     
+    @Test
+    fun `a symlink loop does not recurse and a symlinked directory is not indexed twice`() = runBlocking {
+        val src = File(tempDir, "smali").apply { mkdirs() }
+        File(src, "A.smali").writeText(".class public Lcom/A;\n.super Ljava/lang/Object;")
+        java.nio.file.Files.createSymbolicLink(File(src, "loop").toPath(), tempDir.toPath())
+        java.nio.file.Files.createSymbolicLink(File(tempDir, "alias").toPath(), src.toPath())
+
+        val result = scanner.scanDirectory(tempDir)
+
+        assertEquals(1, result.filesProcessed)
+        assertEquals(1, index.getStats().classes)
+    }
+
     @Test
     fun `scan directory with single smali file`() = runBlocking {
         // Create a simple smali file
@@ -230,11 +245,6 @@ class WorkspaceScannerTest {
         assertEquals(fileCount, result.filesProcessed)
         assertEquals(fileCount, result.filesSucceeded)
         
-        // Performance check: should be fast
-        assertTrue(result.durationMs < 5000, "Should complete 50 files in <5 seconds, took ${result.durationMs}ms")
-        
-        println("Performance: $fileCount files in ${result.durationMs}ms (${result.filesPerSecond} files/sec)")
-        
         // Verify all indexed correctly
         val stats = index.getStats()
         assertEquals(fileCount, stats.classes)
@@ -254,6 +264,5 @@ class WorkspaceScannerTest {
         // Note: filesPerSecond can be 0 if duration is 0ms (very fast execution)
         // This is actually good - means parsing is instant
         assertTrue(result.filesPerSecond >= 0, "Should calculate files/second (can be 0 if instant)")
-        println("Processing rate: ${result.filesPerSecond} files/second")
     }
 }

@@ -1,31 +1,18 @@
 package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.Location
+import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.SymbolInformation
 import org.eclipse.lsp4j.SymbolKind
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import java.util.PriorityQueue
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.ClassUtils
+import xyz.surendrajat.smalilsp.util.Types
 
 /**
- * Provides workspace-wide symbol search.
- * 
- * Features:
- * - Fuzzy matching on symbol names
- * - Case-insensitive search
- * - Searches classes, methods, and fields
- * - Fast performance (< 500ms for 4000+ files)
- * 
- * LSP Request: workspace/symbol
- * 
- * Search Algorithm:
- * 1. If query is empty, return all symbols (up to limit)
- * 2. Normalize query to lowercase for case-insensitive matching
- * 3. Check if symbol name contains query substring
- * 4. Support fuzzy matching: "FBAdapter" matches "FeedbackAdapter"
- * 5. Rank results by match quality (exact > prefix > contains)
- * 6. Return up to 500 results for performance
+ * Workspace symbol search over classes, methods and fields: case-insensitive, fuzzy, and the
+ * best 500 kept while scanning so a large workspace never sorts a full result list.
  */
 class WorkspaceSymbolProvider(
     private val index: WorkspaceIndex
@@ -41,71 +28,50 @@ class WorkspaceSymbolProvider(
      * @param query Search string (case-insensitive, supports fuzzy matching)
      * @return List of matching symbols, ranked by relevance
      */
-    fun search(query: String): List<SymbolInformation> {
+    fun search(query: String, cancel: CancelChecker? = null): List<SymbolInformation> {
         val normalizedQuery = query.lowercase().trim()
         if (normalizedQuery.isEmpty()) {
             return collectFirstSymbols()
         }
 
-        val matches = TopSymbolMatches(MAX_RESULTS)
+        // Every class, method and field name is compared on every keystroke of the symbol
+        // picker; the scan is memory-bound, so it runs in parallel chunks, each keeping its
+        // own top matches, merged at the end. The global top set is contained in the union
+        // of the per-chunk top sets, so the result equals a sequential scan's.
+        val files = index.getFilesView().toList()
+        val chunkSize = maxOf(256, files.size / (Runtime.getRuntime().availableProcessors() * 4) + 1)
+        val merged = TopSymbolMatches(MAX_RESULTS)
+        files.chunked(chunkSize).parallelStream()
+            .map { chunk ->
+                cancel?.checkCanceled()
+                val top = TopSymbolMatches(MAX_RESULTS)
+                for (file in chunk) matchFile(file, normalizedQuery, top)
+                top
+            }
+            .toList()
+            .forEach { top -> top.forEach(merged::offer) }
+        return merged.toSortedSymbolInformation()
+    }
 
-        index.getFilesView().forEach { file ->
-            // Add class symbol - match on simple name OR full package path.
-            // e.g. query "billingclient" should match "Lcom/android/billingclient/BillingClient;"
-            val simpleName = extractSimpleName(file.classDefinition.name)
-            val fullPath = file.classDefinition.name.removePrefix("L").removeSuffix(";").lowercase()
-            val classMatch = matchSymbol(simpleName, normalizedQuery)
-                ?: if (fullPath.contains(normalizedQuery)) 50 else null
-            if (classMatch != null) {
-                matches.offer(
-                    ScoredSymbol(
-                        name = file.classDefinition.name,
-                        kind = SymbolKind.Class,
-                        location = Location(file.uri, file.classDefinition.range),
-                        containerName = null,
-                        score = classMatch
-                    )
-                )
-            }
-            
-            // Add method symbols - match ONLY on method name, not class+method
-            file.methods.forEach { method ->
-                val methodMatch = matchSymbol(method.name, normalizedQuery)
-                if (methodMatch != null) {
-                    // Display name includes class for context
-                    val displayName = "${file.classDefinition.name}.${method.name}"
-                    matches.offer(
-                        ScoredSymbol(
-                            name = displayName,
-                            kind = SymbolKind.Method,
-                            location = Location(file.uri, method.range),
-                            containerName = file.classDefinition.name,
-                            score = methodMatch
-                        )
-                    )
-                }
-            }
-            
-            // Add field symbols - match ONLY on field name, not class+field
-            file.fields.forEach { field ->
-                val fieldMatch = matchSymbol(field.name, normalizedQuery)
-                if (fieldMatch != null) {
-                    // Display name includes class for context
-                    val displayName = "${file.classDefinition.name}.${field.name}"
-                    matches.offer(
-                        ScoredSymbol(
-                            name = displayName,
-                            kind = SymbolKind.Field,
-                            location = Location(file.uri, field.range),
-                            containerName = file.classDefinition.name,
-                            score = fieldMatch
-                        )
-                    )
-                }
-            }
+    private fun matchFile(file: SmaliFile, normalizedQuery: String, matches: TopSymbolMatches) {
+        // Class symbol: match on the simple name, or on the package path at a lower score
+        // (query "billingclient" should find "Lcom/android/billingclient/BillingClient;")
+        // Nothing is allocated for a candidate until the top set accepts its score: a short query
+        // matches most of the workspace's names
+        val className = file.classDefinition.name
+        val classMatch = matchSymbol(Types.simpleName(className), normalizedQuery)
+            ?: if (pathContains(className, normalizedQuery)) 50 else null
+        if (classMatch != null) {
+            matches.offer(ScoredSymbol(file, SymbolKind.Class, null, file.classDefinition.range, classMatch))
         }
-
-        return matches.toSortedSymbolInformation()
+        for (method in file.methods) {
+            val score = matchSymbol(method.name, normalizedQuery) ?: continue
+            matches.offer(ScoredSymbol(file, SymbolKind.Method, method.name, method.range, score))
+        }
+        for (field in file.fields) {
+            val score = matchSymbol(field.name, normalizedQuery) ?: continue
+            matches.offer(ScoredSymbol(file, SymbolKind.Field, field.name, field.range, score))
+        }
     }
 
     private fun collectFirstSymbols(): List<SymbolInformation> {
@@ -143,63 +109,34 @@ class WorkspaceSymbolProvider(
         return results
     }
     
-    /**
-     * Match a symbol name against a query.
-     * 
-     * Returns match score (higher is better):
-     * - 1000: Exact match (case-insensitive)
-     * - 500 + length bonus: Prefix match (shorter symbols score higher)
-     * - 100 + length bonus: Contains match (shorter symbols score higher)
-     * - 10: Fuzzy match (only for queries >= 3 chars)
-     * - null: No match
-     * 
-     * The length bonus ensures shorter symbol names rank higher:
-     * - Searching "q" returns class "q" before "queryString"
-     */
+    /** Match score, higher is better: 1000 exact, 500 prefix, 100 contains (both plus a bonus for shorter names, so `q` beats `queryString`), 10 fuzzy for queries of 3+ characters; null for no match. */
     private fun matchSymbol(symbolName: String, query: String): Int? {
         if (query.isEmpty()) return 10 // Everything matches empty query
-        
-        val normalizedSymbol = symbolName.lowercase()
-        
-        // Calculate length bonus: shorter names get higher scores
-        // Max bonus of 100, decreases with length
-        val lengthBonus = maxOf(0, 100 - normalizedSymbol.length * 5)
-        
-        // Exact match - highest priority
-        if (normalizedSymbol == query) return 1000 + lengthBonus
-        
-        // Prefix match - second priority
-        if (normalizedSymbol.startsWith(query)) return 500 + lengthBonus
-        
-        // Contains match - third priority
-        if (normalizedSymbol.contains(query)) return 100 + lengthBonus
-        
-        // Fuzzy match: only for longer queries to avoid noise
-        // Single-letter queries like "q" should NOT fuzzy match "request"
-        if (query.length >= 3 && fuzzyMatch(normalizedSymbol, query)) return 10
-        
+
+        // Case-insensitive comparisons without lowercasing every symbol: a query runs over
+        // every method and field name in the workspace, so one allocation per name counted.
+        val lengthBonus = maxOf(0, 100 - symbolName.length * 5)
+        if (symbolName.equals(query, ignoreCase = true)) return 1000 + lengthBonus
+        if (symbolName.startsWith(query, ignoreCase = true)) return 500 + lengthBonus
+        if (symbolName.contains(query, ignoreCase = true)) return 100 + lengthBonus
+        if (query.length >= 3 && fuzzyMatch(symbolName, query)) return 10
         return null
     }
+
+    /** Does the package path of `Lcom/pkg/Name;` (without `L` and `;`) contain [query]? */
+    private fun pathContains(className: String, query: String): Boolean {
+        val at = className.indexOf(query, startIndex = 1, ignoreCase = true)
+        return at >= 0 && at + query.length <= className.length - 1
+    }
     
-    /**
-     * Fuzzy match: check if all query letters appear in order in symbol.
-     * 
-     * Examples:
-     * - "FBA" matches "FeedBackAdapter"
-     * - "onCrt" matches "onCreate"
-     * - "str" matches "StringBuilder"
-     */
+    /** Every query letter appears in order in the symbol: `onCrt` matches `onCreate`. */
     private fun fuzzyMatch(symbol: String, query: String): Boolean {
         var symbolIdx = 0
         var queryIdx = 0
-        
         while (symbolIdx < symbol.length && queryIdx < query.length) {
-            if (symbol[symbolIdx] == query[queryIdx]) {
-                queryIdx++
-            }
+            if (symbol[symbolIdx].lowercaseChar() == query[queryIdx]) queryIdx++
             symbolIdx++
         }
-        
         return queryIdx == query.length
     }
     
@@ -214,22 +151,24 @@ class WorkspaceSymbolProvider(
         )
     }
 
-    private data class ScoredSymbol(
-        val name: String,
-        val kind: SymbolKind,
-        val location: Location,
-        val containerName: String?,
-        val score: Int
-    )
+    /** A candidate: the file, the member (null for the class itself) and the score; the symbol is built only for the winners. */
+    private class ScoredSymbol(val file: SmaliFile, val kind: SymbolKind, val memberName: String?, val range: Range, val score: Int) {
+        val className: String get() = file.classDefinition.name
+        fun toSymbolInformation(): SymbolInformation =
+            if (memberName == null) SymbolInformation(className, kind, Location(file.uri, range))
+            else SymbolInformation("$className.$memberName", kind, Location(file.uri, range), className)
+    }
 
-    private class TopSymbolMatches(limit: Int) {
+    /** Ties broken by class name then member name, which orders like the full `class.member` name without building it. */
+    private val byName = Comparator<ScoredSymbol> { left, right ->
+        val byClass = left.className.compareTo(right.className)
+        if (byClass != 0) byClass else (left.memberName ?: "").compareTo(right.memberName ?: "")
+    }
+
+    private inner class TopSymbolMatches(limit: Int) {
         private val worstFirst = Comparator<ScoredSymbol> { left, right ->
             val scoreCompare = left.score.compareTo(right.score)
-            if (scoreCompare != 0) {
-                scoreCompare
-            } else {
-                right.name.compareTo(left.name)
-            }
+            if (scoreCompare != 0) scoreCompare else byName.compare(right, left)
         }
 
         private val maxSize = limit
@@ -252,18 +191,15 @@ class WorkspaceSymbolProvider(
             offerIntoHeap(activeHeap, symbol)
         }
 
+        fun forEach(action: (ScoredSymbol) -> Unit) {
+            (heap?.toList() ?: buffered).forEach(action)
+        }
+
         fun toSortedSymbolInformation(): List<SymbolInformation> {
             val source = heap?.toList() ?: buffered
             return source
-                .sortedWith(compareByDescending<ScoredSymbol> { it.score }.thenBy { it.name })
-                .map { symbol ->
-                    SymbolInformation(
-                        symbol.name,
-                        symbol.kind,
-                        symbol.location,
-                        symbol.containerName
-                    )
-                }
+                .sortedWith(compareByDescending<ScoredSymbol> { it.score }.then(byName))
+                .map { it.toSymbolInformation() }
         }
 
         private fun offerIntoHeap(target: PriorityQueue<ScoredSymbol>, symbol: ScoredSymbol) {
@@ -279,16 +215,4 @@ class WorkspaceSymbolProvider(
             }
         }
     }
-    
-    /**
-     * Extract simple class name from full Smali type.
-     * 
-     * Examples:
-     * - "Lcom/example/MyClass;" -> "MyClass"
-     * - "Lcom/example/Outer$Inner;" -> "Inner"
-     * - "La/b/c/q;" -> "q"
-     */
-    private fun extractSimpleName(fullName: String): String {
-        return ClassUtils.extractSimpleName(fullName)
     }
-}

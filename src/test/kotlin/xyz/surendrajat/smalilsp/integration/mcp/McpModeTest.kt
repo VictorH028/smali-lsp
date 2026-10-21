@@ -1,0 +1,1057 @@
+package xyz.surendrajat.smalilsp.integration.mcp
+
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import org.junit.jupiter.api.*
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import java.io.*
+import java.nio.file.Files
+import java.nio.file.Path
+import org.junit.jupiter.api.io.TempDir
+import java.util.Properties
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
+
+/**
+ * Integration tests for McpMode (MCP server over JSON-RPC 2.0 stdio).
+ *
+ * Spawns the main entrypoint with `mcp` subcommand and tests the full MCP lifecycle:
+ * - Initialization handshake (initialize -> initialized)
+ * - Tool discovery (tools/list)
+ * - Tool execution (tools/call) for all 8 tools
+ * - Error handling (unknown tool, missing args, no index)
+ * - Protocol compliance (JSON-RPC 2.0 format)
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class McpModeTest {
+
+    private val gson = Gson()
+
+    @TempDir
+    lateinit var tempRoot: Path
+
+    private lateinit var testProjectDir: File
+    private lateinit var smaliFile: File
+    private lateinit var smaliFileUri: String
+
+    @BeforeEach
+    fun setup() {
+        testProjectDir = Files.createTempDirectory(tempRoot, "mcp-test").resolve("test-project").toFile()
+        testProjectDir.mkdirs()
+
+        val smaliDir = File(testProjectDir, "smali/com/example/test")
+        smaliDir.mkdirs()
+
+        smaliFile = File(smaliDir, "MainActivity.smali")
+        smaliFile.writeText("""
+            .class public Lcom/example/test/MainActivity;
+            .super Ljava/lang/Object;
+            .source "MainActivity.java"
+
+            # static fields
+            .field private static TAG:Ljava/lang/String; = "MainActivity"
+
+            # instance fields
+            .field private counter:I
+
+            # direct methods
+            .method public constructor <init>()V
+                .registers 2
+
+                invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+                const/4 v0, 0x0
+                iput v0, p0, Lcom/example/test/MainActivity;->counter:I
+
+                return-void
+            .end method
+
+            .method public static main([Ljava/lang/String;)V
+                .registers 3
+
+                sget-object v0, Ljava/lang/System;->out:Ljava/io/PrintStream;
+
+                const-string v1, "Hello World"
+
+                invoke-virtual {v0, v1}, Ljava/io/PrintStream;->println(Ljava/lang/String;)V
+
+                return-void
+            .end method
+
+            .method public increment()V
+                .registers 2
+
+                iget v0, p0, Lcom/example/test/MainActivity;->counter:I
+                add-int/lit8 v0, v0, 0x1
+                iput v0, p0, Lcom/example/test/MainActivity;->counter:I
+
+                return-void
+            .end method
+        """.trimIndent())
+
+        smaliFileUri = smaliFile.toURI().toString()
+    }
+
+    // --- JSON-RPC helpers ---
+
+    private fun sendRequest(
+        stdin: BufferedWriter,
+        stdout: BufferedReader,
+        id: Any,
+        method: String,
+        params: Any? = null
+    ): JsonObject {
+        val request = mutableMapOf<String, Any?>(
+            "jsonrpc" to "2.0",
+            "id" to id,
+            "method" to method
+        )
+        if (params != null) {
+            request["params"] = params
+        }
+
+        val json = gson.toJson(request)
+        stdin.write(json)
+        stdin.newLine()
+        stdin.flush()
+
+        val response = stdout.readLine()
+        assertNotNull(response, "Expected response but got null (server may have crashed)")
+        return JsonParser.parseString(response).asJsonObject
+    }
+
+    private fun sendNotification(stdin: BufferedWriter, method: String) {
+        val notification = mapOf("jsonrpc" to "2.0", "method" to method)
+        stdin.write(gson.toJson(notification))
+        stdin.newLine()
+        stdin.flush()
+    }
+
+    private fun callTool(
+        stdin: BufferedWriter,
+        stdout: BufferedReader,
+        id: Any,
+        toolName: String,
+        arguments: Map<String, Any?> = emptyMap()
+    ): JsonObject {
+        return sendRequest(stdin, stdout, id, "tools/call", mapOf(
+            "name" to toolName,
+            "arguments" to arguments
+        ))
+    }
+
+    private fun assertJsonRpcSuccess(response: JsonObject, expectedId: Any) {
+        assertEquals("2.0", response.get("jsonrpc").asString, "Must be JSON-RPC 2.0")
+        assertNotNull(response.get("result"), "Expected result, got: $response")
+        assertNull(response.get("error"), "Unexpected error: ${response.get("error")}")
+        when (expectedId) {
+            is Int -> assertEquals(expectedId, response.get("id").asInt)
+            is String -> assertEquals(expectedId, response.get("id").asString)
+        }
+    }
+
+    private fun assertJsonRpcError(response: JsonObject) {
+        assertEquals("2.0", response.get("jsonrpc").asString)
+        assertNotNull(response.get("error"), "Expected error, got: $response")
+    }
+
+    private fun getToolResultText(response: JsonObject): String {
+        val result = response.getAsJsonObject("result")
+        val content = result.getAsJsonArray("content")
+        return content[0].asJsonObject.get("text").asString
+    }
+
+    private fun isToolError(response: JsonObject): Boolean {
+        val result = response.getAsJsonObject("result") ?: return false
+        return result.get("isError")?.asBoolean == true
+    }
+
+    // --- Tests ---
+
+    @Test
+    fun `test MCP initialization handshake`() {
+        val process = startMcpProcess()
+        val expectedVersion = runtimeVersion()
+
+        try {
+            val stdin = BufferedWriter(OutputStreamWriter(process.outputStream))
+            val stdout = BufferedReader(InputStreamReader(process.inputStream))
+            drainStderr(process)
+
+            // Step 1: Send initialize request
+            val initResponse = sendRequest(stdin, stdout, 1, "initialize", mapOf(
+                "protocolVersion" to "2025-03-26",
+                "capabilities" to emptyMap<String, Any>(),
+                "clientInfo" to mapOf("name" to "test-client", "version" to "1.0.0")
+            ))
+
+            assertJsonRpcSuccess(initResponse, 1)
+
+            val result = initResponse.getAsJsonObject("result")
+            assertEquals("2025-03-26", result.get("protocolVersion").asString)
+
+            val capabilities = result.getAsJsonObject("capabilities")
+            assertNotNull(capabilities.get("tools"), "Server must declare tools capability")
+
+            val serverInfo = result.getAsJsonObject("serverInfo")
+            assertEquals("smali-lsp", serverInfo.get("name").asString)
+            assertEquals(expectedVersion, serverInfo.get("version").asString)
+            assertTrue(serverInfo.get("version").asString != "1.0.0")
+
+            // Step 2: Send initialized notification (no response expected)
+            sendNotification(stdin, "notifications/initialized")
+
+            // Step 3: Verify server still responds after initialization
+            val listResponse = sendRequest(stdin, stdout, 2, "tools/list")
+            assertJsonRpcSuccess(listResponse, 2)
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test tools list returns all 14 tools`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            val response = sendRequest(stdin, stdout, 10, "tools/list")
+            assertJsonRpcSuccess(response, 10)
+
+            val result = response.getAsJsonObject("result")
+            val tools = result.getAsJsonArray("tools")
+
+            val toolNames = tools.map { it.asJsonObject.get("name").asString }.toSet()
+            assertEquals(14, toolNames.size, "Expected 14 tools, got: $toolNames")
+
+            val expectedTools = setOf(
+                "smali_index", "smali_find_definition", "smali_search_symbols",
+                "smali_get_stats", "smali_find_references", "smali_hover",
+                "smali_diagnostics", "smali_document_symbols",
+                "smali_search_strings", "smali_call_graph", "smali_xref_summary",
+                "smali_type_hierarchy", "smali_read_method", "smali_list_package"
+            )
+            assertEquals(expectedTools, toolNames)
+
+            // Verify each tool has required MCP fields
+            for (tool in tools) {
+                val toolObj = tool.asJsonObject
+                assertNotNull(toolObj.get("name"), "Tool missing name")
+                assertNotNull(toolObj.get("description"), "Tool missing description")
+                assertNotNull(toolObj.get("inputSchema"), "Tool missing inputSchema")
+
+                val schema = toolObj.getAsJsonObject("inputSchema")
+                assertEquals("object", schema.get("type").asString, "inputSchema type must be 'object'")
+            }
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test full tool lifecycle - index, query, search`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            // 1. Index
+            val indexResponse = callTool(stdin, stdout, 20, "smali_index", mapOf(
+                "directory" to testProjectDir.absolutePath
+            ))
+            assertJsonRpcSuccess(indexResponse, 20)
+            assertFalse(isToolError(indexResponse))
+            val indexText = getToolResultText(indexResponse)
+            assertTrue(indexText.contains("Successfully indexed"))
+            assertTrue(indexText.contains("Classes:"))
+
+            // 2. Get stats
+            val statsResponse = callTool(stdin, stdout, 21, "smali_get_stats")
+            assertJsonRpcSuccess(statsResponse, 21)
+            assertFalse(isToolError(statsResponse))
+            val statsText = getToolResultText(statsResponse)
+            val stats = JsonParser.parseString(statsText).asJsonObject
+            assertEquals(1, stats.get("classes").asInt)
+            assertTrue(stats.get("methods").asInt >= 3) // constructor, main, increment
+            assertTrue(stats.get("fields").asInt >= 2) // TAG, counter
+
+            // 3. Find definition
+            val defResponse = callTool(stdin, stdout, 22, "smali_find_definition", mapOf(
+                "symbol" to "Lcom/example/test/MainActivity;"
+            ))
+            assertJsonRpcSuccess(defResponse, 22)
+            assertFalse(isToolError(defResponse))
+            val defText = getToolResultText(defResponse)
+            val defResult = JsonParser.parseString(defText).asJsonObject
+            assertEquals(1, defResult.get("count").asInt)
+            val results = defResult.getAsJsonArray("results")
+            assertEquals("class", results[0].asJsonObject.get("type").asString)
+
+            // 4. Search symbols
+            val searchResponse = callTool(stdin, stdout, 23, "smali_search_symbols", mapOf(
+                "pattern" to "main"
+            ))
+            assertJsonRpcSuccess(searchResponse, 23)
+            assertFalse(isToolError(searchResponse))
+            val searchText = getToolResultText(searchResponse)
+            val searchResult = JsonParser.parseString(searchText).asJsonObject
+            assertTrue(searchResult.get("count").asInt > 0)
+
+            // 5. Document symbols
+            val symbolsResponse = callTool(stdin, stdout, 24, "smali_document_symbols", mapOf(
+                "uri" to smaliFileUri
+            ))
+            assertJsonRpcSuccess(symbolsResponse, 24)
+            assertFalse(isToolError(symbolsResponse))
+            val symbolsText = getToolResultText(symbolsResponse)
+            val symbolsResult = JsonParser.parseString(symbolsText).asJsonObject
+            assertTrue(symbolsResult.get("count").asInt >= 4)
+
+            // 6. Hover
+            val hoverResponse = callTool(stdin, stdout, 25, "smali_hover", mapOf(
+                "uri" to smaliFileUri,
+                "line" to 17,
+                "character" to 50
+            ))
+            assertJsonRpcSuccess(hoverResponse, 25)
+            assertFalse(isToolError(hoverResponse))
+
+            // 7. Find references
+            val refsResponse = callTool(stdin, stdout, 26, "smali_find_references", mapOf(
+                "uri" to smaliFileUri,
+                "line" to 17,
+                "character" to 50
+            ))
+            assertJsonRpcSuccess(refsResponse, 26)
+            assertFalse(isToolError(refsResponse))
+
+            // 8. Diagnostics
+            val diagResponse = callTool(stdin, stdout, 27, "smali_diagnostics", mapOf(
+                "uri" to smaliFileUri,
+                "content" to smaliFile.readText()
+            ))
+            assertJsonRpcSuccess(diagResponse, 27)
+            assertFalse(isToolError(diagResponse))
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test tool error - no index loaded`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            val response = callTool(stdin, stdout, 30, "smali_find_definition", mapOf(
+                "symbol" to "Lcom/example/Test;"
+            ))
+
+            // Tool-level error is returned as JSON-RPC success with isError=true
+            assertJsonRpcSuccess(response, 30)
+            assertTrue(isToolError(response))
+            assertTrue(getToolResultText(response).contains("No index loaded"))
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test tool error - invalid directory`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            val response = callTool(stdin, stdout, 31, "smali_index", mapOf(
+                "directory" to "/nonexistent/path/12345"
+            ))
+
+            assertJsonRpcSuccess(response, 31)
+            assertTrue(isToolError(response))
+            assertTrue(getToolResultText(response).contains("not found"))
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test unknown tool is a JSON-RPC error`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            // The protocol reserves JSON-RPC "invalid params" for a tool that does not exist; the SDK alone would answer with a tool error
+            val response = callTool(stdin, stdout, 45, "smali_nope")
+
+            assertJsonRpcError(response)
+            assertEquals(-32602, response.getAsJsonObject("error").get("code").asInt)
+            assertTrue(response.getAsJsonObject("error").get("message").asString.contains("smali_nope"))
+
+            // and the session goes on answering
+            assertJsonRpcSuccess(callTool(stdin, stdout, 46, "smali_get_stats"), 46)
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test tool error - missing arguments`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            // Index first
+            callTool(stdin, stdout, 40, "smali_index", mapOf(
+                "directory" to testProjectDir.absolutePath
+            ))
+
+            // Call find_definition without required 'symbol' arg
+            val response = callTool(stdin, stdout, 41, "smali_find_definition")
+
+            assertJsonRpcSuccess(response, 41)
+            assertTrue(isToolError(response))
+            assertTrue(getToolResultText(response).contains("Missing"))
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test diagnostics with invalid smali detects errors`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 70, "smali_index", mapOf(
+                "directory" to testProjectDir.absolutePath
+            ))
+
+            val invalidSmali = """
+                .class public Lcom/example/Invalid;
+                .super Ljava/lang/Object;
+
+                .method public test()V
+                    invoke-virtual {p0}, Lcom/example/FakeClass;->fakeMethod()V
+                    return-void
+                .end method
+            """.trimIndent()
+
+            val response = callTool(stdin, stdout, 71, "smali_diagnostics", mapOf(
+                "uri" to "file:///tmp/Invalid.smali",
+                "content" to invalidSmali
+            ))
+
+            assertJsonRpcSuccess(response, 71)
+            assertFalse(isToolError(response))
+            val text = getToolResultText(response)
+            val result = JsonParser.parseString(text).asJsonObject
+            val diagnostics = result.getAsJsonArray("diagnostics")
+            assertTrue(diagnostics.size() > 0, "Should detect undefined class reference")
+
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test graceful shutdown on stdin close`() {
+        val process = startMcpProcess()
+
+        try {
+            val (stdin, _) = initializeSession(process)
+
+            // Close stdin - server should exit gracefully
+            stdin.close()
+
+            val exited = process.waitFor(10, TimeUnit.SECONDS)
+            assertTrue(exited, "Server should exit when stdin is closed")
+
+        } finally {
+            if (process.isAlive) {
+                process.destroyForcibly()
+            }
+        }
+    }
+
+    @Test
+    fun `test document_symbols includes line ranges`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 80, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 81, "smali_document_symbols", mapOf("uri" to smaliFileUri))
+            assertJsonRpcSuccess(response, 81)
+            assertFalse(isToolError(response))
+
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            val symbols = result.getAsJsonArray("symbols")
+
+            for (sym in symbols) {
+                val symObj = sym.asJsonObject
+                assertTrue(symObj.has("range"), "Symbol '${symObj.get("kind")}' missing 'range'")
+                val range = symObj.getAsJsonObject("range")
+                assertTrue(range.has("start"), "range missing 'start'")
+                assertTrue(range.has("end"), "range missing 'end'")
+                assertTrue(range.getAsJsonObject("start").has("line"), "start missing 'line'")
+                assertTrue(range.getAsJsonObject("end").has("line"), "end missing 'line'")
+            }
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test search_symbols matches package path`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 90, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            // Search by package segment "example" — should match "Lcom/example/test/MainActivity;"
+            val response = callTool(stdin, stdout, 91, "smali_search_symbols", mapOf("pattern" to "example"))
+            assertJsonRpcSuccess(response, 91)
+            assertFalse(isToolError(response))
+
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertTrue(result.get("count").asInt > 0,
+                "Package path search for 'example' should match Lcom/example/test/MainActivity;")
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test re-index does not corrupt previous results`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            // First index
+            val r1 = callTool(stdin, stdout, 100, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+            assertFalse(isToolError(r1))
+            val stats1 = JsonParser.parseString(
+                getToolResultText(callTool(stdin, stdout, 101, "smali_get_stats"))
+            ).asJsonObject
+            val classes1 = stats1.get("classes").asInt
+
+            // Re-index the same directory
+            val r2 = callTool(stdin, stdout, 102, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+            assertFalse(isToolError(r2))
+            val stats2 = JsonParser.parseString(
+                getToolResultText(callTool(stdin, stdout, 103, "smali_get_stats"))
+            ).asJsonObject
+            val classes2 = stats2.get("classes").asInt
+
+            assertEquals(classes1, classes2, "Re-index should produce same class count (OOM regression check)")
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // End-to-end tests added to catch real-world regressions early
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** Generate N synthetic-but-valid smali files in a temp directory. */
+    private fun createSmaliProject(root: File, count: Int): List<File> {
+        val dir = File(root, "smali/com/e2e/test")
+        dir.mkdirs()
+        return (1..count).map { i ->
+            val f = File(dir, "Cls$i.smali")
+            f.writeText("""
+                .class public Lcom/e2e/test/Cls$i;
+                .super Ljava/lang/Object;
+                .field private value$i:I
+
+                .method public constructor <init>()V
+                    .registers 2
+                    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+                    const/4 v0, 0x0
+                    iput v0, p0, Lcom/e2e/test/Cls$i;->value$i:I
+                    return-void
+                .end method
+
+                .method public getValue$i()I
+                    .registers 2
+                    iget v0, p0, Lcom/e2e/test/Cls$i;->value$i:I
+                    return v0
+                .end method
+            """.trimIndent())
+            f
+        }
+    }
+
+    @Test
+    fun `test indexing 200 files completes within 60 seconds`() {
+        val root = Files.createTempDirectory("mcp-e2e-large").toFile()
+        createSmaliProject(root, 200)
+
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            val response = callTool(stdin, stdout, 200, "smali_index", mapOf("directory" to root.absolutePath))
+
+            assertJsonRpcSuccess(response, 200)
+            assertFalse(isToolError(response), "Indexing 200 files must not fail: ${getToolResultText(response)}")
+
+            assertTrue(getToolResultText(response).contains("Files: 200/200"), "every file indexed: ${getToolResultText(response)}")
+
+            val statsText = getToolResultText(callTool(stdin, stdout, 201, "smali_get_stats"))
+            val stats = JsonParser.parseString(statsText).asJsonObject
+            assertEquals(200, stats.get("classes").asInt, "Expected exactly 200 classes indexed")
+            // 200 classes × 2 methods each
+            assertTrue(stats.get("methods").asInt >= 400, "Expected >= 400 methods")
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `test indexing directory with a malformed smali file succeeds for valid files`() {
+        val root = Files.createTempDirectory("mcp-e2e-errors").toFile()
+        val smaliDir = File(root, "smali/com/test")
+        smaliDir.mkdirs()
+
+        // A perfectly valid class
+        File(smaliDir, "GoodClass.smali").writeText("""
+            .class public Lcom/test/GoodClass;
+            .super Ljava/lang/Object;
+            .method public hello()V
+                .registers 1
+                return-void
+            .end method
+        """.trimIndent())
+
+        // Deliberately broken smali — missing directives, random garbage
+        File(smaliDir, "BadClass.smali").writeText("this is not smali at all $$$ ???")
+
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            val response = callTool(stdin, stdout, 210, "smali_index", mapOf("directory" to root.absolutePath))
+            assertJsonRpcSuccess(response, 210)
+            assertFalse(isToolError(response), "Indexing must not fail because of one bad file")
+
+            // GoodClass must be findable despite the bad file
+            val defResponse = callTool(stdin, stdout, 211, "smali_find_definition",
+                mapOf("symbol" to "Lcom/test/GoodClass;"))
+            assertJsonRpcSuccess(defResponse, 211)
+            assertFalse(isToolError(defResponse))
+            val def = JsonParser.parseString(getToolResultText(defResponse)).asJsonObject
+            assertEquals(1, def.get("count").asInt, "GoodClass must be found even after bad file next to it")
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `test indexing empty directory returns zero stats`() {
+        val root = Files.createTempDirectory("mcp-e2e-empty").toFile()
+        File(root, "smali").mkdirs()
+
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            val response = callTool(stdin, stdout, 220, "smali_index", mapOf("directory" to root.absolutePath))
+            assertJsonRpcSuccess(response, 220)
+            assertFalse(isToolError(response))
+
+            val statsText = getToolResultText(callTool(stdin, stdout, 221, "smali_get_stats"))
+            val stats = JsonParser.parseString(statsText).asJsonObject
+            assertEquals(0, stats.get("classes").asInt, "Empty dir must produce zero classes")
+            assertEquals(0, stats.get("methods").asInt)
+            assertEquals(0, stats.get("fields").asInt)
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `test find definition returns empty results for unknown class`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 230, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 231, "smali_find_definition",
+                mapOf("symbol" to "Lcom/totally/nonexistent/Class;"))
+            assertJsonRpcSuccess(response, 231)
+            assertFalse(isToolError(response), "Unknown class must return empty results, not an error")
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertEquals(0, result.get("count").asInt)
+            assertEquals(0, result.getAsJsonArray("results").size())
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test search with empty pattern returns symbols`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 240, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 241, "smali_search_symbols", mapOf("pattern" to ""))
+            assertJsonRpcSuccess(response, 241)
+            assertFalse(isToolError(response))
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            // At minimum the one class should be present
+            assertTrue(result.get("count").asInt >= 1, "Empty pattern search must return at least 1 symbol")
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test 20 sequential tool calls remain fast after indexing`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 250, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            var id = 251
+            repeat(20) {
+                val resp = callTool(stdin, stdout, id++, "smali_search_symbols", mapOf("pattern" to "main"))
+                assertJsonRpcSuccess(resp, id - 1)
+                assertFalse(isToolError(resp))
+            }
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test three consecutive re-indexes give identical stats`() {
+        val root = Files.createTempDirectory("mcp-e2e-reindex").toFile()
+        createSmaliProject(root, 50)
+
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            var id = 260
+            val counts = (1..3).map {
+                callTool(stdin, stdout, id++, "smali_index", mapOf("directory" to root.absolutePath))
+                val statsText = getToolResultText(callTool(stdin, stdout, id++, "smali_get_stats"))
+                JsonParser.parseString(statsText).asJsonObject.get("classes").asInt
+            }
+
+            assertEquals(1, counts.distinct().size,
+                "Re-indexing same dir 3× must give identical class count: $counts")
+            assertEquals(50, counts[0], "Expected 50 classes after each index")
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `test search finds classes across package hierarchy`() {
+        val root = Files.createTempDirectory("mcp-e2e-search").toFile()
+        // Deep package structure
+        val deep = File(root, "smali/com/example/billing/internal")
+        deep.mkdirs()
+        File(deep, "BillingManager.smali").writeText("""
+            .class public Lcom/example/billing/internal/BillingManager;
+            .super Ljava/lang/Object;
+            .method public purchase()V
+                .registers 1
+                return-void
+            .end method
+        """.trimIndent())
+
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 270, "smali_index", mapOf("directory" to root.absolutePath))
+
+            // Search by simple class name
+            val byName = JsonParser.parseString(
+                getToolResultText(callTool(stdin, stdout, 271, "smali_search_symbols", mapOf("pattern" to "BillingManager")))
+            ).asJsonObject
+            assertTrue(byName.get("count").asInt >= 1, "Search by class name must find BillingManager")
+
+            // Search by package segment
+            val byPkg = JsonParser.parseString(
+                getToolResultText(callTool(stdin, stdout, 272, "smali_search_symbols", mapOf("pattern" to "billing")))
+            ).asJsonObject
+            assertTrue(byPkg.get("count").asInt >= 1, "Search by package segment 'billing' must find BillingManager")
+
+            // Search by nested package segment
+            val byNested = JsonParser.parseString(
+                getToolResultText(callTool(stdin, stdout, 273, "smali_search_symbols", mapOf("pattern" to "internal")))
+            ).asJsonObject
+            assertTrue(byNested.get("count").asInt >= 1, "Search by 'internal' must find class in internal package")
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `test document_symbols returns method and field details`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+
+            callTool(stdin, stdout, 280, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val symResponse = callTool(stdin, stdout, 281, "smali_document_symbols", mapOf("uri" to smaliFileUri))
+            assertJsonRpcSuccess(symResponse, 281)
+            assertFalse(isToolError(symResponse))
+
+            val result = JsonParser.parseString(getToolResultText(symResponse)).asJsonObject
+            val symbols = result.getAsJsonArray("symbols")
+
+            val kinds = symbols.map { it.asJsonObject.get("kind").asString }.toSet()
+            assertTrue("class" in kinds, "document_symbols must include class symbol")
+            assertTrue("method" in kinds, "document_symbols must include method symbols")
+            assertTrue("field" in kinds, "document_symbols must include field symbols")
+
+            // Every symbol must have a non-zero line range (end > start or at minimum present)
+            for (sym in symbols) {
+                val obj = sym.asJsonObject
+                val range = obj.getAsJsonObject("range")
+                val startLine = range.getAsJsonObject("start").get("line").asInt
+                assertTrue(startLine >= 0, "Symbol '${obj.get("kind")}' has negative start line")
+            }
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `find references and hover accept a class or member name instead of a position`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 300, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            // The class: its declaration plus the owner tokens of the iput/iget instructions
+            val classRefs = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 301, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;"))
+            )).asJsonObject
+            assertTrue(classRefs.get("count").asInt >= 4, "declaration + 3 owner references, got $classRefs")
+
+            // A field by name: declaration plus every access
+            val fieldRefs = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 302, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "counter"))
+            )).asJsonObject
+            assertEquals(4, fieldRefs.get("count").asInt, "declaration + iput, iget, iput: $fieldRefs")
+            val lines = fieldRefs.getAsJsonArray("results").map { it.asJsonObject.getAsJsonObject("range").getAsJsonObject("start").get("line").asInt }
+            assertEquals(lines.sorted(), lines, "ordered by position")
+
+            // A method by name with no callers: only its declaration
+            val methodRefs = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 303, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "increment", "descriptor" to "()V"))
+            )).asJsonObject
+            assertEquals(1, methodRefs.get("count").asInt, methodRefs.toString())
+
+            // Hover by name
+            val classHover = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 304, "smali_hover", mapOf("class_name" to "Lcom/example/test/MainActivity;"))
+            )).asJsonObject
+            assertTrue(classHover.get("contents").asString.contains("com.example.test.MainActivity"), classHover.toString())
+            val methodHover = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 305, "smali_hover", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "main"))
+            )).asJsonObject
+            assertTrue(methodHover.get("contents").asString.contains("**Method:** `main`"), methodHover.toString())
+            val sdkHover = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 306, "smali_hover", mapOf("class_name" to "Ljava/io/PrintStream;", "member_name" to "println", "descriptor" to "(Ljava/lang/String;)V"))
+            )).asJsonObject
+            assertTrue(sdkHover.get("contents").asString.contains("SDK Method"), sdkHover.toString())
+
+            // Agent-facing errors, not dead JSON-RPC calls
+            val unknownMember = callTool(stdin, stdout, 307, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "nope"))
+            assertTrue(isToolError(unknownMember) && getToolResultText(unknownMember).contains("no member named 'nope'"), getToolResultText(unknownMember))
+            val outside = callTool(stdin, stdout, 308, "smali_find_references", mapOf("class_name" to "Ljava/io/PrintStream;", "member_name" to "println"))
+            assertTrue(isToolError(outside) && getToolResultText(outside).contains("not in the workspace"), getToolResultText(outside))
+            val neither = callTool(stdin, stdout, 309, "smali_hover", mapOf("uri" to smaliFileUri))
+            assertTrue(isToolError(neither) && getToolResultText(neither).contains("class_name"), getToolResultText(neither))
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `xref summary lists the classes that reference a type`() {
+        val root = Files.createTempDirectory("mcp-e2e-xref").toFile()
+        val dir = File(root, "smali/com/x"); dir.mkdirs()
+        File(dir, "Target.smali").writeText(".class public Lcom/x/Target;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n    return-void\n.end method")
+        File(dir, "User.smali").writeText(".class public Lcom/x/User;\n.super Ljava/lang/Object;\n.method public go()V\n    .registers 2\n    new-instance v0, Lcom/x/Target;\n    invoke-virtual {v0}, Lcom/x/Target;->run()V\n    return-void\n.end method")
+        File(dir, "Child.smali").writeText(".class public Lcom/x/Child;\n.super Lcom/x/Target;")
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 310, "smali_index", mapOf("directory" to root.absolutePath))
+            val xref = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 311, "smali_xref_summary", mapOf("class_name" to "Lcom/x/Target;"))
+            )).asJsonObject
+            assertEquals(listOf("Lcom/x/Child;"), xref.getAsJsonArray("subclasses").map { it.asString })
+            assertEquals(listOf("Lcom/x/User;"), xref.getAsJsonArray("type_references").map { it.asString }, "classes that reference the type in instructions: $xref")
+            val callers = xref.getAsJsonArray("method_callers").single().asJsonObject
+            assertEquals("run()V", callers.get("method").asString)
+            assertEquals(listOf("Lcom/x/User;"), callers.getAsJsonArray("callers").map { it.asString })
+        } finally {
+            process.destroyForcibly()
+            root.deleteRecursively()
+        }
+    }
+
+    // --- Helpers ---
+
+    private fun startMcpProcess(): Process {
+        val javaBinary = File(System.getProperty("java.home"), "bin/java").absolutePath
+        val classpath = System.getProperty("java.class.path")
+        assertTrue(classpath.isNotBlank(), "Test runtime classpath should not be blank")
+
+        return ProcessBuilder(
+            javaBinary, "-cp", classpath, "xyz.surendrajat.smalilsp.MainKt", "mcp"
+        ).directory(File(System.getProperty("user.dir")))
+            .start()
+    }
+
+    private fun runtimeVersion(): String {
+        val stream = McpModeTest::class.java.getResourceAsStream("/version.properties")
+        assertNotNull(stream, "version.properties must be present on the test runtime classpath")
+
+        val props = Properties()
+        stream.use { props.load(it) }
+        return props.getProperty("version", "unknown")
+    }
+
+    private fun drainStderr(process: Process) {
+        thread(isDaemon = true) {
+            process.errorStream.bufferedReader().forEachLine { /* discard */ }
+        }
+    }
+
+    private fun initializeSession(process: Process): Pair<BufferedWriter, BufferedReader> {
+        val stdin = BufferedWriter(OutputStreamWriter(process.outputStream))
+        val stdout = BufferedReader(InputStreamReader(process.inputStream))
+        drainStderr(process)
+
+        val initResponse = sendRequest(stdin, stdout, 0, "initialize", mapOf(
+            "protocolVersion" to "2025-03-26",
+            "capabilities" to emptyMap<String, Any>(),
+            "clientInfo" to mapOf("name" to "test-client", "version" to "1.0.0")
+        ))
+        assertJsonRpcSuccess(initResponse, 0)
+
+        sendNotification(stdin, "notifications/initialized")
+
+        return Pair(stdin, stdout)
+    }
+
+    @Test
+    fun `the server exits when the client closes its input`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, _) = initializeSession(process)
+            stdin.close()
+            assertTrue(process.waitFor(20, TimeUnit.SECONDS), "the process ends after EOF on stdin")
+            assertEquals(0, process.exitValue())
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `definitions by position and by member, bounded references, read_method and list_package`() {
+        File(testProjectDir, "res/values").mkdirs()
+        File(testProjectDir, "res/values/public.xml").writeText("<resources>\n    <public type=\"string\" name=\"app_name\" id=\"0x7f0c0001\" />\n    <public type=\"id\" name=\"go\" id=\"0x7f0a0002\" />\n</resources>\n")
+        File(testProjectDir, "res/values/strings.xml").writeText("<resources>\n    <string name=\"app_name\">Hello</string>\n</resources>\n")
+        File(testProjectDir, "smali/org/res").mkdirs()
+        File(testProjectDir, "smali/org/res/Res.smali").writeText(".class public Lorg/res/Res;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 3\n    const v0, 0x7f0c0001\n    const v1, 0x7f0a0002\n    const v2, 0x1010150\n    const/16 v2, 0x3e8\n    return-void\n.end method\n")
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 400, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+            val lines = smaliFile.readLines()
+
+            // Definition at a position: the iget's field goes to the .field line
+            val igetLine = lines.indexOfFirst { it.contains("iget v0, p0") }
+            val byPosition = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 401, "smali_find_definition", mapOf("uri" to smaliFileUri, "line" to igetLine, "character" to lines[igetLine].indexOf("counter") + 2))
+            )).asJsonObject
+            assertEquals(1, byPosition.get("count").asInt, byPosition.toString())
+            assertEquals(lines.indexOfFirst { it.contains(".field private counter:I") }, byPosition.getAsJsonArray("results")[0].asJsonObject.getAsJsonObject("range").getAsJsonObject("start").get("line").asInt)
+
+            // Definition by member name
+            val byMember = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 402, "smali_find_definition", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "increment"))
+            )).asJsonObject
+            assertEquals(lines.indexOfFirst { it.contains(".method public increment") }, byMember.getAsJsonArray("results")[0].asJsonObject.getAsJsonObject("range").getAsJsonObject("start").get("line").asInt)
+
+            // References are bounded, with the full count alongside
+            val bounded = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 403, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "counter", "max_results" to 2))
+            )).asJsonObject
+            assertEquals(2, bounded.get("count").asInt)
+            assertEquals(4, bounded.get("total").asInt, bounded.toString())
+
+            // A method's source by name, numbered from 1
+            val read = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 404, "smali_read_method", mapOf("class_name" to "Lcom/example/test/MainActivity;", "method_name" to "increment"))
+            )).asJsonObject
+            assertEquals(lines.indexOfFirst { it.contains(".method public increment") } + 1, read.get("start_line").asInt)
+            val source = read.get("source").asString
+            assertTrue(source.startsWith("${read.get("start_line").asInt}: .method public increment()V") && source.trimEnd().endsWith(".end method"), source)
+
+            // Resource ids are named in a trailing comment; other literals are left alone
+            val res = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 407, "smali_read_method", mapOf("class_name" to "Lorg/res/Res;", "method_name" to "run"))
+            )).asJsonObject.get("source").asString.lines()
+            assertEquals("3: .method public run()V", res[0])
+            assertEquals("5:     const v0, 0x7f0c0001  # string/app_name = \"Hello\"", res[2])
+            assertEquals("6:     const v1, 0x7f0a0002  # id/go", res[3])
+            assertEquals("7:     const v2, 0x1010150  # android:attr/hint", res[4])
+            assertEquals("8:     const/16 v2, 0x3e8", res[5])
+
+            // Packages
+            val pkg = JsonParser.parseString(getToolResultText(
+                callTool(stdin, stdout, 405, "smali_list_package", mapOf("package" to "com.example"))
+            )).asJsonObject
+            assertEquals(listOf("Lcom/example/test/MainActivity;"), pkg.getAsJsonArray("classes").map { it.asJsonObject.get("name").asString })
+            assertEquals(listOf("test"), pkg.getAsJsonArray("subpackages").map { it.asString })
+
+            // A wrongly typed argument is a tool error naming the argument
+            val typed = callTool(stdin, stdout, 406, "smali_find_references", mapOf("class_name" to listOf("not", "a", "string")))
+            assertTrue(isToolError(typed) && getToolResultText(typed).contains("'class_name' must be a string"), getToolResultText(typed))
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+}

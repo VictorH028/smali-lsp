@@ -6,19 +6,44 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 ### LSP Server (for IDEs)
 
-- **Go to Definition** — jump from any instruction to its target (classes, methods, fields, labels)
-- **Find References** — cross-file xrefs with inheritance-aware polymorphic matching
-- **Hover** — method signatures, field types, class info, SDK class detection
+- **Go to Definition** — classes, methods, fields, labels and resource ids
+- **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; string literals too
+- **Hover** — signatures, types, class info, reference counts, registers (`p1` is which parameter), the method's frame, string literals, resource ids with their values, opcode docs
+- **Inlay hints** — resource names or values after `0x7f…` and `android.R` ids, the decimal value after other hex literals
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
-- **Code Lens** — inline reference counts on methods and fields
-- **Completion** — class names, method/field members, opcodes
+- **Code Lens** — reference counts on classes, methods and fields; subclass and implementation counts
+- **Completion** — class names (ranked), members including inherited ones, opcodes
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors and unresolved class references
-- **Label Navigation** — goto/if-\*/switch targets within methods
-- **All 41 Dalvik instruction types** supported (invoke-\*, iget/iput/sget/sput, new-instance, check-cast, etc.)
+- **Diagnostics** — syntax errors, undefined or duplicate labels, undefined classes in the app's own packages, and what the assembler would reject after a hand edit
+- **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
+- **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
+- **Every Dalvik instruction parses** — 224 opcodes, including `invoke-custom`, `invoke-polymorphic` and method handles
+
+<details>
+<summary>Supported requests</summary>
+
+| Request | Notes |
+| --- | --- |
+| `initialize` / `initialized` / `shutdown` / `exit` | workspace folders or `rootUri`; indexing after `initialized`, with progress |
+| `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer while open, the disk version after close |
+| `textDocument/publishDiagnostics` | syntax errors at once, undefined classes once indexing has finished |
+| `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow overrides and calls through subclasses |
+| `textDocument/foldingRange` | methods, annotations, switch tables, array data |
+| `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search, best 500 |
+| `textDocument/codeLens` + `codeLens/resolve` | counts resolved lazily |
+| `textDocument/inlayHint` | resource names and values, decimal values |
+| `textDocument/completion` | trigger characters `L`, `>`, `/` |
+| `textDocument/prepareRename` + `rename` | methods, fields, labels |
+| `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
+| `textDocument/prepareTypeHierarchy` + `typeHierarchy/supertypes` `subtypes` | |
+| `workspace/didChangeWatchedFiles` | `**/*.smali` and `res/values/public.xml`, registered dynamically |
+| `workspace/didChangeWorkspaceFolders` | added folders are indexed, removed ones dropped |
+| `$/cancelRequest` | honoured by symbol search and reference lists |
+
+</details>
 
 ### MCP Server (for AI agents)
 
@@ -30,10 +55,10 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | Tool                     | Description                                                                      |
 | ------------------------ | -------------------------------------------------------------------------------- |
 | `smali_index`            | Index a directory of smali files                                                 |
-| `smali_find_definition`  | Go to definition for a symbol at a position                                      |
+| `smali_find_definition`  | Go to definition, by position or by class and member name                        |
 | `smali_search_symbols`   | Fuzzy search across classes, methods, fields                                     |
 | `smali_get_stats`        | Index statistics (class/method/field/string counts)                              |
-| `smali_find_references`  | Find all references to a symbol                                                  |
+| `smali_find_references`  | Find all references to a symbol, by position or by name (bounded)               |
 | `smali_hover`            | Get hover info (signatures, types, class details)                                |
 | `smali_diagnostics`      | Compute diagnostics for a file                                                   |
 | `smali_document_symbols` | Get document outline (classes, methods, fields)                                  |
@@ -41,6 +66,8 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | `smali_call_graph`       | Incoming/outgoing call graph for a method                                        |
 | `smali_xref_summary`     | Full cross-reference report (subclasses, implementors, callers, field accessors) |
 | `smali_type_hierarchy`   | Supertypes and subtypes for a class (inheritance chain)                          |
+| `smali_read_method`      | One method's source, numbered, resource ids annotated                            |
+| `smali_list_package`     | Classes under a package prefix and its sub-packages                              |
 
 </details>
 
@@ -55,7 +82,7 @@ The server communicates over **stdio** in standard LSP protocol — no daemon, n
 java -jar build/libs/smali-lsp-<version>.jar lsp
 ```
 
-Configure your editor's LSP client to launch this command for `.smali` files. The server will automatically index the workspace on startup.
+Configure your editor's LSP client to launch this command for `.smali` files. The server indexes the workspace on startup and watches it for changes. Warnings go to stderr; `--verbose` and `--log-file <path>` give more.
 
 <details>
 <summary>VS Code (via APKLab)</summary>
@@ -141,65 +168,60 @@ Add to your MCP config (`.vscode/mcp.json`,`claude_desktop_config.json`, Cursor 
 
 ## Performance
 
-Tested on real-world APKs (119K smali files, 118K classes, 560K methods):
+Measured on three apktool projects on a 12-core Apple Silicon laptop, JDK 21:
 
-| Operation          | Avg Latency | Throughput       |
-| ------------------ | ----------- | ---------------- |
-| Goto Definition    | <1ms        | ~4,000 ops/sec   |
-| Find References    | <1ms        | O(1) reverse index |
-| Hover              | <1ms        | —                |
-| Parsing / Indexing | ~0.3ms/file | ~3,300 files/sec |
-| Symbol Search      | <1s         | —                |
+| | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
+| --- | --- | --- | --- |
+| Index the workspace (cold) | 0.8 s | 1.6 s | 6 s |
+| Heap after indexing | — | 178 MB | 659 MB |
+| Re-index one file on edit, p95 | — | 0.2 ms | 0.6 ms |
+| Workspace symbol search | — | 4–14 ms | 19–25 ms |
 
-- All queries (definition, references, symbols, hover) return in <1s after indexing
-- 99.7% goto-definition coverage (tested on 300K+ methods)
-- 100% parse success rate on 100K+ real smali files
-- 18 KB memory per indexed file (string-interned)
-- Indexed 119K smali files in ~30–36s (warm), ~40s (cold)
-- Indexed 27K smali files in ~6s
+Definition, hover, references, rename and code lens are index lookups, well under a millisecond. All 98,686 files of the three apps parse without errors.
 
 ## Building
 
-Requires Java 17+ and Gradle 8.8+.
+Requires Java 17+; the Gradle wrapper (9.8) downloads itself.
 
 ```bash
 ./gradlew shadowJar
 ```
 
-Output: `build/libs/smali-lsp-<version>.jar`
+Output: `build/libs/smali-lsp-<version>.jar`. `./gradlew installApklab` copies it to `~/.apklab/smali-lsp-dev.jar` for APKLab.
 
 ## Architecture
 
 ```
-ANTLR4 Grammar → SmaliParser → ASTBuilder → WorkspaceIndex → LSP/MCP Providers
+SmaliTextParser (hand-written) → SmaliParser → WorkspaceIndex → LSP/MCP Providers
                                                 ↑
                                     WorkspaceScanner (parallel)
 ```
 
-- **Parser**: ANTLR4 with SLL prediction mode (no ambiguities in smali grammar)
-- **Index**: Thread-safe `ConcurrentHashMap` with O(1) lookups, bidirectional class-URI maps, string literal index
-- **Providers**: Position-aware symbol extraction — correctly resolves which of multiple symbols on a line the cursor targets
-- **Scanner**: Parallel file processing with smart APKTool project detection
+- **Parser**: hand-written lexer and statement parser, 0.04 ms per file, token spans in the AST
+- **Index**: files by canonical URI, class hierarchy sets, packed usage lists retired per file
+- **Providers**: resolve the caret from the AST and answer from the index; one writer thread, requests wait for earlier edits
+- **Scanner**: one coroutine worker per core
+
+See [DESIGN.md](DESIGN.md) for the measured costs and the reasoning.
 
 ## Running Tests
 
-```bash
-# All tests
-./gradlew test
+Run the categories separately; each test fork holds a parsed app in memory:
 
-# By category
+```bash
 ./gradlew test --tests "*.unit.*"
-./gradlew test --tests "*.integration.*"
 ./gradlew test --tests "*.regression.*"
-./gradlew test --tests "*.stress.*"
+./gradlew test --tests "*.integration.*"
 ```
+
+The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise.
 
 ## License
 
 Copyright (C) 2026 Surendrajat
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE), except files under `src/main/antlr/` which are MIT licensed (see header in each file).
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ## Credits
 
-- @psygate for https://github.com/psygate/smali-antlr4-grammar
+- @psygate for https://github.com/psygate/smali-antlr4-grammar, the grammar the parser's operand table was derived from

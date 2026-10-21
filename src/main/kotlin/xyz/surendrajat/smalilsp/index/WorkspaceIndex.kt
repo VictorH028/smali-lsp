@@ -1,310 +1,256 @@
 package xyz.surendrajat.smalilsp.index
 
-import xyz.surendrajat.smalilsp.core.*
 import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
+import org.eclipse.lsp4j.jsonrpc.CancelChecker
+import xyz.surendrajat.smalilsp.core.*
+import xyz.surendrajat.smalilsp.util.StringPool
+import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
 import java.net.URI
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicIntegerArray
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Thread-safe workspace index.
- * 
- * Design principles:
- * - All operations are atomic
- * - No removal of classes when files close (learned from v1 bug)
- * - Fast lookups with ConcurrentHashMap
- * - Tracks reverse dependencies for "find references"
+ * The workspace index: every parsed file by URI, the class → file mapping, the class hierarchy,
+ * and reverse indexes from each method, field and class to the sites that use it.
+ *
+ * Files are keyed by canonical URI (`file:///…`), so a file the scanner found and the same file
+ * sent by the client are one entry, and a file whose class name changes on edit replaces its
+ * old entry. Declarations are answered from the file itself; only usages have tables of their
+ * own.
+ *
+ * Usage tables are [UsageList]s: packed ints, no object per site. Every file has an id and a
+ * generation. Re-indexing a file bumps its generation, which retires all of its earlier
+ * entries at once instead of walking every symbol the file touched. Retired entries are
+ * skipped on read and dropped by a compaction once they make up a quarter of the tables.
+ *
+ * Thread-safe: the scanner indexes files concurrently while requests are answered.
  */
 class WorkspaceIndex {
-    
-    // Class name → SmaliFile
-    private val files = ConcurrentHashMap<String, SmaliFile>()
-    
-    // Class name → URI
-    private val classToUri = ConcurrentHashMap<String, String>()
-    
-    // URI → Class name (reverse lookup for fast findFileByUri)
-    private val uriToClass = ConcurrentHashMap<String, String>()
-    
-    // Method signature → List<Location> (can have multiple definitions - overloads, overrides)
-    private val methodLocations = ConcurrentHashMap<String, MutableSet<Location>>()
-    
-    // Field signature → Location
-    private val fieldLocations = ConcurrentHashMap<String, Location>()
-    
-    // Reverse index: class name → Set<URIs that reference it>
-    private val classUsages = ConcurrentHashMap<String, MutableSet<String>>()
 
-    // String literal index: string value → Set<Location>
-    // Built lazily on first search — not during parallel indexFile() to avoid CHM contention.
-    private var stringIndex = HashMap<String, MutableSet<Location>>()
-    @Volatile private var stringIndexDirty = true
-    private val stringIndexLock = Any()
+    /** The pool every parser feeding this index should intern through (`SmaliParser(index.strings)`). */
+    val strings = StringPool()
 
-    // Subclass hierarchy: parent class → direct subclasses
-    // Built at index time, used by ReferenceProvider and TypeHierarchyProvider
-    private val subclassIndex = ConcurrentHashMap<String, MutableSet<String>>()
+    /** Resource ids by value, from each workspace root's `res/values/public.xml`. */
+    val resources = ResourceTable()
 
-    // Interface implementors: interface → direct implementors
-    private val implementorsIndex = ConcurrentHashMap<String, MutableSet<String>>()
-
-    // Reverse usage indexes: symbol → all call/access sites across workspace
-    // Built during indexFile() — enables O(1) "Find References" instead of O(n) full scans.
-    // Keys use same format as methodSignature()/fieldSignature().
-    private val methodUsages = ConcurrentHashMap<String, MutableSet<Location>>()
-    private val fieldUsages = ConcurrentHashMap<String, MutableSet<Location>>()
-
-    // Class reference locations: className → all locations that reference it
-    // Includes: instruction targets, field type declarations, method signature types
-    private val classRefLocations = ConcurrentHashMap<String, MutableSet<Location>>()
-
-    // Document content for open files (uri → content string)
-    // Only populated for files open in the editor (didOpen/didChange)
-    // Removed on didClose to bound memory to open editor tabs
-    private val documentContents = ConcurrentHashMap<String, String>()
-
-    // Simple name → Set<full class names> (reverse index for O(1) findClassesBySimpleName)
+    // ---- files ----
+    private val filesByUri = ConcurrentHashMap<String, SmaliFile>()
+    private val uriByClass = ConcurrentHashMap<String, String>()
     private val simpleNameIndex = ConcurrentHashMap<String, MutableSet<String>>()
-
-    // String literal value → total occurrence count across workspace.
-    // Maintained incrementally so getStats() does not need to materialize the lazy string index.
-    private val stringValueCounts = ConcurrentHashMap<String, Int>()
-
+    private val packageCounts = ConcurrentHashMap<String, Int>()
     private val methodCount = AtomicInteger(0)
     private val fieldCount = AtomicInteger(0)
-    
-    /**
-     * Index a smali file. Thread-safe.
-     *
-     * On re-index (didChange), removes stale entries from ALL index maps
-     * before adding new ones — prevents ghost references to renamed/deleted symbols.
-     */
+
+    // ---- file ids and generations (grown under fileLock; readers bounds-check their snapshot) ----
+    private val fileLock = Any()
+    private val fileIds = ConcurrentHashMap<String, Int>()
+    @Volatile private var urisById = arrayOfNulls<String>(1024)
+    @Volatile private var generation = AtomicIntegerArray(1024)
+    @Volatile private var contributions = AtomicIntegerArray(1024)
+
+    // ---- hierarchy ----
+    private val subclassIndex = ConcurrentHashMap<String, MutableSet<String>>()
+    private val implementorsIndex = ConcurrentHashMap<String, MutableSet<String>>()
+
+    // ---- usages ----
+    private val methodUsages = ConcurrentHashMap<MemberKey, UsageList>()
+    private val fieldUsages = ConcurrentHashMap<MemberKey, UsageList>()
+    private val classRefs = ConcurrentHashMap<String, UsageList>()
+    private val totalEntries = AtomicLong(0)
+    private val staleEntries = AtomicLong(0)
+
+    // ---- string literals: value → sites, maintained like the member tables ----
+    private val stringUsages = ConcurrentHashMap<String, UsageList>()
+    private val stringValueCounts = ConcurrentHashMap<String, Int>()
+
+    // ---- open documents ----
+    private val documentContents = ConcurrentHashMap<String, String>()
+    private val documentLines = ConcurrentHashMap<String, List<String>>()
+
+    // ======================================================================
+    // Indexing
+    // ======================================================================
+
+    /** Indexes a file; a file already indexed under the same URI is replaced. Thread-safe. */
     fun indexFile(file: SmaliFile) {
+        val uri = canonicalUri(file.uri)
+        val id = fileId(uri)
+        filesByUri.put(uri, file)?.let { retract(it, uri) }
+        val gen = retireUsages(id)
+
         val className = file.classDefinition.name
-
-        // Clean up old entries if re-indexing (didChange)
-        files[className]?.let { oldFile -> removeOldEntries(oldFile) }
-
-        // Store file
-        files[className] = file
-        classToUri[className] = file.uri
-        uriToClass[file.uri] = className
-
-        // Update simple name index for O(1) lookups
-        val simpleName = extractSimpleNameFromClassName(className)
-        if (simpleName != null) {
-            simpleNameIndex.computeIfAbsent(simpleName) { ConcurrentHashMap.newKeySet() }
-                .add(className)
+        uriByClass[className] = uri
+        simpleNameIndex.computeIfAbsent(simpleKey(className)) { ConcurrentHashMap.newKeySet() }.add(className)
+        packageCounts.merge(Types.packageOf(className), 1, Int::plus)
+        file.classDefinition.superClass?.let { subclassIndex.computeIfAbsent(it) { ConcurrentHashMap.newKeySet() }.add(className) }
+        for (iface in file.classDefinition.interfaces) {
+            implementorsIndex.computeIfAbsent(iface) { ConcurrentHashMap.newKeySet() }.add(className)
         }
-
-        // Index method declarations
-        file.methods.forEach { method ->
-            val signature = methodSignature(className, method.name, method.descriptor)
-            methodLocations.computeIfAbsent(signature) { ConcurrentHashMap.newKeySet() }
-                .add(Location(file.uri, method.range))
-        }
-
-        // Index field declarations
-        file.fields.forEach { field ->
-            val signature = fieldSignature(className, field.name)
-            fieldLocations[signature] = Location(file.uri, field.range)
-        }
-
-        // Track superclass usage + subclass hierarchy
-        file.classDefinition.superClass?.let { superClass ->
-            classUsages.computeIfAbsent(superClass) { ConcurrentHashMap.newKeySet() }
-                .add(file.uri)
-            subclassIndex.computeIfAbsent(superClass) { ConcurrentHashMap.newKeySet() }
-                .add(className)
-        }
-
-        // Track interface usages + implementors
-        file.classDefinition.interfaces.forEach { iface ->
-            classUsages.computeIfAbsent(iface) { ConcurrentHashMap.newKeySet() }
-                .add(file.uri)
-            implementorsIndex.computeIfAbsent(iface) { ConcurrentHashMap.newKeySet() }
-                .add(className)
-        }
-
-        // Build reverse usage indexes from instructions
-        file.methods.forEach { method ->
-            method.instructions.forEach { instr ->
-                when (instr) {
-                    is InvokeInstruction -> {
-                        methodUsages.computeIfAbsent(
-                            methodSignature(instr.className, instr.methodName, instr.descriptor)
-                        ) { ConcurrentHashMap.newKeySet() }.add(Location(file.uri, instr.range))
-                        classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
-                            .add(Location(file.uri, instr.range))
-                    }
-                    is FieldAccessInstruction -> {
-                        fieldUsages.computeIfAbsent(
-                            fieldSignature(instr.className, instr.fieldName)
-                        ) { ConcurrentHashMap.newKeySet() }.add(Location(file.uri, instr.range))
-                        classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
-                            .add(Location(file.uri, instr.range))
-                        extractClassFromType(instr.fieldType)?.let { refClass ->
-                            classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                                .add(Location(file.uri, instr.range))
-                        }
-                    }
-                    is TypeInstruction -> {
-                        classRefLocations.computeIfAbsent(instr.className) { ConcurrentHashMap.newKeySet() }
-                            .add(Location(file.uri, instr.range))
-                    }
-                    is JumpInstruction, is ConstStringInstruction -> {
-                        // Labels are method-local; strings handled by lazy stringIndex
-                    }
-                }
-            }
-        }
-
-        // Index class references from field types
-        file.fields.forEach { field ->
-            extractClassFromType(field.type)?.let { refClass ->
-                classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                    .add(Location(file.uri, field.range))
-            }
-        }
-
-        // Index class references from method signatures (parameters + return type)
-        file.methods.forEach { method ->
-            extractClassFromType(method.returnType)?.let { refClass ->
-                classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                    .add(Location(file.uri, method.range))
-            }
-            method.parameters.forEach { param ->
-                extractClassFromType(param.type)?.let { refClass ->
-                    classRefLocations.computeIfAbsent(refClass) { ConcurrentHashMap.newKeySet() }
-                        .add(Location(file.uri, method.range))
-                }
-            }
-        }
-
         methodCount.addAndGet(file.methods.size)
         fieldCount.addAndGet(file.fields.size)
         updateStringValueCounts(file, delta = 1)
 
-        // Mark string index as stale (rebuilt lazily on next search)
-        stringIndexDirty = true
+        var added = 0
+        forEachUsage(file) { list, line, start, end ->
+            list.add(id, gen, line, start, end)
+            added++
+        }
+        totalEntries.addAndGet(added.toLong())
+        synchronized(fileLock) {
+            // Under the lock: fileId() may replace the arrays while growing them
+            contributions.set(id, added)
+            maybeCompact()
+        }
     }
 
-    /**
-     * Remove a file from the index completely (class entry + all references).
-     * Called when a file is deleted from disk — without this, the index would
-     * keep ghost class entries pointing at non-existent files, and features
-     * like "Go to Definition" would navigate to URIs that no longer exist.
-     *
-     * @param uri URI of the deleted file
-     * @return true if the file was indexed and has been removed
-     */
+    /** Removes a deleted file and everything it contributed. Returns false if it was not indexed. */
     fun removeFile(uri: String): Boolean {
-        val className = findClassNameByUri(uri) ?: return false
-        val oldFile = files[className] ?: return false
-
-        removeOldEntries(oldFile)
-        files.remove(className)
-        classToUri.remove(className)
-        uriToClass.remove(oldFile.uri)
-        stringIndexDirty = true
+        val key = canonicalUri(uri)
+        val file = filesByUri.remove(key) ?: return false
+        retract(file, key)
+        retireUsages(fileId(key))
         return true
     }
 
-    /**
-     * Remove all index entries from a previously indexed file.
-     * Called before re-indexing to prevent stale references.
-     */
-    private fun removeOldEntries(oldFile: SmaliFile) {
-        val className = oldFile.classDefinition.name
-        val uri = oldFile.uri
+    /** Removes every indexed file under [folderUri] (a workspace folder the client closed); returns how many. */
+    fun removeFilesUnder(folderUri: String): Int {
+        val prefix = canonicalUri(folderUri).trimEnd('/') + "/"
+        val uris = filesByUri.keys.filter { it.startsWith(prefix) }
+        for (uri in uris) removeFile(uri)
+        return uris.size
+    }
 
-        methodCount.addAndGet(-oldFile.methods.size)
-        fieldCount.addAndGet(-oldFile.fields.size)
-        updateStringValueCounts(oldFile, delta = -1)
+    /** Undoes what [indexFile] recorded for [file] outside the usage tables. */
+    private fun retract(file: SmaliFile, uri: String) {
+        val className = file.classDefinition.name
+        uriByClass.remove(className, uri)
+        simpleNameIndex[simpleKey(className)]?.remove(className)
+        packageCounts.computeIfPresent(Types.packageOf(className)) { _, n -> if (n > 1) n - 1 else null }
+        file.classDefinition.superClass?.let { subclassIndex[it]?.remove(className) }
+        for (iface in file.classDefinition.interfaces) implementorsIndex[iface]?.remove(className)
+        methodCount.addAndGet(-file.methods.size)
+        fieldCount.addAndGet(-file.fields.size)
+        updateStringValueCounts(file, delta = -1)
+    }
 
-        // Remove simple name index entry
-        extractSimpleNameFromClassName(className)?.let { simpleName ->
-            simpleNameIndex[simpleName]?.remove(className)
-        }
+    /** Moves the file to a new generation, retiring every usage entry it added so far. */
+    private fun retireUsages(id: Int): Int = synchronized(fileLock) {
+        staleEntries.addAndGet(contributions.getAndSet(id, 0).toLong())
+        generation.incrementAndGet(id)
+    }
 
-        // Remove method declarations
-        oldFile.methods.forEach { method ->
-            val sig = methodSignature(className, method.name, method.descriptor)
-            methodLocations[sig]?.removeIf { it.uri == uri }
-        }
-
-        // Remove field declarations
-        oldFile.fields.forEach { field ->
-            fieldLocations.remove(fieldSignature(className, field.name))
-        }
-
-        // Remove hierarchy entries
-        oldFile.classDefinition.superClass?.let { sc ->
-            classUsages[sc]?.remove(uri)
-            subclassIndex[sc]?.remove(className)
-        }
-        oldFile.classDefinition.interfaces.forEach { iface ->
-            classUsages[iface]?.remove(uri)
-            implementorsIndex[iface]?.remove(className)
-        }
-
-        // Remove reverse usage entries (instructions + field types + method signatures)
-        oldFile.methods.forEach { method ->
-            method.instructions.forEach { instr ->
-                when (instr) {
-                    is InvokeInstruction -> {
-                        val sig = methodSignature(instr.className, instr.methodName, instr.descriptor)
-                        methodUsages[sig]?.removeIf { it.uri == uri }
-                        classRefLocations[instr.className]?.removeIf { it.uri == uri }
-                    }
-                    is FieldAccessInstruction -> {
-                        val sig = fieldSignature(instr.className, instr.fieldName)
-                        fieldUsages[sig]?.removeIf { it.uri == uri }
-                        classRefLocations[instr.className]?.removeIf { it.uri == uri }
-                        extractClassFromType(instr.fieldType)?.let { refClass ->
-                            classRefLocations[refClass]?.removeIf { it.uri == uri }
-                        }
-                    }
-                    is TypeInstruction -> {
-                        classRefLocations[instr.className]?.removeIf { it.uri == uri }
-                    }
-                    else -> {}
-                }
+    private fun fileId(uri: String): Int {
+        fileIds[uri]?.let { return it }
+        synchronized(fileLock) {
+            fileIds[uri]?.let { return it }
+            val id = fileIds.size
+            if (id >= urisById.size) {
+                val n = urisById.size * 2
+                urisById = urisById.copyOf(n)
+                generation = grow(generation, n)
+                contributions = grow(contributions, n)
             }
-        }
-        oldFile.fields.forEach { field ->
-            extractClassFromType(field.type)?.let { refClass ->
-                classRefLocations[refClass]?.removeIf { it.uri == uri }
-            }
-        }
-        oldFile.methods.forEach { method ->
-            extractClassFromType(method.returnType)?.let { refClass ->
-                classRefLocations[refClass]?.removeIf { it.uri == uri }
-            }
-            method.parameters.forEach { param ->
-                extractClassFromType(param.type)?.let { refClass ->
-                    classRefLocations[refClass]?.removeIf { it.uri == uri }
-                }
-            }
+            urisById[id] = uri
+            generation.set(id, 1)
+            fileIds[uri] = id
+            return id
         }
     }
 
+    private fun grow(old: AtomicIntegerArray, n: Int): AtomicIntegerArray {
+        val fresh = AtomicIntegerArray(n)
+        for (i in 0 until old.length()) fresh.set(i, old.get(i))
+        return fresh
+    }
+
     /**
-     * Extract class name from a type descriptor, stripping array brackets.
-     * Returns null for primitive types.
-     * Example: "[Lcom/Foo;" → "Lcom/Foo;", "I" → null
+     * Every usage a file contributes: call sites, field accesses, class references (owners, type
+     * operands, field types, descriptor types) and string literals, each at its token. Array
+     * types are filed under their element class; a primitive-array owner (`[I->clone()`) names
+     * no class.
      */
-    private fun extractClassFromType(type: String): String? {
-        val base = type.trimStart('[')
-        return if (base.startsWith('L') && base.endsWith(';')) base else null
+    private inline fun forEachUsage(
+        file: SmaliFile,
+        sink: (list: UsageList, line: Int, start: Int, end: Int) -> Unit
+    ) {
+        for (method in file.methods) {
+            for (instr in method.instructions) {
+                when (instr) {
+                    is InvokeInstruction -> {
+                        at(instr.nameSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(methodUsages, MemberKey(instr.className, instr.methodName, instr.descriptor)), l, a, b) }
+                        Types.className(instr.className)?.let { owner -> at(instr.ownerSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, owner), l, a, b) } }
+                    }
+                    is FieldAccessInstruction -> {
+                        at(instr.nameSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(fieldUsages, MemberKey(instr.className, instr.fieldName, instr.fieldType)), l, a, b) }
+                        Types.className(instr.className)?.let { owner -> at(instr.ownerSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, owner), l, a, b) } }
+                        Types.className(instr.fieldType)?.let { type -> at(instr.typeSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
+                    }
+                    is TypeInstruction -> {
+                        Types.className(instr.className)?.let { type -> at(instr.typeSpan ?: instr.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
+                    }
+                    is ConstStringInstruction -> sink(listFor(stringUsages, instr.value), instr.startLine, instr.startChar, if (instr.endLine == instr.startLine) instr.endChar else instr.startChar)
+                    is JumpInstruction -> {}
+                }
+            }
+            if (method.descriptorEnd - method.descriptorStart == method.descriptor.length) {
+                for (type in Types.parseTypeSequence(method.descriptor)) {
+                    val className = type.className ?: continue
+                    sink(listFor(classRefs, className), method.descriptorLine, method.descriptorStart + type.start, method.descriptorStart + type.end)
+                }
+            } else {
+                // No usable span (a hand-built definition): point at the declaration
+                Types.className(method.returnType)?.let { type -> at(method.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
+                for (param in method.parameters) {
+                    Types.className(param.type)?.let { type -> at(method.range.toSpan()) { l, a, b -> sink(listFor(classRefs, type), l, a, b) } }
+                }
+            }
+        }
+        for (field in file.fields) {
+            Types.className(field.type)?.let { type -> sink(listFor(classRefs, type), field.typeLine, field.typeStart, field.typeEnd) }
+        }
+        // Annotations, .catch exception types, .local types, method prototypes
+        for (ref in file.typeRefs) sink(listFor(classRefs, ref.className), ref.line, ref.start, ref.end)
+    }
+
+    private inline fun at(span: Span, use: (line: Int, start: Int, end: Int) -> Unit) = use(span.line, span.start, span.end)
+
+    private fun <K : Any> listFor(table: ConcurrentHashMap<K, UsageList>, key: K): UsageList =
+        table[key] ?: table.computeIfAbsent(key) { UsageList() }
+
+    /** Drops the spare capacity of every usage list; called once the initial scan is over. */
+    fun trimUsages() {
+        for (table in listOf(methodUsages, fieldUsages, classRefs, stringUsages)) {
+            for (list in table.values) list.trim()
+        }
+    }
+
+    private fun Range.toSpan() = Span(start.line, start.character, if (end.line == start.line) end.character else start.character)
+
+    /**
+     * Drops retired entries once they make up a quarter of the tables. Called with [fileLock]
+     * held, so the generation array cannot be replaced (grown) while entries are judged
+     * against it: an entry of a file id beyond the captured array would look retired.
+     */
+    private fun maybeCompact() {
+        val stale = staleEntries.get()
+        if (stale < 100_000 || stale * 4 < totalEntries.get()) return
+        val gen = generation
+        var dropped = 0L
+        for (table in listOf(methodUsages, fieldUsages, classRefs, stringUsages)) {
+            for (list in table.values) dropped += list.compact(gen)
+        }
+        totalEntries.addAndGet(-dropped)
+        staleEntries.set(0)
     }
 
     private fun updateStringValueCounts(file: SmaliFile, delta: Int) {
-        file.methods.forEach { method ->
-            method.instructions.forEach { instr ->
+        for (method in file.methods) {
+            for (instr in method.instructions) {
                 if (instr is ConstStringInstruction) {
                     stringValueCounts.compute(instr.value) { _, existing ->
                         val next = (existing ?: 0) + delta
@@ -314,453 +260,286 @@ class WorkspaceIndex {
             }
         }
     }
-    
-    /**
-     * Find a class definition in workspace.
-     * Returns null for SDK/system classes (not in user's APK).
-     */
-    fun findClass(className: String): SmaliFile? {
-        return files[className]
-    }
+
+    // ======================================================================
+    // Files and classes
+    // ======================================================================
+
+    /** The file defining [className], or null when the class is not in the workspace. */
+    fun findClass(className: String): SmaliFile? = uriByClass[className]?.let { filesByUri[it] }
+
+    fun hasClass(className: String): Boolean = uriByClass.containsKey(className)
+
+    /** URI of the file defining [className]. */
+    fun getUri(className: String): String? = uriByClass[className]
+
+    fun findFileByUri(uri: String): SmaliFile? = filesByUri[uri] ?: filesByUri[canonicalUri(uri)]
+
+    fun findClassNameByUri(uri: String): String? = findFileByUri(uri)?.classDefinition?.name
+
+    /** Classes whose last path segment is [simpleName] (`Outer$Inner` for nested classes). */
+    fun findClassesBySimpleName(simpleName: String): List<SmaliFile> =
+        simpleNameIndex[simpleName]?.mapNotNull { findClass(it) } ?: emptyList()
+
+    /** Live key-set view of every indexed class name; no copy. */
+    fun getClassNames(): Set<String> = uriByClass.keys
+
+    /** Live view of every indexed file; no copy. */
+    fun getFilesView(): Collection<SmaliFile> = filesByUri.values
+
+    fun getStats(): IndexStats = IndexStats(
+        classes = uriByClass.size,
+        methods = methodCount.get(),
+        fields = fieldCount.get(),
+        strings = stringValueCounts.size
+    )
+
+    // ======================================================================
+    // Declarations
+    // ======================================================================
+
+    /** A method and the file that declares it. */
+    data class MethodMatch(val file: SmaliFile, val method: MethodDefinition)
+
+    /** A field and the file that declares it. */
+    data class FieldMatch(val file: SmaliFile, val field: FieldDefinition)
 
     /**
-     * Find classes by simple name (e.g., "MainActivity" matches "Lcom/example/MainActivity;").
-     * Returns all matching classes since simple names are not unique.
-     * O(1) lookup via simpleNameIndex.
+     * The declaration a reference `className->methodName descriptor` resolves to: in [className]
+     * itself or, failing that, up its superclasses and interfaces. Null when no workspace class
+     * on that path declares it.
      */
-    fun findClassesBySimpleName(simpleName: String): List<SmaliFile> {
-        val classNames = simpleNameIndex[simpleName] ?: return emptyList()
-        return classNames.mapNotNull { files[it] }
-    }
-    
-    /**
-     * Get URI for a class in workspace.
-     * Returns null for SDK/system classes.
-     */
-    fun getUri(className: String): String? {
-        return classToUri[className]
-    }
-    
-    /**
-     * Check if a class is available in workspace.
-     * Returns false for SDK/system classes.
-     */
-    fun hasClass(className: String): Boolean {
-        return files.containsKey(className)
-    }
-    
-    /**
-     * Find method definition(s).
-     * Can return multiple locations (overloads, overrides).
-     */
-    fun findMethod(className: String, methodName: String, descriptor: String): Set<Location> {
-        return findMethodInternal(className, methodName, descriptor, mutableSetOf())
-    }
+    fun resolveMethod(className: String, methodName: String, descriptor: String): MethodMatch? =
+        resolveMethodIn(className, methodName, descriptor, HashSet())
 
-    private fun findMethodInternal(
-        className: String, methodName: String, descriptor: String, visited: MutableSet<String>
-    ): Set<Location> {
-        if (!visited.add(className)) return emptySet() // cycle protection
-
-        // Try direct lookup first (fast path)
-        val signature = methodSignature(className, methodName, descriptor)
-        val directMatch = methodLocations[signature]
-        if (directMatch != null && directMatch.isNotEmpty()) {
-            return directMatch
+    private fun resolveMethodIn(className: String, methodName: String, descriptor: String, visited: MutableSet<String>): MethodMatch? {
+        if (!visited.add(className)) return null
+        val file = findClass(className) ?: return null
+        file.methods.firstOrNull { it.name == methodName && it.descriptor == descriptor }?.let { return MethodMatch(file, it) }
+        file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" }?.let { superClass ->
+            resolveMethodIn(superClass, methodName, descriptor, visited)?.let { return it }
         }
-
-        // If not found, search up class hierarchy (parent classes and interfaces)
-        val classFile = files[className] ?: return emptySet()
-
-        // Check superclass
-        val superClass = classFile.classDefinition.superClass
-        if (superClass != null && superClass != "Ljava/lang/Object;") {
-            val parentResult = findMethodInternal(superClass, methodName, descriptor, visited)
-            if (parentResult.isNotEmpty()) {
-                return parentResult
-            }
+        for (iface in file.classDefinition.interfaces) {
+            resolveMethodIn(iface, methodName, descriptor, visited)?.let { return it }
         }
-
-        // Check interfaces
-        for (interfaceName in classFile.classDefinition.interfaces) {
-            val interfaceResult = findMethodInternal(interfaceName, methodName, descriptor, visited)
-            if (interfaceResult.isNotEmpty()) {
-                return interfaceResult
-            }
-        }
-
-        return emptySet()
-    }
-    
-    /**
-     * Find field definition.
-     */
-    fun findField(className: String, fieldName: String): Location? {
-        return findFieldInternal(className, fieldName, mutableSetOf())
-    }
-
-    private fun findFieldInternal(
-        className: String, fieldName: String, visited: MutableSet<String>
-    ): Location? {
-        if (!visited.add(className)) return null // cycle protection
-
-        // Try direct lookup first (fast path)
-        val signature = fieldSignature(className, fieldName)
-        val directMatch = fieldLocations[signature]
-        if (directMatch != null) {
-            return directMatch
-        }
-
-        // If not found, search up class hierarchy (parent classes)
-        val classFile = files[className] ?: return null
-
-        val superClass = classFile.classDefinition.superClass
-        if (superClass != null && superClass != "Ljava/lang/Object;") {
-            val parentResult = findFieldInternal(superClass, fieldName, visited)
-            if (parentResult != null) {
-                return parentResult
-            }
-        }
-
         return null
     }
-    
+
     /**
-     * Build the string literal index from all indexed files.
-     * Called lazily on first search — not during the parallel indexFile() scan,
-     * where ConcurrentHashMap contention on stringIndex was the primary bottleneck.
-     * Double-checked locking: volatile read is fast, synchronized block only on first build.
+     * The topmost declarations of the virtual method [start] overrides: walking superclasses and
+     * interfaces, the declarations whose own supertypes in the workspace do not declare the
+     * method. [start] itself when nothing above declares it; several when an interface and a
+     * superclass both do.
      */
-    private fun ensureStringIndex() {
-        if (!stringIndexDirty) return
-        synchronized(stringIndexLock) {
-            if (!stringIndexDirty) return@synchronized
-            val newIndex = HashMap<String, MutableSet<Location>>()
-            for (file in files.values) {
-                for (method in file.methods) {
-                    for (instr in method.instructions) {
-                        if (instr is ConstStringInstruction) {
-                            newIndex.getOrPut(instr.value) { mutableSetOf() }
-                                .add(Location(file.uri, instr.range))
-                        }
-                    }
-                }
+    fun rootMethodDeclarations(start: MethodMatch, methodName: String, descriptor: String): List<MethodMatch> {
+        val roots = LinkedHashMap<String, MethodMatch>()
+        val visited = HashSet<String>()
+        fun climb(match: MethodMatch) {
+            val definition = match.file.classDefinition
+            if (!visited.add(definition.name)) return
+            var overridesSomething = false
+            for (parent in listOfNotNull(definition.superClass) + definition.interfaces) {
+                val above = resolveMethod(parent, methodName, descriptor) ?: continue
+                if (!above.method.isVirtual) continue
+                overridesSomething = true
+                climb(above)
             }
-            stringIndex = newIndex
-            stringIndexDirty = false
+            if (!overridesSomething) roots[definition.name] = match
         }
+        climb(start)
+        return roots.values.toList()
     }
 
+    /** Where the method is declared, as a location of its name token. */
+    fun findMethod(className: String, methodName: String, descriptor: String): List<Location> =
+        listOfNotNull(resolveMethod(className, methodName, descriptor)?.let { Location(it.file.uri, it.method.nameSpan.toRange()) })
+
     /**
-     * Search string literals by substring match (case-insensitive).
-     * Returns matching string values with their locations.
+     * The declaration a field reference resolves to: in [className], else in its superinterfaces
+     * (interface constants are accessed through the implementing class), else up its superclass.
+     * The type is part of a field's identity.
      */
-    fun searchStrings(query: String, maxResults: Int = 500): List<StringSearchResult> {
-        ensureStringIndex()
-        val normalizedQuery = query.lowercase()
-        val results = ArrayList<StringSearchResult>(minOf(maxResults, 64))
+    fun resolveField(className: String, fieldName: String, fieldType: String): FieldMatch? =
+        resolveFieldIn(className, fieldName, fieldType, HashSet())
 
-        for ((value, locations) in stringIndex) {
-            if (normalizedQuery.isNotEmpty() && !value.lowercase().contains(normalizedQuery)) continue
-
-            for (location in locations) {
-                results.add(StringSearchResult(value, location))
-                if (results.size >= maxResults) {
-                    return results
-                }
-            }
+    private fun resolveFieldIn(className: String, fieldName: String, fieldType: String, visited: MutableSet<String>): FieldMatch? {
+        if (!visited.add(className)) return null
+        val file = findClass(className) ?: return null
+        file.fields.firstOrNull { it.name == fieldName && it.type == fieldType }?.let { return FieldMatch(file, it) }
+        for (iface in file.classDefinition.interfaces) {
+            resolveFieldIn(iface, fieldName, fieldType, visited)?.let { return it }
         }
-
-        return results
+        val superClass = file.classDefinition.superClass?.takeIf { it != "Ljava/lang/Object;" } ?: return null
+        return resolveFieldIn(superClass, fieldName, fieldType, visited)
     }
 
-    /**
-     * Get all locations of an exact string literal.
-     */
-    fun findStringLocations(value: String): Set<Location> {
-        ensureStringIndex()
-        return stringIndex[value] ?: emptySet()
-    }
+    /** Where the field is declared, as a location of its name token. */
+    fun findField(className: String, fieldName: String, fieldType: String): Location? =
+        resolveField(className, fieldName, fieldType)?.let { Location(it.file.uri, it.field.nameSpan.toRange()) }
 
-    /**
-     * Find all files that reference a class (inheritance/interface only).
-     */
+    // ======================================================================
+    // Usages
+    // ======================================================================
+
+    /** Every call site of the method, at the method-name token. */
+    fun findMethodUsages(className: String, methodName: String, descriptor: String): List<Location> =
+        methodUsages[MemberKey(className, methodName, descriptor)].toLocations()
+
+    /** Every access of the field, at the field-name token. */
+    fun findFieldUsages(className: String, fieldName: String, fieldType: String): List<Location> =
+        fieldUsages[MemberKey(className, fieldName, fieldType)].toLocations()
+
+    /** Every `const-string` that loads exactly [value], at the instruction. */
+    fun findStringUsages(value: String): List<Location> = stringUsages[value].toLocations()
+
+    /** Every reference to the class as an owner, operand, field type or descriptor type; [cancel] is checked along the way for the big ones. */
+    fun findClassRefLocations(className: String, cancel: CancelChecker? = null): List<Location> = classRefs[className].toLocations(cancel)
+
+    /** URIs of the files that extend or implement [className]. */
     fun findClassUsages(className: String): Set<String> {
-        return classUsages[className] ?: emptySet()
+        val uris = LinkedHashSet<String>()
+        subclassIndex[className]?.forEach { sub -> uriByClass[sub]?.let(uris::add) }
+        implementorsIndex[className]?.forEach { impl -> uriByClass[impl]?.let(uris::add) }
+        return uris
     }
 
-    // ========== Reverse Usage Index Queries ==========
-
-    /**
-     * Find all call sites for a method. O(1) lookup.
-     * Returns locations of all invoke instructions targeting this method signature.
-     */
-    fun findMethodUsages(className: String, methodName: String, descriptor: String): Set<Location> {
-        return methodUsages[methodSignature(className, methodName, descriptor)] ?: emptySet()
+    private fun UsageList?.toLocations(cancel: CancelChecker? = null): List<Location> {
+        if (this == null) return emptyList()
+        val entries = snapshot()
+        val gen = generation
+        val uris = urisById
+        val out = ArrayList<Location>(entries.size / UsageList.STRIDE)
+        var i = 0
+        while (i < entries.size) {
+            if (cancel != null && i % (UsageList.STRIDE * 4096) == 0) cancel.checkCanceled()
+            val fileId = entries[i]
+            if (fileId < gen.length() && gen.get(fileId) == entries[i + 1]) {
+                val line = entries[i + 2]
+                out.add(Location(uris[fileId], Range(Position(line, entries[i + 3]), Position(line, entries[i + 4]))))
+            }
+            i += UsageList.STRIDE
+        }
+        return out
     }
 
-    /**
-     * Find all access sites for a field. O(1) lookup.
-     * Returns locations of all iget/iput/sget/sput instructions targeting this field.
-     */
-    fun findFieldUsages(className: String, fieldName: String): Set<Location> {
-        return fieldUsages[fieldSignature(className, fieldName)] ?: emptySet()
-    }
+    // ======================================================================
+    // Hierarchy
+    // ======================================================================
 
-    /**
-     * Find all locations that reference a class. O(1) lookup.
-     * Includes: invoke targets, field access targets, type instructions,
-     * field type declarations, method parameter/return types.
-     */
-    fun findClassRefLocations(className: String): Set<Location> {
-        return classRefLocations[className] ?: emptySet()
-    }
+    fun getDirectSubclasses(className: String): Set<String> = subclassIndex[className] ?: emptySet()
 
-    /**
-     * Get direct subclasses of a class. O(1) lookup.
-     */
-    fun getDirectSubclasses(className: String): Set<String> {
-        return subclassIndex[className] ?: emptySet()
-    }
+    fun getDirectImplementors(className: String): Set<String> = implementorsIndex[className] ?: emptySet()
 
-    /**
-     * Get direct implementors of an interface. O(1) lookup.
-     */
-    fun getDirectImplementors(className: String): Set<String> {
-        return implementorsIndex[className] ?: emptySet()
-    }
-
-    /**
-     * Get all transitive subclasses (direct + indirect). BFS traversal.
-     * Used by ReferenceProvider for polymorphic method reference matching.
-     */
+    /** Every transitive subclass and implementor, breadth first. */
     fun getAllSubclasses(className: String): Set<String> {
-        val result = mutableSetOf<String>()
-        val visited = mutableSetOf(className) // Track visited including root to handle cycles
+        val result = LinkedHashSet<String>()
+        val visited = hashSetOf(className)
         val queue = ArrayDeque<String>()
         queue.add(className)
-
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
-            val directSubs = subclassIndex[current] ?: emptySet()
-            val directImpls = implementorsIndex[current] ?: emptySet()
-            for (sub in directSubs) {
-                if (visited.add(sub)) {
-                    result.add(sub)
-                    queue.add(sub)
-                }
-            }
-            for (impl in directImpls) {
-                if (visited.add(impl)) {
-                    result.add(impl)
-                    queue.add(impl)
+            for (next in getDirectSubclasses(current) + getDirectImplementors(current)) {
+                if (visited.add(next)) {
+                    result.add(next)
+                    queue.add(next)
                 }
             }
         }
         return result
     }
-    
-    /**
-     * Get index statistics.
-     */
-    fun getStats(): IndexStats {
-        return IndexStats(
-            classes = files.size,
-            methods = methodCount.get(),
-            fields = fieldCount.get(),
-            strings = stringValueCounts.size
-        )
-    }
-    
-    /**
-     * Find SmaliFile by URI.
-     * Critical for AST-based providers to get parsed file directly.
-     * Optimized with O(1) reverse lookup map.
-     */
-    fun findFileByUri(uri: String): SmaliFile? {
-        // Try all URI format variants for robust matching
-        val variants = getNormalizedUriVariants(uri)
-        
-        for (uriVariant in variants) {
-            val className = uriToClass[uriVariant]
-            if (className != null) {
-                return files[className]
+
+    // ======================================================================
+    // String literals
+    // ======================================================================
+
+    /** String literals containing [query] (case-insensitive), with where they occur. */
+    fun searchStrings(query: String, maxResults: Int = 500): List<StringSearchResult> {
+        val results = ArrayList<StringSearchResult>(minOf(maxResults, 64))
+        for ((value, sites) in stringUsages) {
+            if (query.isNotEmpty() && !value.contains(query, ignoreCase = true)) continue
+            for (location in sites.toLocations()) {
+                results.add(StringSearchResult(value, location))
+                if (results.size >= maxResults) return results
             }
         }
-        
-        // Last resort: Linear search (should rarely happen)
-        return files.values.find { file -> 
-            variants.any { variant -> file.uri == variant }
-        }
-    }
-    
-    /**
-     * Normalize URI to handle variations in format.
-     * Returns all possible variations of the URI to try during lookup.
-     */
-    private fun getNormalizedUriVariants(uri: String): List<String> {
-        val variants = mutableListOf(uri)
-        
-        // file:/// (triple slash) -> file:/ (single slash from Java's toURI())
-        if (uri.startsWith("file:///")) {
-            variants.add(uri.replaceFirst("file:///", "file:/"))
-        }
-        // file:/ (single slash) -> file:/// (triple slash for LSP standard)
-        else if (uri.startsWith("file:/") && !uri.startsWith("file://")) {
-            variants.add(uri.replaceFirst("file:/", "file:///"))
-        }
-        // file:// (double slash, Windows style) -> file:/// (triple slash)
-        else if (uri.startsWith("file://") && !uri.startsWith("file:///")) {
-            variants.add(uri.replaceFirst("file://", "file:///"))
-        }
-        
-        return variants
-    }
-    
-    /**
-     * Get class name key set view. No copy — safe for concurrent iteration.
-     * Preferred over getAllClassNames() for iteration (avoids 118K-element list copy).
-     */
-    fun getClassNames(): Set<String> {
-        return files.keys
+        return results
     }
 
-    /**
-     * Get all indexed class names (for comprehensive testing).
-     * Returns a list copy to avoid concurrent modification issues.
-     */
-    fun getAllClassNames(): List<String> {
-        return files.keys.toList()
-    }
+    // ======================================================================
+    // Open documents
+    // ======================================================================
 
-    /**
-     * Get all indexed files (for workspace symbol search, MCP tools).
-     * Returns a list copy to avoid concurrent modification issues.
-     */
-    fun getAllFiles(): List<SmaliFile> {
-        return files.values.toList()
-    }
-
-    /**
-     * Get a concurrent view of indexed files without copying.
-     * Safe for iteration; view may reflect concurrent updates.
-     */
-    fun getFilesView(): Collection<SmaliFile> {
-        return files.values
-    }
-    
-    /**
-     * Find class name by URI.
-     * Useful for reverse lookup from usage URIs.
-     * Optimized: O(1) lookup using uriToClass reverse map.
-     */
-    fun findClassNameByUri(uri: String): String? {
-        // Try all URI format variants for robust matching
-        val variants = getNormalizedUriVariants(uri)
-        
-        for (uriVariant in variants) {
-            val className = uriToClass[uriVariant]
-            if (className != null) {
-                return className
-            }
-        }
-        
-        return null
-    }
-    
-    /**
-     * Store document content for an open file.
-     * Called by SmaliTextDocumentService on didOpen/didChange.
-     */
+    /** Keeps the editor's text for an open file (didOpen/didChange). Keyed by canonical URI like the files. */
     fun setDocumentContent(uri: String, content: String) {
-        documentContents[uri] = content
-        documentLines.remove(uri) // Invalidate cached lines
+        val key = canonicalUri(uri)
+        documentContents[key] = content
+        documentLines.remove(key)
     }
 
-    /**
-     * Remove document content when file is closed.
-     * Called by SmaliTextDocumentService on didClose.
-     */
     fun removeDocumentContent(uri: String) {
-        documentContents.remove(uri)
-        documentLines.remove(uri)
+        val key = canonicalUri(uri)
+        documentContents.remove(key)
+        documentLines.remove(key)
     }
 
-    /**
-     * Get full document content for an open file.
-     * Returns null if file is not in the buffer (not open or already closed).
-     */
-    fun getDocumentContent(uri: String): String? {
-        return documentContents[uri]
-    }
+    fun getDocumentContent(uri: String): String? = documentContents[canonicalUri(uri)]
 
-    /** Cached split lines for open documents — avoids re-splitting on every getLineContent call. */
-    private val documentLines = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+    /** Whether the workspace defines at least one class in [packagePrefix] (`Lcom/app/`, as [Types.packageOf] spells it). */
+    fun hasPackage(packagePrefix: String): Boolean = packageCounts.containsKey(packagePrefix)
 
-    /**
-     * Get a specific line from a document.
-     * Checks in-memory content first (open editor buffers), falls back to disk.
-     *
-     * @param uri Document URI
-     * @param lineIndex 0-based line index
-     * @return Line content or null if unavailable
-     */
-    fun getLineContent(uri: String, lineIndex: Int): String? {
-        // Fast path: check cached lines (open files)
-        val content = documentContents[uri]
-        if (content != null) {
-            val lines = documentLines.getOrPut(uri) { content.lines() }
-            return if (lineIndex in lines.indices) lines[lineIndex] else null
-        }
+    /** Whether an editor buffer is open for the file, under any spelling of its URI. */
+    fun isOpen(uri: String): Boolean = documentContents.containsKey(canonicalUri(uri))
 
-        // Slow path: read from disk (non-open files, e.g. navigating to definition)
+    /** The lines of an open document (split once and cached), or of the file on disk when it is not open. */
+    fun getLines(uri: String): List<String>? {
+        val key = canonicalUri(uri)
+        val content = documentContents[key]
+        if (content != null) return documentLines.getOrPut(key) { content.lines() }
         return try {
-            val path = URI(uri).let { File(it) }
-            val lines = path.readLines()
-            if (lineIndex in lines.indices) lines[lineIndex] else null
+            File(URI(uri)).readLines()
         } catch (_: Exception) {
             null
         }
     }
 
-    /**
-     * Clear all data (for tests).
-     */
-    fun clear() {
-        files.clear()
-        classToUri.clear()
-        uriToClass.clear()
-        methodLocations.clear()
-        fieldLocations.clear()
-        classUsages.clear()
-        stringIndex.clear()
-        stringIndexDirty = true
-        methodCount.set(0)
-        fieldCount.set(0)
-        subclassIndex.clear()
-        implementorsIndex.clear()
-        methodUsages.clear()
-        fieldUsages.clear()
-        classRefLocations.clear()
-        stringValueCounts.clear()
-        documentContents.clear()
-        documentLines.clear()
-        simpleNameIndex.clear()
-    }
-    
-    private fun methodSignature(className: String, methodName: String, descriptor: String): String {
-        return "$className->$methodName$descriptor"
-    }
-    
-    private fun fieldSignature(className: String, fieldName: String): String {
-        return "$className->$fieldName"
+    /** A line of an open document, or of the file on disk when it is not open. */
+    fun getLineContent(uri: String, lineIndex: Int): String? {
+        val key = canonicalUri(uri)
+        val content = documentContents[key]
+        if (content != null) {
+            val lines = documentLines.getOrPut(key) { content.lines() }
+            return lines.getOrNull(lineIndex)
+        }
+        return try {
+            File(URI(uri)).bufferedReader().useLines { it.elementAtOrNull(lineIndex) }
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    /** Extract simple name from full class name: "Lcom/example/MyClass;" → "MyClass" */
-    private fun extractSimpleNameFromClassName(className: String): String? {
-        val cleaned = className.removePrefix("L").removeSuffix(";")
-        if (cleaned.isEmpty()) return null
-        return cleaned.substringAfterLast('/')
+
+
+    /** Last path segment of a class name, keeping the Outer$Inner chain (unlike Types.simpleName): "Lcom/a/Outer$Inner;" → "Outer$Inner". */
+    private fun simpleKey(className: String): String = className.removePrefix("L").removeSuffix(";").substringAfterLast('/')
+
+    companion object {
+        /**
+         * One spelling per file. `file:/x` (java.io.File) and `file://x` become `file:///x`, and
+         * percent-encoding is normalized through the path: VS Code sends `Foo%24Bar.smali` for the
+         * file the scanner found as `Foo$Bar.smali`. Non-file URIs are kept as they are.
+         */
+        fun canonicalUri(uri: String): String {
+            if (!uri.startsWith("file:")) return uri
+            return try {
+                File(URI(uri)).toPath().toUri().toString()
+            } catch (_: Exception) {
+                when {
+                    uri.startsWith("file:///") -> uri
+                    uri.startsWith("file://") -> "file:///" + uri.substring("file://".length)
+                    else -> "file:///" + uri.substring("file:/".length)
+                }
+            }
+        }
     }
 }
 
@@ -775,3 +554,17 @@ data class StringSearchResult(
     val value: String,
     val location: Location
 )
+
+/**
+ * A method or field as the usage tables key it: owner, name and descriptor (or field type).
+ * The parts are the AST's pooled strings, so a key is one small object sharing them instead
+ * of a concatenated `Lowner;->name(desc)` string, and equality is usually three identity checks.
+ */
+internal class MemberKey(@JvmField val owner: String, @JvmField val name: String, @JvmField val descriptor: String) {
+    override fun hashCode(): Int = (owner.hashCode() * 31 + name.hashCode()) * 31 + descriptor.hashCode()
+
+    override fun equals(other: Any?): Boolean =
+        other is MemberKey && (owner === other.owner || owner == other.owner) && (name === other.name || name == other.name) && (descriptor === other.descriptor || descriptor == other.descriptor)
+
+    override fun toString(): String = "$owner->$name$descriptor"
+}

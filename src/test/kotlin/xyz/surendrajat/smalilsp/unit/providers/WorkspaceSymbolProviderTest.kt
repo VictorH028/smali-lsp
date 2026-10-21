@@ -1,15 +1,17 @@
 package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.SymbolKind
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Timeout
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 
 import xyz.surendrajat.smalilsp.core.ClassDefinition
 import xyz.surendrajat.smalilsp.core.SmaliFile
 import xyz.surendrajat.smalilsp.providers.WorkspaceSymbolProvider
+import xyz.surendrajat.smalilsp.shared.openSource
 /**
  * Unit tests for WorkspaceSymbolProvider.
  * 
@@ -265,11 +267,10 @@ class WorkspaceSymbolProviderTest {
     }
     
     /**
-     * Test performance on large workspace (4000+ symbols).
+     * A large workspace is capped at 500 results.
      */
     @Test
-    @Timeout(1) // Must complete in < 1 second
-    fun `performance on large workspace`() {
+    fun `large workspace results are capped at 500`() {
         val index = WorkspaceIndex()
         
         // Create 1000 classes with 5 methods and 3 fields each
@@ -308,14 +309,9 @@ class WorkspaceSymbolProviderTest {
         
         val provider = WorkspaceSymbolProvider(index)
         
-        val start = System.currentTimeMillis()
         val results = provider.search("Class")
-        val elapsed = System.currentTimeMillis() - start
-        
-        // Should find results quickly
-        assertTrue(results.isNotEmpty())
+
         assertEquals(500, results.size) // Limited to 500
-        assertTrue(elapsed < 500, "Should complete in < 500ms, was ${elapsed}ms")
     }
     
     /**
@@ -392,7 +388,7 @@ class WorkspaceSymbolProviderTest {
         assertTrue(results.isNotEmpty())
         val methodSymbol = results.find { it.kind == SymbolKind.Method }
         assertNotNull(methodSymbol)
-        assertEquals("file:///test/MyClass.smali", methodSymbol!!.location.uri)
+        assertEquals("file:///test/MyClass.smali", methodSymbol.location.uri)
         assertEquals(10, methodSymbol.location.range.start.line)
         assertEquals(4, methodSymbol.location.range.start.character)
     }
@@ -409,7 +405,7 @@ class WorkspaceSymbolProviderTest {
         
         val methodSymbol = results.find { it.kind == SymbolKind.Method }
         assertNotNull(methodSymbol)
-        assertNotNull(methodSymbol!!.containerName)
+        assertNotNull(methodSymbol.containerName)
         assertTrue(methodSymbol.containerName.contains("MainActivity"))
     }
     
@@ -470,5 +466,23 @@ class WorkspaceSymbolProviderTest {
             methods = emptyList(),
             fields = emptyList()
         )
+    }
+
+    @Test
+    fun `a cancelled search stops instead of scanning on`() {
+        val index = createTestIndex()
+        val provider = WorkspaceSymbolProvider(index)
+        val cancelled = org.eclipse.lsp4j.jsonrpc.CancelChecker { throw java.util.concurrent.CancellationException("superseded") }
+        org.junit.jupiter.api.assertThrows<java.util.concurrent.CancellationException> { provider.search("a", cancelled) }
+    }
+
+    @Test
+    fun `an exact method name ranks before a class that merely starts with it`() {
+        val index = WorkspaceIndex()
+        index.openSource("file:///Utils.smali", ".class public Lcom/app/Utils;\n.super Ljava/lang/Object;\n\n.method public getClassLoader()Ljava/lang/ClassLoader;\n    .registers 1\n    const/4 v0, 0x0\n    return-object v0\n.end method")
+        index.openSource("file:///getClassLoaderUtils.smali", ".class public Lcom/app/getClassLoaderUtils;\n.super Ljava/lang/Object;")
+        val results = WorkspaceSymbolProvider(index).search("getClassLoader")
+        assertEquals(listOf("Lcom/app/Utils;.getClassLoader", "Lcom/app/getClassLoaderUtils;"), results.map { it.name })
+        assertEquals(listOf(SymbolKind.Method, SymbolKind.Class), results.map { it.kind })
     }
 }

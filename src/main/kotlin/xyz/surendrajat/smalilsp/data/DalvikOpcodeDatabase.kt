@@ -6,7 +6,8 @@ package xyz.surendrajat.smalilsp.data
  * Data sourced from the official Android Dalvik bytecode specification:
  * https://source.android.com/docs/core/runtime/dalvik-bytecode
  *
- * Covers all 256 opcodes (0x00-0xFF) including unused/reserved ones.
+ * Covers all 224 defined opcodes; the 32 unused/reserved slots
+ * (0x3E-0x43, 0x73, 0x79-0x7A, 0xE3-0xF9) are intentionally absent.
  */
 object DalvikOpcodeDatabase {
 
@@ -76,22 +77,14 @@ object DalvikOpcodeDatabase {
         instructionsByName[name.lowercase()]
 
     /**
-     * Get all known instruction names (excluding unused_XX).
+     * Get all known instruction names.
      * Cached — safe since the instruction database is immutable.
      */
     private val cachedInstructionNames: List<String> by lazy {
-        instructionsByName.values
-            .filter { !it.name.startsWith("unused_") }
-            .map { it.name }
+        instructionsByName.values.map { it.name }
     }
 
     fun allInstructionNames(): List<String> = cachedInstructionNames
-
-    /**
-     * Get all instructions (including unused).
-     */
-    fun allInstructions(): Collection<InstructionInfo> =
-        instructionsByName.values
 
     private fun buildInstructionList(): List<InstructionInfo> = listOf(
         // 0x00 nop

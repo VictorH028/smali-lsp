@@ -2,7 +2,11 @@ package xyz.surendrajat.smalilsp.unit.index
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Assertions.*
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import xyz.surendrajat.smalilsp.core.*
 
 import xyz.surendrajat.smalilsp.core.ClassDefinition
@@ -38,7 +42,7 @@ class WorkspaceIndexTest {
         
         val found = index.findClass("Lcom/example/Test;")
         assertNotNull(found)
-        assertEquals("Lcom/example/Test;", found?.classDefinition?.name)
+        assertEquals("Lcom/example/Test;", found.classDefinition.name)
     }
     
     @Test
@@ -84,10 +88,10 @@ class WorkspaceIndexTest {
         
         index.indexFile(file)
         
-        val location = index.findField("Lcom/example/Test;", "myField")
+        val location = index.findField("Lcom/example/Test;", "myField", "I")
         assertNotNull(location)
-        assertEquals("file:///test/Test.smali", location?.uri)
-        assertEquals(5, location?.range?.start?.line)
+        assertEquals("file:///test/Test.smali", location.uri)
+        assertEquals(5, location.range?.start?.line)
     }
     
     @Test
@@ -245,7 +249,7 @@ class WorkspaceIndexTest {
         assertNull(index.findFileByUri(uri))
         // Method/field entries gone
         assertTrue(index.findMethod(className, "foo", "()V").isEmpty())
-        assertNull(index.findField(className, "bar"))
+        assertNull(index.findField(className, "bar", "I"))
         // Subclass hierarchy still has referrer but no parent entry
         assertTrue(index.getDirectSubclasses(className).contains("Lcom/example/Referrer;"))
     }
@@ -297,5 +301,32 @@ class WorkspaceIndexTest {
             range = range(0, 0, 0, 10),
             modifiers = setOf("private")
         )
+    }
+
+    @Test
+    fun `findClassNameByUri names the class of an indexed file and nothing for an unknown one`() {
+        index.indexFile(createTestFile(className = "Lcom/example/Outer\$Inner;", uri = "file:///test/Outer\$Inner.smali"))
+        assertEquals("Lcom/example/Outer\$Inner;", index.findClassNameByUri("file:///test/Outer\$Inner.smali"))
+        assertNull(index.findClassNameByUri("file:///test/Missing.smali"))
+    }
+
+    @Test
+    fun `getAllSubclasses on an inheritance cycle lists each class once and never the root`() {
+        index.indexFile(createTestFile(className = "Lcom/example/A;", uri = "file:///A.smali", superClass = "Lcom/example/B;"))
+        index.indexFile(createTestFile(className = "Lcom/example/B;", uri = "file:///B.smali", superClass = "Lcom/example/A;"))
+        assertEquals(setOf("Lcom/example/B;"), index.getAllSubclasses("Lcom/example/A;"))
+        assertEquals(setOf("Lcom/example/A;"), index.getAllSubclasses("Lcom/example/B;"))
+    }
+
+    @Test
+    fun `getLineContent reads an open document and nothing for a file that is neither open nor on disk`() {
+        val uri = "file:///test/Open.smali"
+        index.setDocumentContent(uri, ".class public LOpen;\n.super Ljava/lang/Object;\n\n.method public run()V\n    return-void\n.end method")
+        assertEquals(".class public LOpen;", index.getLineContent(uri, 0))
+        assertEquals("", index.getLineContent(uri, 2))
+        assertEquals("    return-void", index.getLineContent(uri, 4))
+        assertNull(index.getLineContent(uri, 6))
+        index.removeDocumentContent(uri)
+        assertNull(index.getLineContent(uri, 0), "nothing is open and the file does not exist on disk")
     }
 }

@@ -1,107 +1,89 @@
 import java.time.Instant
-
-buildscript {
-    dependencies {
-        constraints {
-            classpath(libs.commons.io)
-            classpath(libs.plexus.utils)
-            classpath(libs.log4j.api)
-            classpath(libs.log4j.core)
-        }
-    }
-}
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.shadow)
-    id("antlr")
-    id("jacoco")
-    alias(libs.plugins.jmh)
 }
 
 group = "xyz.surendrajat"
-version = "1.5.0"
+version = "2.0.0"
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    // ANTLR for parsing
-    antlr(libs.antlr.tool)
-    implementation(libs.antlr.runtime)
-    
     // LSP4J for language server
     implementation(libs.lsp4j)
-    
+
     // Kotlin coroutines for concurrency
     implementation(libs.kotlinx.coroutines.core)
-    
+
     // JSON for CLI mode
     implementation(libs.gson)
 
     // MCP (Model Context Protocol) server
     implementation(libs.mcp.kotlin.sdk.server)
-    
+
     // Logging
     implementation(libs.slf4j.api)
     implementation(libs.logback.classic)
-    
+
     // Testing
     testImplementation(libs.junit.jupiter)
     testImplementation("org.jetbrains.kotlin:kotlin-test")
-    
-    // JMH Benchmarking
-    jmh(libs.jmh.core)
-    jmh(libs.jmh.generator.annprocess)
+    // Gradle 9 no longer injects the JUnit platform launcher — must be declared explicitly
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
-// Configure ANTLR
-tasks.generateGrammarSource {
-    maxHeapSize = "128m"
-    arguments = arguments + listOf("-visitor", "-long-messages", "-package", "xyz.surendrajat.smalilsp.parser.generated")
-    outputDirectory = file("build/generated-src/antlr/main/xyz/surendrajat/smalilsp/parser/generated")
+// Keep never-loaded artifacts off the runtime classpath, so the shadow jar stays lean
+// without fragile path-based excludes: io.ktor:* are the MCP SDK's HTTP/SSE transports
+// (dragging in kotlin-reflect, jansi, and typesafe-config through ktor-server-core). This
+// server is stdio-only; the ktor code paths are never loaded.
+// Tests keep the full classpath (this only touches runtimeClasspath).
+configurations.runtimeClasspath {
+    exclude(group = "io.ktor")
 }
 
-// Make Kotlin compilation depend on ANTLR generation
-tasks.compileKotlin {
-    dependsOn(tasks.generateGrammarSource)
+// Build on whatever JDK launches Gradle — any Java 17+ works (Gradle 9's own floor;
+// no pinned toolchain, no forced downloads). The artifact is kept Java-17 compatible
+// regardless of the build JDK:
+//  - bytecode: jvmTarget/release below emit class-file 61
+//  - API surface: release (javac) and -Xjdk-release (kotlinc) compile against the
+//    Java 17 API, so code using newer JDK APIs fails the build instead of crashing
+//    on a real Java 17 runtime. CI additionally runs the tests on a JDK 17 leg.
+val targetJavaVersion = 17
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.fromTarget(targetJavaVersion.toString()))
+        freeCompilerArgs.add("-Xjdk-release=$targetJavaVersion")
+        // The build is warning-free; keep it that way
+        allWarningsAsErrors.set(true)
+    }
 }
 
-tasks.compileTestKotlin {
-    dependsOn(tasks.generateTestGrammarSource)
-}
-
-// Fix JMH task dependencies
-tasks.named("compileJmhKotlin") {
-    dependsOn(tasks.named("generateJmhGrammarSource"))
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(targetJavaVersion)
 }
 
 tasks.test {
     useJUnitPlatform()
-    
+
     // Show test output
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = true
     }
-    
+
     // Each test worker needs enough heap for large APK tests (indexing 4K+ files)
     maxHeapSize = "1g"
-    
+
     // Limit parallelism: each worker holds a parsed APK in memory.
     // Too many forks OOM; too few wastes time. 4 is a safe default.
     maxParallelForks = minOf(4, Runtime.getRuntime().availableProcessors())
-    
-    // Fail on first test failure
-    failFast = true
-}
 
-tasks.jacocoTestReport {
-    reports {
-        xml.required.set(true)
-        html.required.set(true)
-    }
 }
 
 // Generate version metadata resource from project version + git commit
@@ -113,21 +95,27 @@ val gitCommitProvider = providers.exec {
 }.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
 
 tasks.register("generateVersionProperties") {
-    inputs.property("projectVersion", project.version.toString())
-    inputs.property("gitCommit", gitCommitProvider)
-    outputs.file(versionPropertiesFile)
+    // Task-local copies: the doLast closure must capture plain values/Providers,
+    // not `project` or top-level script properties (which drag the whole script
+    // object in and break the configuration cache).
+    val projectVersion = project.version.toString()
+    val commitProvider = gitCommitProvider
+    val outputFile = versionPropertiesFile
+    inputs.property("projectVersion", projectVersion)
+    inputs.property("gitCommit", commitProvider)
+    outputs.file(outputFile)
     doLast {
         val commitHash = try {
-            gitCommitProvider.get()
+            commitProvider.get()
         } catch (_: Exception) {
             "unknown"
         }
 
         val buildTime = Instant.now().toString()
-        val file = versionPropertiesFile.get().asFile
+        val file = outputFile.get().asFile
 
         file.parentFile.mkdirs()
-        file.writeText("""version=${project.version}
+        file.writeText("""version=$projectVersion
 commit=$commitHash
 buildTime=$buildTime
 """)
@@ -144,6 +132,7 @@ tasks.jar {
     enabled = false
 }
 
+// Jar contents are governed by the runtimeClasspath excludes above — no path lists needed.
 tasks.shadowJar {
     archiveBaseName.set("smali-lsp")
     archiveClassifier.set("")
@@ -153,40 +142,46 @@ tasks.shadowJar {
         attributes["Main-Class"] = "xyz.surendrajat.smalilsp.MainKt"
     }
 
-    // --- Exclude build-time-only ANTLR4 tool classes ---
-    // antlr("org.antlr:antlr4:4.13.1") leaks into runtimeClasspath via the ANTLR plugin.
-    // Only antlr4-runtime (org/antlr/v4/runtime/**) is needed at runtime.
-    // The tool packages below are used only during grammar code generation at build time.
-    exclude("org/antlr/v4/Tool*.class")  // top-level Tool class
-    exclude("org/antlr/v4/tool/**")
-    exclude("org/antlr/v4/codegen/**")
-    exclude("org/antlr/v4/analysis/**")
-    exclude("org/antlr/v4/automata/**")
-    exclude("org/antlr/v4/gui/**")
-    exclude("org/antlr/v4/semantics/**")
-    exclude("org/antlr/v4/parse/**")
-    exclude("org/antlr/v4/misc/**")     // tool misc (runtime misc lives under org/antlr/v4/runtime/misc)
-
-    // ANTLR3 runtime — transitive dep of the full antlr4 tool, not used at runtime
-    exclude("org/antlr/runtime/**")
-
-    // StringTemplate 4 — only used by ANTLR4 code generation, not at runtime
-    exclude("org/stringtemplate/**")
-
-    // Tree layout — only for ANTLR4 GUI visualization
-    exclude("org/abego/**")
-
-    // ICU4J — only used by ANTLR4 tool for unicode property analysis during grammar compilation
-    exclude("com/ibm/**")
-
-    // --- Exclude Ktor HTTP/WebSocket transport ---
-    // The MCP Kotlin SDK includes Ktor for HTTP+SSE transport.
-    // We only use StdioServerTransport. Ktor classes are never loaded on the stdio path
-    // (class loading is lazy; KtorServerKt extension functions are never called).
-    exclude("io/ktor/**")
-    exclude("com/typesafe/**")  // Typesafe Config, pulled in by Ktor
+    // Build metadata the dependencies ship and nothing reads at runtime
+    exclude("META-INF/maven/**", "META-INF/proguard/**", "META-INF/com.android.tools/**", "META-INF/*.version", "META-INF/**/verification.properties")
+    // logback's servlet hook: there is no servlet container here
+    exclude("ch/qos/logback/classic/servlet/**", "META-INF/services/jakarta.servlet.ServletContainerInitializer")
 }
 
-kotlin {
-    jvmToolchain(17)
+// Live testing in APKLab: copies the fat jar to ~/.apklab/smali-lsp-dev.jar (or -PapklabDir=<dir>).
+// Point `apklab.smaliLspPath` at that file once; reload the VS Code window after each install.
+tasks.register<Copy>("installApklab") {
+    group = "distribution"
+    description = "Copies the shadow jar to ~/.apklab/smali-lsp-dev.jar for APKLab to launch"
+    from(tasks.shadowJar.flatMap { it.archiveFile })
+    into(providers.gradleProperty("apklabDir").orElse(providers.systemProperty("user.home").map { "$it/.apklab" }))
+    rename { "smali-lsp-dev.jar" }
+}
+
+// Regenerates src/main/resources/android-public.txt (android.R names) from a decoded framework:
+//   apktool d --no-src -o fw ~/Library/apktool/framework/1.apk
+//   ./gradlew generateAndroidPublic -PframeworkPublicXml=fw/res/values/public.xml -PframeworkLabel="framework-res.apk bundled with apktool 3.0.2 (Android 16)"
+tasks.register("generateAndroidPublic") {
+    group = "build setup"
+    description = "Writes src/main/resources/android-public.txt from a framework public.xml"
+    val input = providers.gradleProperty("frameworkPublicXml")
+    val label = providers.gradleProperty("frameworkLabel").orElse("the Android framework")
+    val output = layout.projectDirectory.file("src/main/resources/android-public.txt")
+    doLast {
+        val xml = File(input.orNull ?: throw GradleException("pass -PframeworkPublicXml=<decoded framework>/res/values/public.xml"))
+        val entry = Regex("""<public type="([a-z]+)" name="([^"\s]+)" id="0x([0-9a-f]{8})"""")
+        val entries = xml.readLines().mapNotNull { line -> entry.find(line)?.destructured?.let { (type, name, id) -> Triple(id.toLong(16).toInt(), type, name) } }.sortedBy { it.first }
+        if (entries.isEmpty() || entries.any { it.first ushr 24 != 0x01 }) throw GradleException("$xml is not a framework public.xml")
+        val out = StringBuilder()
+        out.append("# Android framework public resource ids (package 0x01): ${entries.size} entries from the public.xml of the\n")
+        out.append("# ${label.get()}; AOSP, Apache License 2.0.\n")
+        out.append("# Regenerate with ./gradlew generateAndroidPublic (see build.gradle.kts). Sections: [type-hex type]; lines: entry-hex name.\n")
+        var section = -1
+        for ((id, type, name) in entries) {
+            val typeId = (id ushr 16) and 0xff
+            if (typeId != section) { out.append("[%02x %s]\n".format(typeId, type)); section = typeId }
+            out.append("%04x %s\n".format(id and 0xffff, name))
+        }
+        output.asFile.writeText(out.toString())
+    }
 }

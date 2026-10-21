@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.0.0] - 2026-10-19
+
+### Breaking
+
+- `--verbose` raises the log level to INFO on stderr instead of enabling file logging; `--log-file <path>` writes a file; nothing is written to the working directory
+- Exit status 1 when the client exits without a shutdown request
+- The opcode and registers of an instruction are no longer navigation targets; only the owner, member and type tokens are
+- MCP: `smali_find_references` and `smali_list_package` return at most `max_results` (default 500) with a `total`; an unknown tool is a JSON-RPC error
+
+### Added
+
+- Register hover and document highlight: which parameter or local a register is, every use in the method with writes apart from reads
+- Frame hover on `.registers`/`.locals`; method hovers name the register each parameter arrives in
+- Assembler checks for hand edits: undeclared or unaddressable registers, literals that do not fit, a misplaced `move-result`
+- Resource ids: hover, definition and inlay hints for `0x7f…` literals from the project's `res/values`, with their values; `android.R` ids named from a bundled framework table
+- Inlay hints with the decimal value of other hex literals
+- References and hover for string literals
+- Code lens on the class line: references, subclass and implementation counts
+- Implementations, document highlight and folding ranges
+- Diagnostics for undefined and duplicate labels
+- Completion of inherited members, ranked class names; hierarchies from any reference
+- Workspace folders added or removed during the session
+- MCP: `smali_read_method` (resource ids annotated) and `smali_list_package`; arguments are validated
+
+### Changed
+
+- A hand-written parser replaces the ANTLR grammar: the same model byte for byte on 98,686 fixture files, 3.6–4.6× faster, cold start about twice as fast, no input can overflow the stack
+- Memory: 178 MB of heap after indexing ProtonMail and 659 MB for a 76 K-file app (from 288 MB and 1.05 GB); idle heap is returned to the OS
+- Undefined-class warnings only for classes in packages the workspace defines
+- One writer thread applies every edit; requests wait for the edits sent before them; cancelled requests stop
+- Definitions point at the name token; references follow the member family (overrides, calls through subclasses)
+- Toolchain: Gradle 9.8.1, Kotlin 2.4.21, lsp4j 1.0.0, MCP Kotlin SDK 0.15.0; any JDK 17+ builds the project
+
+### Fixed
+
+- Label operations scoped to the containing method
+- Rename rejected for SDK and unindexed members; arrays of workspace classes no longer flagged
+- Ghost class evicted when a watched file's class is renamed; percent-encoded URIs are the same file; a watcher is registered for `.smali` files
+- Members used through a subclass, fields inherited from interfaces and calls through subtypes resolve; implementations of `Object` are not every class
+- The parser accepts every form baksmali writes: `synchronized`, debug-info `.param`/`.local`, digit-leading names, byte and short suffixes, `invoke-custom`, `invoke-polymorphic`, method handles
+- The server exits when the client closes the connection without `exit`, and MCP mode when its input ends; neither lingered before
+- Indexing survives a silent client, a bad file and a symlink loop; MCP stdout no longer corrupted by a logging banner
+- A removed workspace folder drops its resources with its files
+
+### Internal
+
+- Real-APK invariants, stdio drives of both binaries, an AST fingerprint and fuzz corpora gate every change
+- Gradle configuration cache on; jacoco removed; CI test jobs no longer build the jar first
+
 ## [1.5.0] - 2026-04-21
 
 ### Changed

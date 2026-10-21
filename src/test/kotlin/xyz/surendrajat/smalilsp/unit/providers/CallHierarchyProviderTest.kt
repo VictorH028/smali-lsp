@@ -217,6 +217,30 @@ class CallHierarchyProviderTest {
     }
 
     @Test
+    fun `incoming calls include calls through subclasses and on the overridden supertype`() {
+        indexContent("file:///test/Base.smali", ".class public Lcom/example/Base;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 1\n    return-void\n.end method")
+        indexContent("file:///test/Derived.smali", ".class public Lcom/example/Derived;\n.super Lcom/example/Base;\n.method public run()V\n    .registers 1\n    return-void\n.end method")
+        indexContent("file:///test/Users.smali", """
+            .class public Lcom/example/Users;
+            .super Ljava/lang/Object;
+            .method public viaDerived()V
+                .registers 1
+                invoke-virtual {p0}, Lcom/example/Derived;->run()V
+                return-void
+            .end method
+            .method public viaBase()V
+                .registers 1
+                invoke-virtual {p0}, Lcom/example/Base;->run()V
+                return-void
+            .end method
+        """.trimIndent())
+        val onBaseRun = provider.prepare("file:///test/Base.smali", Position(3, 4)).single()
+        assertEquals(setOf("viaDerived()V", "viaBase()V"), provider.incomingCalls(onBaseRun).map { it.from.name }.toSet())
+        val onDerivedRun = provider.prepare("file:///test/Derived.smali", Position(3, 4)).single()
+        assertEquals(setOf("viaDerived()V", "viaBase()V"), provider.incomingCalls(onDerivedRun).map { it.from.name }.toSet(), "a call on Base may dispatch to Derived.run")
+    }
+
+    @Test
     fun `no callers returns empty list`() {
         val content = """
             .class public Lcom/example/Isolated;
@@ -238,5 +262,16 @@ class CallHierarchyProviderTest {
 
         val incoming = provider.incomingCalls(items[0])
         assertTrue(incoming.isEmpty())
+    }
+
+    @Test
+    fun `prepare on a call site is the called method`() {
+        indexContent("file:///test/Target.smali", ".class public Lcom/example/Target;\n.super Ljava/lang/Object;\n.method public doWork()V\n    .registers 1\n    return-void\n.end method")
+        val caller = ".class public Lcom/example/Caller;\n.super Ljava/lang/Object;\n.method public go()V\n    .registers 1\n    invoke-virtual {p0}, Lcom/example/Target;->doWork()V\n    return-void\n.end method"
+        indexContent("file:///test/Caller.smali", caller)
+        val item = provider.prepare("file:///test/Caller.smali", Position(4, caller.lines()[4].indexOf("doWork") + 2)).single()
+        assertEquals("doWork()V", item.name)
+        assertEquals("Lcom/example/Target;", item.detail)
+        assertEquals("file:///test/Target.smali", item.uri)
     }
 }

@@ -23,9 +23,11 @@ apk*
 !DESIGN.md
 *.sh
 *.txt
+!src/main/resources/android-public.txt
 !.github/
 docs
 *.py
 test-*
 *.code-workspace
 *.jar
+!gradle/wrapper/gradle-wrapper.jar

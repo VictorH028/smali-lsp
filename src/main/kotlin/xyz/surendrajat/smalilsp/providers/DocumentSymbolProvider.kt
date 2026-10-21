@@ -2,18 +2,9 @@ package xyz.surendrajat.smalilsp.providers
 
 import org.eclipse.lsp4j.*
 import xyz.surendrajat.smalilsp.core.SmaliFile
-import xyz.surendrajat.smalilsp.resolver.TypeResolver
+import xyz.surendrajat.smalilsp.util.Types
 
-/**
- * Provides document outline/symbols in IDEs.
- * 
- * Shows hierarchical view:
- * - Class
- *   - Methods
- *   - Fields
- * 
- * Enables quick navigation in Explorer sidebar.
- */
+/** Document outline: the class with its methods and fields, name tokens as selection ranges. */
 class DocumentSymbolProvider {
     
     /**
@@ -23,10 +14,10 @@ class DocumentSymbolProvider {
         val classSymbol = DocumentSymbol()
         
         // Class symbol
-        classSymbol.name = TypeResolver.toReadableName(file.classDefinition.name)
+        classSymbol.name = Types.readableName(file.classDefinition.name)
         classSymbol.kind = SymbolKind.Class
         classSymbol.range = file.classDefinition.range
-        classSymbol.selectionRange = file.classDefinition.range
+        classSymbol.selectionRange = file.classDefinition.nameSpan.toRange()
         
         // Add detail (modifiers, superclass)
         val details = mutableListOf<String>()
@@ -34,7 +25,7 @@ class DocumentSymbolProvider {
             details.add(file.classDefinition.modifiers.joinToString(" "))
         }
         file.classDefinition.superClass?.let {
-            details.add("extends ${TypeResolver.toReadableName(it)}")
+            details.add("extends ${Types.readableName(it)}")
         }
         if (details.isNotEmpty()) {
             classSymbol.detail = details.joinToString(", ")
@@ -53,7 +44,7 @@ class DocumentSymbolProvider {
                 SymbolKind.Method
             }
             methodSymbol.range = method.range
-            methodSymbol.selectionRange = method.range
+            methodSymbol.selectionRange = method.nameSpan.toRange()
             
             // Detail: signature
             methodSymbol.detail = method.descriptor
@@ -67,15 +58,10 @@ class DocumentSymbolProvider {
             fieldSymbol.name = field.name
             fieldSymbol.kind = SymbolKind.Field
             fieldSymbol.range = field.range
-            fieldSymbol.selectionRange = field.range
+            fieldSymbol.selectionRange = field.nameSpan.toRange()
             
-            // Detail: type
-            val typeClass = TypeResolver.extractClassName(field.type)
-            fieldSymbol.detail = if (typeClass != null) {
-                TypeResolver.toReadableName(typeClass)
-            } else {
-                field.type
-            }
+            // Detail: the type as Java would write it (`int`, `byte[]`, `java.lang.String[]`)
+            fieldSymbol.detail = Types.readableName(field.type)
             
             children.add(fieldSymbol)
         }

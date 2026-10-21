@@ -1,697 +1,527 @@
-# Smali-LSP Architecture
+# smali-lsp Architecture
 
-Deep-dive into how smali-lsp works, from startup to every LSP feature,
-with memory/CPU estimates and design rationale.
+How smali-lsp works, from startup to each LSP feature, with the measured costs and the
+reasons behind the main design choices. Numbers in this document come from three apktool
+projects: Mastodon v2.13.4 (2,517 files), ProtonMail 7.11.5 (19,637 files) and a 76,532-file
+production app, measured on a 12-core Apple Silicon laptop with JDK 21.
 
-**Codebase**: 26 Kotlin source files (~8,900 lines) + 2 ANTLR grammars (1,595 lines) + 95 test files (~28,000 lines).
-
----
-
-## 1. Startup & Initialization
-
-### 1.1 Entry Point (`Main.kt`)
-
-```
-main() → parseArgs → startLsp() | startMcp()
-```
-
-- **LSP mode**: Creates `SmaliLanguageServer`, wires it to stdin/stdout via LSP4J's
-  `Launcher`, calls `launcher.startListening()`. The JVM blocks on this call.
-- **MCP mode**: Creates `McpMode`, calls `run()` which sets up a JSON-RPC server
-  over stdio using the MCP Kotlin SDK.
-
-### 1.2 LSP Handshake
-
-| Step | Who | What | Time |
-|------|-----|------|------|
-| `initialize` | Client→Server | Server returns capabilities, stores workspace folders | <1ms |
-| `initialized` | Client→Server | Server launches `indexWorkspace()` on `CompletableFuture.runAsync` | <1ms |
-| Indexing | Server (background) | `WorkspaceScanner.scanDirectory()` — parallel parse & index | 30s for 119K files |
-
-**Design decision: Deferred indexing.**
-Indexing runs in a background thread after `initialized`, not during `initialize`.
-This lets the client display the editor immediately while indexing runs.
-Progress is reported via LSP `WorkDoneProgress` notifications.
-
-**Trade-off**: LSP requests during indexing return empty/partial results.
-Alternative: Queue requests until indexing completes. We chose the simpler approach
-because most users open a file (triggering `didOpen` which indexes that file)
-before making queries.
+**Codebase**: 30 Kotlin source files (~7,400 lines), no grammar: the front end is a
+hand-written parser; 97 test files (~21,000 lines).
 
 ---
 
-## 2. Parsing Pipeline
+## 1. Startup
 
-### 2.1 ANTLR Grammar (SmaliLexer.g4 + SmaliParser.g4)
-
-**Coverage**: 206/208 Dalvik instructions (99%), all 29 directives.
-
-| Component | Tokens/Rules | Status |
-|-----------|-------------|--------|
-| Move/return/const | 24 instructions | Complete |
-| Field access (iget/iput/sget/sput) | 28 instructions | Complete |
-| Invoke (virtual/super/direct/static/interface) | 10 + 10 range variants | Complete |
-| Arithmetic (binary/2addr/literal) | 70 instructions | Complete |
-| Type ops (new-instance/check-cast/etc.) | 7 instructions | Complete |
-| Control flow (goto/if-*/switch) | 12 instructions | Complete |
-| invoke-polymorphic, invoke-custom | 4 instructions | **Stub only** (no operands) |
-
-**Known gap**: `invoke-polymorphic` and `invoke-custom` rules are stubs — they
-accept the opcode token but not operands. Files using these instructions (rare, API 26+)
-will produce parse errors on those lines. These instructions are almost never seen in
-decompiled APKs. The rest of the file still parses correctly due to ANTLR error recovery.
-
-**Design decision: SLL-only parsing.**
-We use ANTLR's SLL prediction mode with no LL fallback. Verified: 0 fallbacks on 88,688
-real-world smali files. SLL is 4-10x faster than LL. If a file hypothetically needed LL,
-it would silently produce a parse error.
-
-### 2.2 SmaliParser.kt
-
-Wraps ANTLR parsing:
+### 1.1 Entry point (`Main.kt`, `Cli.kt`, `Logging.kt`, `SmaliLanguageServer.kt`)
 
 ```
-content → BOM strip → blank check → CharStream → Lexer → TokenStream → Parser → ParseTree
+main() → parseArgs → configureLogging → startLsp() | McpMode().run()
 ```
 
-- **BOM handling**: Strips UTF-8 BOM (`\uFEFF`) before parsing.
-- **Fast-reject**: If content doesn't contain `.class`, returns null immediately
-  (saves ANTLR setup for non-smali files).
-- **Error collection**: Custom `ANTLRErrorListener` collects `SyntaxError` objects
-  (1-based line, column, message). Exception-path errors use `line=1` so downstream
-  `line-1` conversion yields `0`, not `-1`.
+`java -jar smali-lsp.jar <lsp|mcp> [--verbose] [--log-file <path>]`
 
-| Step | CPU cost | Memory |
-|------|----------|--------|
-| BOM strip | O(1) | None (substring or same reference) |
-| CharStream creation | O(n) | Copy of input (~1x file size) |
-| Lexer tokenization | O(n) | All tokens buffered (~2-3x file size) |
-| Parser (SLL) | O(n) | Parse tree (~3-5x file size) |
-| **Total per file** | **~5ms for avg smali file** | **~10x file size peak** |
+`Main.kt` holds `main()`; `Cli.kt` the options, the usage text and the version resource;
+`Logging.kt` the logback setup; `SmaliLanguageServer.kt` the server.
 
-### 2.3 ASTBuilder.kt
+- **lsp**: `SmaliLanguageServer` wired to stdin/stdout through LSP4J's `Launcher`; the JVM
+  blocks in `startListening()`.
+- **mcp**: `McpMode` serves the MCP protocol over stdio with the MCP Kotlin SDK.
+- **Logging**: stdout carries the protocol, so everything the server says goes to stderr.
+  WARN and above by default, INFO with `--verbose`, and `--log-file` additionally writes to
+  a file. LSP4J logs through `java.util.logging`, which `logging.properties` points at stderr.
 
-Walks the ANTLR parse tree (listener pattern) and builds our clean data model:
+### 1.2 LSP handshake
 
-```
-ParseTree → ASTBuilder (listener walk) → SmaliFile
-```
+| Step | What happens |
+|------|--------------|
+| `initialize` | Capabilities are answered at once. Workspace folders are taken from `workspaceFolders`, else `rootUri`, else `rootPath`. |
+| `initialized` | A `**/*.smali` file watcher is registered when the client supports dynamic registration. Indexing starts in the background, with `window/workDoneProgress` only for clients that advertise it; a client that rejects the progress token still gets indexed. |
+| `shutdown` / `exit` | `exit` returns 0 after a `shutdown` request and 1 otherwise, as the protocol asks; a client that closes the connection without `exit` gets the same statuses, so a dead editor leaves no server behind. MCP mode exits when its input ends (the SDK's transport stops reading at EOF but never closes the session). |
 
-Extracts:
-- **ClassDefinition**: name, modifiers, super, interfaces, ranges
-- **MethodDefinition**: name, descriptor, parameters, return type, modifiers, range
-- **FieldDefinition**: name, type, modifiers, range
-- **Instructions**: Only navigation-relevant instructions (invoke, field access, type ops,
-  jump, const-string). Arithmetic/move/return instructions are NOT captured — they have
-  no cross-file navigation value.
-- **Labels**: name → range mapping for jump target navigation
-
-**Design decision: Selective instruction capture.**
-We only build AST nodes for instructions that reference symbols (classes, methods, fields,
-labels, strings). This covers ~40% of instruction types but captures 100% of navigable
-references. Capturing all 208 instruction types would increase memory ~2.5x with zero
-navigation benefit.
-
-| Step | CPU cost | Memory |
-|------|----------|--------|
-| Tree walk | O(nodes) | SmaliFile object (~1-5KB per class) |
-| String interning | O(1) per string | StringPool bounded at 500K entries |
-
-### 2.4 StringPool.kt
-
-Bounded string deduplication pool using ConcurrentHashMap.
-
-**Why**: Class names like `Ljava/lang/Object;` appear in thousands of files.
-Without interning, 119K files would store 119K copies of common strings.
-
-**Bound**: 500K entries (~20MB). Normal workspaces use ~50K entries.
-If the pool fills, new strings pass through without interning (safety valve).
-
-**Pre-interned**: Common type descriptors (`V`, `Z`, `I`, `J`, `F`, `D`),
-modifiers (`public`, `private`, `static`, `final`), and `Ljava/lang/Object;`.
+Requests arriving during indexing are answered from whatever is indexed so far. Semantic
+diagnostics (unresolved classes) are suppressed until indexing completes, then re-published
+for every open file, so a half-built index never floods a file with false warnings.
 
 ---
 
-## 3. Indexing (`WorkspaceIndex.kt`)
+## 2. Parsing
 
-The central data store. 701 lines, 16 concurrent maps + 2 caches.
+### 2.1 The front end (`SmaliTextParser.kt`, `InstructionShapes.kt`)
 
-### 3.1 Data Structures
+A hand-written lexer and statement parser, 0.04 ms per file single-threaded. Smali is a list
+of statements, one per line in everything baksmali writes, so the parser reads a statement at
+a time: a directive, a `:label`, or an instruction whose operands are fixed by its opcode.
+`InstructionShapes` maps each of the 224 opcodes to one of 26 operand shapes (`R_LITERAL`,
+`LIST_METHOD`, `RR_FIELD`, …), a table derived mechanically from the grammar this parser
+replaced, so it accepts exactly what the grammar accepted: every directive, `invoke-custom`,
+`invoke-polymorphic`, `const-method-handle`, `const-method-type`, typed literal suffixes, the
+debug forms of `.param`/`.local`, member names spelled like opcodes, keywords or digits.
 
-| Map | Key | Value | Purpose | Lookup |
-|-----|-----|-------|---------|--------|
-| `files` | `Lcom/Foo;` | `SmaliFile` | Full AST per class | O(1) |
-| `classToUri` | `Lcom/Foo;` | `file:///path` | Class → file URI | O(1) |
-| `uriToClass` | `file:///path` | `Lcom/Foo;` | URI → class (reverse) | O(1) |
-| `methodLocations` | `Lcom/Foo;->bar()V` | `Set<Location>` | Method declaration sites | O(1) |
-| `fieldLocations` | `Lcom/Foo;->baz` | `Location` | Field declaration site | O(1) |
-| `classUsages` | `Lcom/Foo;` | `Set<URI>` | Files that reference class | O(1) |
-| `subclassIndex` | `Lcom/Foo;` | `Set<className>` | Direct subclasses | O(1) |
-| `implementorsIndex` | `Lcom/Foo;` | `Set<className>` | Direct implementors | O(1) |
-| `methodUsages` | `Lcom/Foo;->bar()V` | `Set<Location>` | All call sites | O(1) |
-| `fieldUsages` | `Lcom/Foo;->baz` | `Set<Location>` | All access sites | O(1) |
-| `classRefLocations` | `Lcom/Foo;` | `Set<Location>` | All reference locations | O(1) |
-| `simpleNameIndex` | `Foo` | `Set<className>` | Simple name → full names | O(1) |
-| `stringIndex` | `"hello"` | `Set<Location>` | String literal locations | O(1) (lazy) |
-| `documentContents` | URI | content string | Open editor buffers | O(1) |
-| `documentLines` | URI | `List<String>` | Cached split lines | O(1) |
+Whitespace, including newlines, separates tokens the way the assembler's lexer treats it, so a
+hand-written statement may still wrap. Tokens are spans into the source, never objects: the
+lexer advances a cursor and leaves the current token's kind and bounds in fields, and the
+parser slices names and descriptors straight out of the text and interns them. Positions are
+UTF-16 string indices, so every LSP column is exact, including lines with astral characters.
 
-### 3.2 Memory Estimate (119K classes, Truecaller APK)
+The parser has no unbounded recursion: array dimensions are a loop, and annotations nested
+deeper than 64 levels are a syntax error, so no input can overflow the stack; 57,000 randomly
+damaged fixture files (inserted tokens, deletions, truncations, 5,000-bracket runs, 300-deep
+nests) parse without an exception on a 256 KB stack (`test-tmp/probes/Fuzz.java`).
 
-**Per-class breakdown** (average: 2 methods, 1 field, 5 instructions):
+**Errors and recovery.** A syntax error is reported on the offending token, with the token's
+length, and parsing resumes at the next line (at the offending token itself when it begins a
+line, since the statement before it ended early). One bad line costs one diagnostic, not the
+rest of the file; a method cut off by the next declaration or by the end of the file is
+closed there and kept. On 10,500 fixture files broken in nine ways (unknown opcode, missing
+`;`, deleted `.end method`, garbage line, field without a type, missing brace, unterminated
+string, missing comma, unknown directive) the parser agreed with the grammar on every case:
+error or not, the first error's line, and the number of methods recovered.
 
-| Component | Bytes/class | Notes |
-|-----------|-------------|-------|
-| SmaliFile object | ~3,000 | Class + method + field defs + instruction list |
-| files entry (CHM) | ~100 | Key + value ref + CHM node overhead |
-| classToUri + uriToClass | ~200 | Two entries, key + value strings |
-| methodLocations | ~400 | 2 methods × (signature + Location + CHM overhead) |
-| fieldLocations | ~200 | 1 field × (signature + Location) |
-| classUsages | ~80 | 1 super + 0-1 interfaces |
-| subclassIndex + implementorsIndex | ~80 | 1 entry each (shared keys) |
-| methodUsages (as target) | ~0 | Only populated when OTHER files call this class |
-| fieldUsages (as target) | ~0 | Only populated when OTHER files access this class |
-| classRefLocations | ~200 | References from instructions in this file |
-| simpleNameIndex | ~60 | Simple name string + set entry |
-| **Total per class** | **~4,300** | |
+**Why not the grammar.** The ANTLR lexer allocated a token object for each of 16 million
+tokens and the parser a tree it then threw away: 29 to 31 times the source size in garbage,
+45 MB/s. The hand-written front end runs at 165–170 MB/s with 6 to 7 times the source
+allocated, 3.6× faster on ProtonMail and 4.6× on the large app, and the scan is no longer
+GC-bound. The swap was verified by the per-file AST fingerprint over all 98,686 fixture files
+(byte-identical to the grammar's output) and by the parser tests that pin every accepted
+spelling.
 
-**Aggregate for 119K classes:**
+`ParserCorpusTest` still parses every fixture file and fails on any syntax error or on a
+file whose `.method`/`.field` count does not match the AST: 98,686 files, zero errors.
 
-| Component | Size | Notes |
-|-----------|------|-------|
-| SmaliFile ASTs | ~360 MB | 119K × 3KB average |
-| Forward indexes | ~35 MB | classToUri, uriToClass, method/fieldLocations |
-| Reverse indexes | ~80 MB | methodUsages, fieldUsages, classRefLocations |
-| Hierarchy indexes | ~10 MB | subclass, implementors, simpleNameIndex |
-| String index (lazy) | ~15 MB | Built on first string search |
-| ConcurrentHashMap overhead | ~40 MB | ~30% overhead per CHM |
-| StringPool | ~20 MB | 500K interned strings |
-| **Total heap** | **~560 MB** | |
-
-**Observed**: JVM reports ~700-900 MB heap for Truecaller (119K files). The gap is
-JVM object headers, alignment padding, ANTLR residual structures, and GC overhead.
-
-### 3.3 Indexing Performance (WorkspaceScanner.kt)
+### 2.2 `SmaliParser.kt`
 
 ```
-findSmaliFiles() → Channel<File> → N workers → parse + indexFile()
+content → BOM strip → ".class" fast reject → SmaliTextParser → SmaliFile + syntax errors
 ```
 
-**Worker pool model**: `maxOf(2, availableProcessors)` coroutines on `Dispatchers.Default`.
-Channel capacity: `workers × 4` (one batch ahead per worker for backpressure).
+Errors are collected as `SyntaxError(line, column, message, length)`, never thrown: a broken
+method still yields the class around it.
 
-| Phase | CPU | I/O | Time (119K files, M1 Mac) |
-|-------|-----|-----|---------------------------|
-| findSmaliFiles (walkTopDown) | Low | Sequential directory walk | ~2s |
-| File read (readText) | Low | Parallel, SSD-bound | ~5s |
-| ANTLR parse (SLL) | High | None | ~15s |
-| ASTBuilder walk | Medium | None | ~5s |
-| indexFile() | Medium | None | ~3s |
-| **Total** | | | **~30s** |
+### 2.3 What the model holds
 
-**Bottleneck**: ANTLR parsing is the dominant cost. The SLL prediction mode and
-CommonTokenStream buffering are CPU-bound. Improvements would require a faster parser
-(hand-written recursive descent would be ~3x faster but much harder to maintain).
+What is captured:
 
-### 3.4 Re-indexing (didChange)
+- **ClassDefinition**: name and its token span, modifiers, superclass and interfaces with the
+  spans of their type tokens.
+- **MethodDefinition**: name, descriptor, parameters, return type, modifiers, the full range,
+  the name and descriptor spans, label definitions, and `labelRefs`, every label reference in
+  the body (jumps, `.catch` blocks, switch tables, `fill-array-data`).
+- **FieldDefinition**: name, type, modifiers, range, name and type spans.
+- **Instructions** that name a symbol: invoke (incl. custom/polymorphic/method-handle), field
+  access, type operands (`new-instance`, `check-cast`, `instance-of`, `const-class`,
+  `new-array`, `filled-new-array`), jumps and `const-string`. Each member reference carries one
+  extra int, the column of its `Lowner;->name` target, from which owner, name and descriptor
+  spans are derived; nothing else is allocated per site.
+- **typeRefs**: class names inside annotations, `.catch`, `.local` and method prototypes,
+  recorded from the token stream while those directives are open.
 
-When the user edits a file, `didChange` triggers a re-parse and re-index:
+Arithmetic, move and return instructions are not captured: they reference registers only.
+Opcode documentation for them comes from the line text (see 5.3).
 
-```
-content → parseWithErrors() → indexFile() → publishDiagnostics()
-```
+Strings are interned through the index's `StringPool`, so a class name that occurs in
+thousands of files is one `String`; the pool is bounded (500 K entries) and per index.
 
-`indexFile()` calls `removeOldEntries(oldFile)` first, which cleans ALL secondary
-index maps (method/field locations, usages, hierarchy, classRefLocations, simpleNameIndex)
-before adding new entries. This prevents ghost references to renamed/deleted symbols.
+| | ProtonMail (19,637 files) | 76 K-file app |
+|---|---|---|
+| Single-thread parse, all files | 0.77 s (0.04 ms/file, 165 MB/s) | 3.8 s (170 MB/s) |
+| AST heap after GC | 116 MB (5.9 KB/file) | 388 MB |
 
-**Design decision: Full re-parse on every keystroke.**
-We use `TextDocumentSyncKind.Full` (entire document on each change, not incremental diffs).
-This is simpler and avoids complex incremental parsing. For typical smali files (<1000 lines),
-full re-parse takes <10ms — well within the LSP response budget.
+Interning the instruction strings took the ProtonMail AST from 470 MB to 293 MB for 2 to 5 %
+parse time; storing instruction and label ranges as four ints instead of LSP4J `Range`
+objects took it to 190 MB. The rest came from what a class histogram showed around the
+instructions, none of it visible through the API: declarations now keep their range and
+token spans as ints too and build `Range`/`Span` on demand (a `Range` is three objects); a
+member's modifiers are one immutable set per distinct combination (`StringPool.internModifiers`,
+a few dozen per workspace) instead of a `LinkedHashSet` with its table and entries; a
+method's labels sit in `LabelMap`, a sorted name array and an int array behind the `Map`
+interface, with the `LabelDefinition` built when one is asked for; label references, type
+references, parameters, directive blocks and the `.implements` tokens are `LabelRefList`,
+`TypeRefList`, `ParameterList`, `BlockList` and `RangeList`, arrays behind the `List`
+interface that build their element on access; and string literals up to 64 characters are
+pooled. Every value read through the getters is unchanged, which a per-file hash of the whole
+AST over the three fixtures (`Fingerprint3`) checks after each step. The instruction objects
+are now half of what is left; their line ints stay exact because the lexer skips newlines,
+so a hand-edited instruction may span lines.
 
-**Trade-off**: Large files (>10K lines, rare in smali) would take ~50ms. Incremental
-sync would reduce this to <5ms but adds significant complexity for minimal benefit.
+### 2.4 Symbol resolution: `SmaliFile.symbolAt`
 
-### 3.5 String Index (Lazy Rebuild)
-
-The string literal index is NOT built during initial indexing. It's deferred to
-the first `searchStrings()` or `findStringLocations()` call.
-
-**Why**: During parallel indexing, 119K files all contend on the string index CHM.
-String searches are rare (only used by the MCP `smali_search_strings` tool), so
-deferring the build eliminates a hot contention point.
-
-**Implementation**: Double-checked locking with `@Volatile` dirty flag:
-1. `indexFile()` sets `stringIndexDirty = true` (volatile write)
-2. `searchStrings()` checks dirty flag (volatile read, fast path)
-3. If dirty: acquires lock, rebuilds from all `files.values`, sets dirty=false
-
-**Correctness**: The volatile write to `stringIndexDirty` creates a happens-before
-relationship per JMM, ensuring the new `stringIndex` HashMap reference is visible
-to subsequent readers. The HashMap itself is safe because it's replaced atomically
-(not mutated in place after publication).
+Providers never read line text to find out what the caret is on. `symbolAt(position)` walks
+the spans and answers with a `Symbol`: `ClassDecl`, `MethodDecl`, `FieldDecl`, `ClassRef` (owner,
+`.super`, `.implements`, a type in a descriptor or field type, a type operand, a directive
+reference; arrays resolve to their element class), `MethodRef`, `FieldRef`, `Primitive`,
+`LabelDecl`, `LabelRef`, or `OnInstruction` when the caret is on an opcode, a register or a
+string. `OnInstruction` navigates nowhere (an editor underlines whatever answers go-to-definition,
+and an opcode is not a link); hover reads the opcode or register from the line, and references on
+the string literal are every load of the same value. A caret right after a token still counts as
+that token, as editors expect.
 
 ---
 
-## 4. LSP Features
+## 3. The index (`WorkspaceIndex.kt`)
 
-### 4.1 Go-to-Definition (`DefinitionProvider.kt`)
+### 3.1 Storage
 
-```
-position → findNodeAt() → dispatch by NodeType
-```
+| Structure | Key | Value |
+|-----------|-----|-------|
+| `filesByUri` | canonical `file:///…` URI | `SmaliFile` |
+| `uriByClass` | `Lcom/Foo;` | canonical URI of its definition (last indexed wins) |
+| `subclassIndex`, `implementorsIndex` | parent / interface | direct subclasses / implementors |
+| `simpleNameIndex` | `Outer$Inner` | full class names |
+| `methodUsages` | `Lcom/Foo;->bar(I)V` | `UsageList` of call sites |
+| `fieldUsages` | `Lcom/Foo;->baz:I` | `UsageList` of access sites |
+| `classRefs` | `Lcom/Foo;` | `UsageList` of owner, operand, field-type and descriptor-type tokens |
+| `stringIndex` (lazy) | literal value | `UsageList` of `const-string` sites |
 
-| Cursor on | Navigation target | Complexity |
-|-----------|-------------------|------------|
-| CLASS node | Superclass definition | O(1) index lookup |
-| METHOD declaration line | Class refs in signature (params, return type) | O(params) string scan |
-| METHOD body (directive) | Class refs in .catch/.annotation/.implements | O(line) regex |
-| FIELD declaration | Class ref in field type | O(1) |
-| INSTRUCTION (invoke) | Method/class/field definition via InstructionSymbolExtractor | O(1) index + O(hierarchy) for inherited methods |
-| INSTRUCTION (jump) | Label definition in same file | O(methods) scan |
-| LABEL | Self (already at definition) | O(1) |
+Files are keyed by canonical URI: the scanner's and the client's forms of one file are one
+entry, and a file whose class name changes on edit replaces its old entry instead of leaving a
+ghost class. Field keys include the type, since DEX allows two fields of one name. Declarations
+have no table: `findMethod`/`findField` look in the class's `SmaliFile` and walk up the
+hierarchy, and return the name-token location.
 
-**Hierarchy traversal**: `findMethod()` and `findField()` walk the class hierarchy
-(super → super → ...) with visited-set cycle protection. For deep hierarchies (10+ levels),
-this is O(depth) with one CHM lookup per level.
+### 3.2 `UsageList` and generations
 
-### 4.2 Find References (`ReferenceProvider.kt`)
+A usage list is a packed `IntArray`, five ints per site: file id, the file's generation when
+the site was added, line, start column, end column. Every file has an id and a generation.
+Re-indexing a file bumps its generation, which retires all of its earlier entries in O(1)
+instead of walking every symbol the file touched. Readers skip retired entries; a compaction
+drops them once they make up a quarter of all entries (and at least 100 K), amortized O(1).
 
-Uses reverse indexes for O(1) lookups:
+Why: the previous `ConcurrentHashMap<String, Set<Location>>` tables cost ~130 bytes per site
+and removal scanned every usage set the file touched, so a keystroke in a file that calls
+`Object.<init>` walked the 76 K-entry set for that symbol.
 
-| Reference type | Index used | Complexity |
-|----------------|-----------|------------|
-| Class references | `classRefLocations[className]` | O(1) |
-| Method call sites | `methodUsages[signature]` | O(1) |
-| Field access sites | `fieldUsages[signature]` | O(1) |
-| Polymorphic (include subclass overrides) | `getAllSubclasses()` + per-class lookup | O(subclasses) |
+| | ProtonMail | 76 K-file app |
+|---|---|---|
+| Index heap after GC | 371 MB → 90 MB → **62 MB** | 1,331 MB → 328 MB → **271 MB** |
+| AST + index | 841 MB → 281 MB → **178 MB** | 2,850 MB → 1,027 MB → **659 MB** |
+| Index build, single thread | 0.95 s → 0.52 s | 3.4 s → 1.4 s |
+| didChange (re-parse + re-index one file), p95 | 58 ms → 0.6 ms → **0.2 ms** | 340 ms → 0.8 ms → **0.6 ms** |
+| didChange, worst of 200 files | 0.9 s → 18 ms | 7.5 s → 9 ms |
 
-**Before reverse indexes**: Find References did O(n) full scan of all files,
-checking every instruction. For 119K files this took ~5 seconds per query.
-**After**: O(1) lookup, <1ms per query.
+The second step: the method and field tables are keyed by `MemberKey` (owner, name,
+descriptor, each the AST's pooled string) instead of a concatenated `Lowner;->name(desc)`
+string per symbol, which was 67 MB of keys on the large app, and the usage lists are trimmed
+to their exact size once the initial scan ends (`trimUsages`), dropping the 30 % the doubling
+growth leaves; they grow by half afterwards.
 
-### 4.3 Hover (`HoverProvider.kt`)
+### 4.1 Giving memory back
 
-```
-position → findNodeAt() → dispatch by NodeType → Markdown content
-```
+The live heap is not what the OS shows. G1 keeps up to 70 % of the heap free after a
+collection and never uncommits, so a server whose live data was 300 MB sat at 1.2 GB of
+committed heap after the scan, and 3 GB on the large app. `JvmTuning` sets the two free-ratio
+flags to 10..30 % through the HotSpot diagnostic bean at startup (they are manageable, so no
+launch flag is needed) and arms G1's periodic collection: 30 s without a collection triggers a
+concurrent cycle, after which G1 uncommits down to the ratio. A cycle marks the whole live
+heap (about 0.4 s of CPU per gigabyte), so it is not left running: every request or
+notification re-arms it, and a cycle that followed no activity disarms it. Measured on the
+real server over stdio: committed heap 1,256 → 400 MB on ProtonMail and 2,992 → 1,556 MB on
+the large app, a minute after indexing, with the scan time unchanged and a remark pause of 2
+to 4 ms; a JVM without these flags is left as it is.
 
-| Cursor on | Hover content |
-|-----------|--------------|
-| Class | Name, modifiers, super, interfaces, method/field counts |
-| Method declaration | Signature, readable types, parameter names |
-| Method body (opcode) | DalvikOpcodeDatabase: format, description, operands |
-| Method body (directive) | Class info for .catch/.annotation targets |
-| Field | Name, type, modifiers |
-| Label | Label name, reference count, label type (cond/goto/try/catch) |
-| Instruction symbol | Class/method/field info at cursor position |
+### 3.3 Scanning (`WorkspaceScanner.kt`)
 
-**DalvikOpcodeDatabase**: 256 opcodes with format strings, descriptions, and operand
-info. Loaded once as a lazy val, cached for all subsequent hover requests.
+`maxOf(2, cores)` coroutine workers drain a bounded channel of files, each reading, parsing
+and indexing its file. The index is safe for concurrent `indexFile` calls: maps are concurrent,
+usage lists synchronize per symbol, generations are bumped under one lock. Through the real
+server on 12 cores, including file reads:
 
-### 4.4 Completion (`CompletionProvider.kt`)
+| | Mastodon | ProtonMail | 76 K-file app |
+|---|---|---|---|
+| Cold | 0.8 s | 1.6 s | 6 s |
 
-| Context | Completions |
-|---------|-------------|
-| `.super ` / `.implements ` | Class name completion from all indexed classes |
-| `L` prefix anywhere | Class name completion (fuzzy match on simple name) |
-| Instruction position | Opcode name completion with documentation |
+### 3.4 String literals
 
-**Class name completion** uses `getClassNames()` which returns
-`ConcurrentHashMap.KeySetView` — zero-copy iteration over the keys.
-For 119K classes, filtering by prefix takes ~5ms.
-
-**Design notes**:
-- Labels show full class path (e.g., `com/example/MyActivity`) to distinguish
-  obfuscated classes with identical simple names. Detail shows simple name.
-- Replace range includes the `L` prefix to avoid double-L insertion.
-- FilterText includes both path and simple name for flexible matching.
-
-### 4.5 Code Lens (`CodeLensProvider.kt`)
-
-Shows `N references` above each method and field definition.
-Uses **lazy resolution**: `provideCodeLenses()` returns unresolved lenses (no counting),
-`resolveCodeLens()` computes the count only when the lens scrolls into view.
-
-| Operation | Complexity |
-|-----------|-----------|
-| provideCodeLenses | O(methods + fields) per file |
-| resolveCodeLens (method) | O(1) via `methodUsages` reverse index |
-| resolveCodeLens (field) | O(1) via `fieldUsages` reverse index |
-
-### 4.6 Call Hierarchy (`CallHierarchyProvider.kt`)
-
-| Direction | Implementation | Complexity |
-|-----------|---------------|------------|
-| Incoming calls | `findMethodUsages()` → group by containing method | O(usages) |
-| Outgoing calls | Scan method's instructions for invoke instructions | O(instructions) |
-
-### 4.7 Type Hierarchy (`TypeHierarchyProvider.kt`)
-
-| Direction | Implementation | Complexity |
-|-----------|---------------|------------|
-| Supertypes | Read `superClass` + `interfaces` from ClassDefinition | O(1) |
-| Subtypes | `getDirectSubclasses()` + `getDirectImplementors()` | O(1) |
-
-Uses pre-built `subclassIndex` and `implementorsIndex` for O(1) subtypes lookup.
-Before these indexes, subtypes required O(n) scan of all classes.
-
-### 4.8 Rename (`RenameProvider.kt`)
-
-Renames symbols across the workspace with `prepareRename()` validation + `rename()` execution.
-
-| Rename target | What gets renamed | Complexity |
-|---------------|-------------------|------------|
-| Method (at declaration) | Declaration + all invoke call sites + subclass overrides | O(usages + subclasses) |
-| Method (at call site) | Same — resolves back to the declaring class | O(usages + subclasses) |
-| Field (at declaration) | Declaration + all iget/iput/sget/sput access sites | O(usages) |
-| Field (at access site) | Same — resolves back to the declaring class | O(usages) |
-| Label (at definition) | `:label` definition + all jump refs + .catch refs in same method | O(instructions in method) |
-| Label (at jump) | Same — resolves the label within the containing method | O(instructions in method) |
-
-**Blocked renames**:
-- `<init>` / `<clinit>`: Special methods, renaming would break JVM semantics.
-- Class names: Would require file rename + cross-file path rewriting (out of scope).
-
-**Polymorphic method rename**: When renaming `Base.run()`, all overrides in subclasses
-(`Child.run()`, `GrandChild.run()`) are also renamed, plus all call sites targeting any
-class in the hierarchy. Uses `getAllSubclasses()` BFS traversal.
-
-**Obfuscated name safety**: Field/method usages are keyed by `className->name` (fields)
-or `className->nameDescriptor` (methods). Renaming `Lcom/a/b;->d` only affects usages
-of that exact class+field pair — NOT `Lcom/x/y;->d`. This is safe even for single-char
-obfuscated names because the index key always includes the owning class.
-
-**Position finding**: Usage locations in the index store the entire instruction range.
-To rename precisely, the provider reads the actual line text and uses `String.indexOf()`
-after `->` to find the exact character offset of the name. This handles arbitrary
-whitespace/formatting in the instruction.
-
-### 4.9 Diagnostics (`DiagnosticProvider.kt`)
-
-Two categories:
-1. **Syntax errors**: From ANTLR parse errors (collected during parsing)
-2. **Semantic errors**: Undefined class references in `.super`, `.implements`,
-   field types, and instruction targets (only if class starts with `L`, not SDK)
-
-Published on:
-- `didOpen`: Always, even if file was already indexed from workspace scan
-- `didChange`: After re-parse
-
-### 4.10 Workspace Symbols (`WorkspaceSymbolProvider.kt`)
-
-Fuzzy search across all indexed symbols:
-- Classes, methods, fields
-- Scoring: exact > prefix > camelCase > contains > fuzzy
-- Limit: 500 results
+`const-string` values go into a usage table like members (value → sites), retired by the file's
+generation like everything else, so a search after an edit never rebuilds anything. The search
+is a case-insensitive `contains` over the table, allocation-free. `getStats().strings` is a
+count map kept incrementally. The table costs about 7 MB on ProtonMail and 20 MB on the
+76 K-file app.
 
 ---
 
-## 5. MCP Mode (`McpMode.kt`)
+## 4. Services and threading
 
-Alternative interface for AI agents. Same index, different transport.
+### 4.1 One writer, many readers
 
-| Tool | Maps to |
+`WriteQueue` is a single thread that applies every mutation in order: `didOpen`,
+`didChange`, `didClose`, watched-file batches (coalesced to the last event per file) and the
+post-indexing diagnostics refresh. Notifications enqueue their work and return, so the LSP4J
+reader thread never parses and a regenerated project's burst of watched-file events cannot
+stall message dispatch.
+
+Every request goes through `WriteQueue.request`, the one helper both services use: it takes
+the queue's barrier (a future for the writes queued before it) and waits for it on the common
+pool before computing, so a request always sees the edits the editor sent ahead of it; a
+failing provider is logged and answered with the request's empty value; a `ResponseError`
+reaches the client as such; and the cancellation token of `$/cancelRequest` is checked by the
+symbol scan and by big reference lists, so the query the editor cancels on the next keystroke
+stops instead of finishing its scan. There is no debounce: re-indexing a file is
+sub-millisecond, and a delay would only make hover and completion stale.
+
+### 4.2 `SmaliTextDocumentService`
+
+One `request` helper answers every request: barrier, `CompletableFutures.computeAsync` (so a
+provider can honour cancellation later), a logged fallback on failure, and `ResponseErrorException`
+passed through. `TextDocumentSyncKind.Full`: the client sends the whole document on every
+change, which is cheaper than maintaining an edit buffer for files this size. Diagnostics are
+published on `didOpen` and `didChange`, syntax-only until indexing completes.
+
+The editor's buffer is the truth while a file is open: `didOpen` always indexes the text it
+receives (a restored unsaved buffer differs from the disk), `didChange` re-indexes, and
+watched-file events for an open file are ignored. `didClose` re-reads the file from disk, so
+an edit discarded without saving leaves the index, and a buffer that was never saved is
+removed.
+
+### 4.3 Workspace
+
+`didChangeWatchedFiles` re-parses created and changed files from disk on the writer and removes
+deleted ones, leaving files that are open in the editor alone. `didChangeWorkspaceFolders`
+drops the files under a closed folder and indexes an opened one like the initial folders.
+`workspace/symbol` runs on the common pool after the barrier.
+
+---
+
+## 5. Features
+
+### 5.1 By symbol kind
+
+| Caret on | Definition | Hover | References | Rename |
+|----------|------------|-------|------------|--------|
+| class name in `.class` | itself | class info | declaration, `.super`/`.implements` lines, every reference | not supported |
+| `.super`, `.implements`, owner, type operand, descriptor type, field type, directive reference | the class, by element type for arrays | class info, or SDK note | references to that class (a type inside an invoke's descriptor answers with the call's references) | — |
+| method name in `.method` | — | signature | the member family: every declaration (the topmost ones it overrides and their overrides) and every call that binds to one of them | the whole family |
+| method name in an invoke | declaration, via hierarchy | the declaration's signature, or SDK note | the family of the method the call resolves to; only the exact owner's call sites for a class outside the workspace | same; nothing for classes outside the workspace |
+| field name in `.field` / access | declaration, via hierarchy (interfaces first) | type | the declaration and every access that binds to it: through subclasses that inherit it without redeclaring it | same |
+| primitive type | the member, when inside a reference | primitive info | — | — |
+| `:label` definition or reference | definition | reference count and label kind | every reference in the method | definition and every reference |
+| opcode or register | the instruction's primary symbol | opcode documentation | — | — |
+
+A call binds to a member by resolution, as the runtime would: constructors and private
+methods to their own class only; static methods and fields to the nearest declaration up the
+superclass chain (superinterfaces first for fields); virtual methods to the nearest
+declaration, with a redeclaration below counting as an override of the same member. The
+expansion through subclasses applies to every indexed class, including bundled classes whose
+names look like the SDK (`androidx`, `kotlin`, `com.google.android`); a class that is not
+indexed (`Ljava/lang/Object;`) has only its exact call sites.
+
+Definitions and the declaration entries of references point at the name token, so an editor
+lands on the name instead of selecting the whole declaration. Usage locations are name tokens
+too, so rename edits are the usage locations themselves. Labels are method-local: a `:cond_0` in another method is never touched.
+`<init>`/`<clinit>` are not renamed; neither are members of classes outside the workspace,
+whose declarations are unreachable.
+
+### 5.2 Hierarchies, lenses, symbols
+
+- **Call hierarchy**: prepared from the called method when the caret is on a call, else the
+  enclosing method; incoming calls are the member family's call sites grouped by containing
+  method (found by binary search over the file's methods); outgoing calls from the method's
+  invoke instructions, resolved through the class hierarchy.
+- **Type hierarchy**: prepared from any class reference under the caret; supertypes from the
+  class definition; subtypes from the subclass and implementor sets.
+- **Implementation**: the concrete declarations of a method's family other than the one under
+  the caret; for a class, every subclass and implementor.
+- **Document highlight**: the references of the symbol restricted to its file; `iput`/`sput`
+  sites are writes, other field sites reads.
+- **Folding ranges**: multi-line methods and the annotation, switch-table and array-data
+  blocks the builder records.
+- **Code lens**: one lens per method and field on its declaration line, resolved lazily to
+  the count of sites that bind to that declaration (an override counts its own callers); the
+  `.class` line has one for the class's references and, when any, one for how many classes
+  extend or implement it (a map lookup, so it comes resolved).
+- **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
+  type as detail, name token as `selectionRange`.
+- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
+  scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
+  query over the 76 K-file app's 660 K names.
+- **Completion**: after `->`, the members of the owner and of its workspace supertypes (own
+  members first, overrides hiding what they override); class names ranked by match kind,
+  length and name so the list is stable across keystrokes; opcodes at the start of a line.
+- **Diagnostics**: syntax errors on the offending token and the file-local checks are
+  published at once: a jump to an undefined label, a label defined twice, and the assembler
+  checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per
+  operand, five 4-bit registers for `35c` calls, literal ranges for `11n`/`21s`/`21h`/`22b`/`22s`,
+  `move-result` placement); unresolved classes in `.super`, `.implements`, field types and
+  instruction targets wait for indexing to finish and are reported only when the class's
+  package is one the workspace defines classes in (the file's own package included). A
+  decompiled app also references classes it does not ship, such as `org.xmlpull` from the
+  platform or an optional library like Conscrypt behind a runtime check, and those are not
+  errors; a hand-edited name inside the app's own packages is. The three fixtures went from
+  652 such warnings to none.
+- **Resource ids**: `ResourceTable` reads each workspace root's `res/values/public.xml` once
+  after the scan (and again when the watcher reports it changed) into a map of id → entry,
+  plus the values the default `res/values/*.xml` files give strings, colors, dimensions,
+  integers and booleans. Hover on a `0x7f...` literal names the resource (`id/login_button`)
+  and shows its value; definition opens the value's line, the file a layout or drawable is, or
+  the `public.xml` entry. `android.R` ids (`0x01TTEEEE`) are named by `FrameworkResources`, a
+  bundled table of the framework's 14,516 public ids (`src/main/resources/android-public.txt`,
+  written by `./gradlew generateAndroidPublic` from the `public.xml` of the framework apktool
+  ships; public ids never change, so one table serves every app). The literal is read
+  from the line on demand, like registers, so the AST is untouched.
+- **Inlay hints**: `InlayHints` scans the requested lines once with `Literals.find`, which
+  reads the one literal a line can carry: the last operand of an instruction, a `.field` value,
+  an annotation element, an `.array-data` element, a `.sparse-switch` key or the `.packed-switch`
+  first key. A resource id becomes its value (name in the tooltip), or its name when it has no
+  value; any other hex literal becomes its decimal value (`= 1000`). Values -9..9, decimal
+  literals, bytes and shorts (`0x41t`), resource-shaped ids the table does not know, and lines
+  baksmali already annotated (`0x3f800000    # 1.0f`) get nothing. Resource hover and definition read the same literal.
+- **Strings**: `const-string` sites are indexed by value like member usages, so references
+  on a string are every load of the same value and its hover carries the count.
+- **Registers**: not in the AST (they would double it for nothing navigable). `InstructionText`
+  decodes one instruction line (opcode, register tokens with columns, range form, literal) and
+  `RegisterFrame` maps `pN` to its frame slot from `.registers`/`.locals` and the parameter
+  types; hover and document highlight on a register scan the method's lines on demand, the
+  `.registers` line hovers the whole frame (which `vN` the locals, `this` and each parameter
+  occupy), and the assembler checks scan the edited file's lines in the diagnostics pass.
+
+### 5.3 What still reads line text
+
+Completion works on the text being typed by nature. The opcode-documentation hover takes the
+first word of the line, because instructions without symbols have no AST node. Both read the
+open document's buffer, or the file on disk when the document is not open (MCP by position).
+
+---
+
+## 6. MCP mode (`McpMode.kt`)
+
+`smali_index` scans a directory into a fresh `WorkspaceIndex` and swaps in one immutable
+`Session(index, providers)`; the old session is dropped before the scan so two indexes of a
+large app never coexist. A registration helper declares each tool's arguments once, answers a
+missing index or argument uniformly, and turns any failure into a tool error. A call to a
+tool that does not exist is the one protocol error: the session's `tools/call` handler answers
+it with JSON-RPC "invalid params" (-32602), as the specification asks, where the SDK alone
+would return a tool result marked as an error.
+
+| Tool | Answers |
 |------|---------|
-| `smali_index` | WorkspaceScanner.scanDirectory() |
-| `smali_find_definition` | DefinitionProvider-like lookup |
-| `smali_search_symbols` | WorkspaceSymbolProvider.search() |
-| `smali_references` | ReferenceProvider.findReferences() |
-| `smali_hover` | HoverProvider.provideHover() |
-| `smali_diagnostics` | DiagnosticProvider.computeDiagnostics() |
-| `smali_file_outline` | Direct SmaliFile access (methods, fields) |
-| `smali_search_strings` | WorkspaceIndex.searchStrings() |
-| `smali_call_graph` | CallHierarchyProvider |
-| `smali_xref_summary` | Aggregated class usage stats |
-| `smali_type_hierarchy` | TypeHierarchyProvider |
+| `smali_index` | scan a directory |
+| `smali_find_definition` | a class by full or simple name; the declaration at a position; a member by `class_name` + `member_name` |
+| `smali_search_symbols` | fuzzy symbol search |
+| `smali_get_stats` | counts |
+| `smali_find_references` | by position (`uri`, `line`, `character`) or by name (`class_name`, optional `member_name` with `descriptor` or `field_type`); at most `max_results` (default 500, cap 5,000) with the full `total` |
+| `smali_hover` | same two forms |
+| `smali_diagnostics` | diagnostics for given content |
+| `smali_document_symbols` | a file's outline |
+| `smali_search_strings` | `const-string` literals, at most `max_results` (default 100, cap 5,000) |
+| `smali_call_graph` | callers and callees of a method |
+| `smali_xref_summary` | subclasses, implementors, callers, accessors, referencing classes |
+| `smali_type_hierarchy` | supertypes and subtypes |
+| `smali_read_method` | one method's numbered source lines, resource ids named in a trailing comment |
+| `smali_list_package` | the classes under a package prefix and its sub-packages |
+
+Arguments are validated by type (a wrongly typed one is a tool error naming it), tool
+handlers run concurrently with the SDK's 0.15 dispatch, and `smali_index` holds a lock so
+only one index is built at a time.
 
 ---
 
-## 6. Concurrency Model
+## 7. Design decisions
 
-### 6.1 During Initial Indexing
-
-Multiple `WorkspaceScanner` workers call `indexFile()` concurrently.
-Thread safety comes from:
-- All index maps are `ConcurrentHashMap`
-- All mutable sets are `ConcurrentHashMap.newKeySet()` (thread-safe sets)
-- `files[className] = file` is an atomic CHM put
-
-**Accepted race**: Two workers could index different files referencing the same class,
-causing concurrent `computeIfAbsent` + `add` on the same set. This is safe because
-`ConcurrentHashMap.newKeySet()` returns a concurrent set.
-
-### 6.2 During LSP Operation
-
-LSP4J processes requests on a single-threaded executor by default.
-`didOpen`/`didChange`/`didClose` and all query methods run sequentially.
-The only concurrent access is between the initial indexing thread and early LSP requests,
-which is safe because:
-- Queries read from CHMs (safe for concurrent reads)
-- `indexFile()` writes to CHMs (safe for concurrent writes)
-- Results may be incomplete during indexing (acceptable — we show progress)
-
-### 6.3 Known Theoretical Races (Not Exploitable in Practice)
-
-1. **`indexFile` check-then-act**: `files[className]?.let { removeOldEntries(it) }` followed
-   by `files[className] = file`. Two threads indexing the same class could interleave.
-   **In practice**: Only happens during initial scan (one file per class name) and `didChange`
-   (single-threaded LSP dispatch). Never concurrent on the same class.
-
-2. **`stringIndex` is not `@Volatile`**: The HashMap reference is published through a
-   non-volatile field. The happens-before from the `@Volatile` dirty flag write makes this
-   safe per JMM, but it's fragile. Adding `@Volatile` to `stringIndex` would be more explicit.
+- **A hand-written parser, not a grammar.** The project started on an ANTLR grammar, moved
+  the model building into a parse listener (5.1 s → 2.7 s on ProtonMail), and then replaced
+  the grammar altogether: an object per token and a parse tree per file cost 30× the source in
+  garbage for a format that is a list of lines. The replacement is 1.2 K lines of Kotlin against
+  1.5 K lines of grammar, a 760-line listener and a generated parser, parses 3.6–4.6× faster, and its operand
+  table is derived from the grammar so nothing accepted was lost; the per-file AST
+  fingerprint over the corpus proved the output byte-identical before the grammar was removed.
+- **Spans in the AST.** One int per member reference gives exact token ranges; the alternative,
+  re-reading lines and matching names with `indexOf`, mis-resolved duplicated names and needed
+  file reads for closed documents.
+- **Full ASTs in memory.** Hover, call hierarchy, diagnostics and the MCP tools all need
+  instruction lists. At about 5.9 KB per file after interning and packing, the AST is two
+  thirds of the heap; re-parsing on demand would save it at the cost of a disk read per
+  request.
+- **Generations, not per-symbol removal.** O(1) retirement is what makes editing a file that
+  references popular symbols cheap.
+- **One writer thread.** Ordering is trivial to reason about, the reader thread stays free,
+  and requests wait a few microseconds for the barrier.
+- **Full document sync.** An edit buffer with incremental ranges is where off-by-one bugs
+  live; smali files are small.
 
 ---
 
-## 7. Performance Profile
+## 8. Known limitations
 
-### 7.1 Initial Indexing (30s for 119K files)
-
-| Phase | % of time | Bottleneck |
-|-------|-----------|-----------|
-| ANTLR tokenization + parsing | ~50% | CPU-bound, SLL prediction |
-| File I/O (readText) | ~15% | SSD sequential reads |
-| ASTBuilder walk | ~15% | Object allocation |
-| indexFile() CHM operations | ~10% | CHM contention on shared maps |
-| findSmaliFiles (walkTopDown) | ~7% | Directory traversal |
-| GC pressure | ~3% | Temporary ANTLR objects |
-
-**Most problematic step**: ANTLR parsing. Options to improve:
-- Hand-written recursive descent parser: ~3x faster but ~5x more code to maintain
-- Incremental parsing: Only re-parse changed regions — complex, marginal gain for initial scan
-- Parallel lexer: ANTLR lexer is not parallelizable (stateful)
-- **Recommendation**: Accept 30s. It's one-time cost, with progress bar.
-
-### 7.2 didChange Re-indexing
-
-| Step | Time |
-|------|------|
-| ANTLR re-parse | ~5-10ms |
-| removeOldEntries | ~0.1ms |
-| indexFile | ~0.5ms |
-| Diagnostics | ~1ms |
-| **Total** | **~7-12ms** |
-
-Well within LSP's interactive budget. Not a bottleneck.
-
-### 7.3 Query Performance
-
-| Query | Time | Notes |
-|-------|------|-------|
-| Go-to-definition | <1ms | O(1) index lookup |
-| Find references (simple) | <1ms | O(1) reverse index |
-| Find references (polymorphic) | 1-5ms | O(subclasses) hierarchy walk |
-| Hover | <1ms | O(1) lookup + string formatting |
-| Completion | 5-15ms | O(classes) prefix filter |
-| Workspace symbols | 10-50ms | O(classes) fuzzy match |
-| Code lens resolve | <1ms | O(1) reverse index |
-
-No query bottleneck. All are interactive-speed.
+- Class rename is not offered: it would mean renaming the file and rewriting the package path
+  across the workspace.
+- A method that overrides one declared outside the workspace (`onCreate` of a framework
+  `Activity`) is renamed with its own subclasses only; the server cannot see the framework
+  declaration, so the override silently stops overriding. The family starts at the topmost
+  declaration *in the workspace*.
+- Two files defining the same class (duplicate dex splits) keep both files indexed, but the
+  class name maps to the last one indexed.
+- The 76 K-file app needs more than the 1 GB test fork, so the fixture-invariant test skips it
+  by default (`-Dsmali.invariants.maxFiles`).
+- Find-references on `Ljava/lang/Object;` answers with every owner, operand and descriptor
+  use: 264 K locations on the 76 K-file app, serialized in well under a second but more than
+  an editor can show. The LSP answer has no cap (a cancelled request stops early); the MCP
+  tool caps its answer and reports the total.
 
 ---
 
-## 8. What's Missing
+## 9. Verification
 
-### 8.1 Feature Status
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Rename symbol | Implemented | Methods, fields, labels. Polymorphic-aware. Class rename not supported. |
-| Document formatting | Not planned | Smali files are machine-generated, rarely hand-formatted |
-| Semantic tokens | Not yet | Medium effort — different colors for user vs SDK classes, register types |
-| Incremental text sync | Not planned | Full sync is fast enough (<10ms for typical smali files) |
-| File watcher | Not yet | Medium effort — detect disk changes without restart |
-
-**Evaluated but not shipped** (prototyped and rejected — poor value/accuracy):
-
-| Feature | Why removed |
-|---------|------------|
-| Go-to-implementation | Found too many unrelated methods. The subclass index finds overrides correctly, but for Smali files the results were noisy and indistinguishable from find-references. |
-| Folding ranges | VS Code already provides indentation-based folding for free. A dedicated provider added no value for Smali files whose structure is simple (`.method`...`.end method`). |
-| Signature help | Smali methods don't have named parameters in the call syntax (`invoke-virtual {v0, v1}, Lfoo;->bar(II)V`). Showing parameter types from the descriptor is trivially visible in the code itself. |
-
-### 8.2 Known Limitations
-
-1. **No cross-dex duplicate handling**: If an APK has duplicate classes across dex splits
-   (e.g., `javax.annotation.Nonnull` in both `classes.dex` and `classes2.dex`), the last
-   indexed file wins. 4 duplicates seen in Truecaller — acceptable.
-
-2. **No annotation AST**: `.annotation` blocks are parsed by the grammar but not captured
-   in the AST. Hover/definition on annotation values requires line-content regex fallback.
-
-6. **No class rename**: Renaming a class would require renaming the file, rewriting
-   `Lold/path;` → `Lnew/path;` across ALL files in the workspace, and updating the
-   `.class` directive. This is a workspace-wide string replacement, not just a symbol rename.
-   Considered too destructive and complex for now.
-
-3. **invoke-polymorphic/invoke-custom stubs**: These rare instructions (API 26+) are
-   recognized by the lexer but the parser rules don't consume operands. Files with these
-   instructions will have parse errors on those lines, but the rest of the file still parses.
-
-4. **No watch mode**: The server doesn't watch for file changes on disk. Only files opened
-   in the editor (via `didOpen`/`didChange`) are re-indexed. Workspace-level changes
-   (e.g., extracting a new APK) require restarting the server.
-
-5. **Label search scans all methods**: `findLabelDefinition()` iterates all methods in a
-   file looking for a label. Labels are method-local, so ideally we'd only search the
-   enclosing method. In practice, label names are unique per file in decompiled smali.
+- `*.unit.*` (467 tests, ~4 s), `*.regression.*` (74, ~1 s), `*.integration.*` (136, ~65 s with
+  the fixtures present; one skip). Run the categories separately: each fork holds a parsed app.
+- `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
+  `.method` or `.field`.
+- `RealApkInvariantsTest`: properties that hold for any apktool project (every invoke in the
+  workspace resolves, hierarchy sets agree with `.super`/`.implements`, usage locations name
+  the member, re-indexing is a no-op), so fixtures can change version without rewriting tests.
+- `LspStdioTest` and `McpModeTest` drive the real binaries over stdio with JSON-RPC.
+- Before a release, a scripted stdio session against a real app exercises every request at
+  about a thousand positions (declarations, references, operands, labels, directives,
+  opcodes), compares the answers with the previous build, and checks each definition,
+  reference line and rename edit against the source text; the same for the twelve MCP tools.
+- Parser and builder changes are checked with a per-file fingerprint of every AST in the corpus
+  against the previous build; a builder change must leave every pre-existing field identical.
 
 ---
 
-## 9. Design Decisions & Rationale
-
-### 9.1 Why ConcurrentHashMap everywhere?
-
-**Decision**: All index maps use ConcurrentHashMap.
-
-**Why**: Initial indexing is parallel (N workers). Using synchronized HashMap would
-serialize all index updates, negating parallelism. CHM allows lock-free reads and
-segment-level writes, giving us ~8x throughput on 8-core machines.
-
-**Alternative considered**: ReadWriteLock + HashMap. Would be faster for reads but
-slower for the write-heavy indexing phase. CHM is simpler and fast enough for both.
-
-**Still justified?** Yes. The 30% memory overhead of CHM (vs HashMap) is
-~15 MB for 119K classes. Acceptable for the concurrency benefit.
-
-### 9.2 Why reverse indexes (methodUsages, fieldUsages, classRefLocations)?
-
-**Decision**: Build reverse indexes during indexFile(), trading memory for query speed.
-
-**Why**: Find References was O(n) — scanning all 119K files' instructions to find
-references to a symbol. For 119K files, this took ~5 seconds per query.
-With reverse indexes: O(1), <1ms.
-
-**Memory cost**: ~80 MB for 119K files. Acceptable.
-
-**Still justified?** Yes. The memory cost is modest and the query speedup
-is dramatic. This is the single most impactful optimization in the codebase.
-
-### 9.3 Why lazy string index?
-
-**Decision**: Don't build string index during initial scan. Rebuild lazily on first search.
-
-**Why**: During parallel indexing, the string index was a contention hotspot. Every file's
-every const-string instruction contended on the same CHM. Deferring the build to a
-single-threaded lazy rebuild eliminated this contention.
-
-**Trade-off**: First string search is slower (~200ms to rebuild from 119K files).
-Subsequent searches are O(1). String search is rarely used (only MCP tool), so
-the cold-start penalty is acceptable.
-
-**Still justified?** Yes. The indexing speedup outweighs the rare first-search delay.
-
-### 9.4 Why Full text sync instead of Incremental?
-
-**Decision**: `TextDocumentSyncKind.Full` — client sends entire document on every change.
-
-**Why**: Incremental sync requires maintaining a line-column map and applying text edits
-to an in-memory buffer. This is error-prone (off-by-one in column handling, Unicode
-grapheme boundaries) and adds ~200 lines of code. Full sync re-sends the document, which
-is at most ~50KB for a typical smali file. With modern IPC, this adds <1ms of overhead.
-
-**Still justified?** Yes. Smali files are small. The complexity of incremental
-sync is not justified for the marginal performance gain.
-
-### 9.5 Why store SmaliFile objects (not just indexes)?
-
-**Decision**: Keep the full SmaliFile AST in memory for every indexed file.
-
-**Why**: Several features need the full AST:
-- Hover on method body needs instruction list
-- Code lens needs method/field counts
-- Diagnostics need field types and method signatures
-- Call hierarchy outgoing needs instruction scan
-
-**Memory cost**: ~360 MB for 119K files (the largest single component).
-
-**Alternative**: Store only indexes, re-parse from disk on demand. Would save ~360 MB
-but add 5-10ms latency per hover/definition request (disk read + parse). For an LSP
-that needs to feel instant, this trade-off favors memory.
-
-**Still justified?** Yes, but this is the area where memory reduction would
-have the biggest impact. For very large codebases (500K+ files), consider an LRU cache
-that evicts least-recently-used SmaliFile objects and re-parses on demand.
-
-### 9.6 Why ANTLR instead of hand-written parser?
-
-**Decision**: Use ANTLR 4 with separate lexer/parser grammars.
-
-**Why**: Smali has a complex, evolving syntax with 200+ instruction types, each with
-different operand formats. A hand-written parser would be faster (~3x) but:
-- ~3,000 lines of hand-written parsing code vs ~1,600 lines of grammar
-- Every new Dalvik instruction requires manual parser changes
-- ANTLR generates robust error recovery for free
-- Grammar is self-documenting and matches the smali spec
-
-**Still justified?** Yes. The 30s indexing time is dominated by parsing, but
-a hand-written parser would only reduce it to ~10s. The maintenance burden doesn't
-justify a 20s improvement on a one-time operation.
-
-### 9.7 Why selective instruction capture in ASTBuilder?
-
-**Decision**: Only capture instructions that reference navigable symbols
-(invoke, field access, type ops, jumps, const-string). Skip arithmetic, move, return, etc.
-
-**Why**: Arithmetic instructions like `add-int v0, v1, v2` reference only registers.
-There's nothing to navigate to. Capturing them would increase memory by ~2.5x
-(they make up ~60% of instructions) with zero user benefit.
-
-**Still justified?** Yes. The opcode hover feature (DalvikOpcodeDatabase) provides hover
-info for ALL instruction types via line-content parsing, so users still get documentation
-even for uncaptured instructions.
-
----
-
-## 10. Appendix: File Inventory
+## 10. File inventory
 
 | File | Lines | Role |
 |------|-------|------|
-| SmaliLexer.g4 | 460 | ANTLR lexer — all smali tokens |
-| SmaliParser.g4 | 1,135 | ANTLR parser — all smali rules |
-| WorkspaceIndex.kt | 701 | Central index with 16 maps |
-| ASTBuilder.kt | 698 | ANTLR parse tree → SmaliFile |
-| McpMode.kt | 747 | MCP JSON-RPC server |
-| HoverProvider.kt | 692 | Hover information |
-| ReferenceProvider.kt | 583 | Find references |
-| DefinitionProvider.kt | 458 | Go-to-definition |
-| CompletionProvider.kt | 241 | Completions |
-| DalvikOpcodeDatabase.kt | 1,049 | 256 opcode descriptions |
-| RenameProvider.kt | 406 | Symbol rename across workspace |
-| SmaliTextDocumentService.kt | 445 | LSP document lifecycle |
-| Main.kt | 360 | Entry point, server setup |
-| DataStructures.kt | 206 | Core data model |
-| SmaliParser.kt | 159 | ANTLR wrapper |
-| WorkspaceScanner.kt | 152 | Parallel file scanner |
-| InstructionSymbolExtractor.kt | 278 | Cursor → symbol extraction |
-| TypeHierarchyProvider.kt | 144 | Type hierarchy |
-| WorkspaceSymbolProvider.kt | 213 | Workspace symbol search |
-| CodeLensProvider.kt | 85 | Reference counts |
-| CallHierarchyProvider.kt | 160 | Call hierarchy |
-| DiagnosticProvider.kt | 176 | Syntax + semantic diagnostics |
-| ClassUtils.kt | 145 | Class name utilities |
-| TypeResolver.kt | 148 | Type → readable name |
-| DescriptorParser.kt | 210 | Method descriptor parser |
-| StringPool.kt | 90 | Bounded string interning |
+| SmaliTextParser.kt | 1,164 | the front end: lexer, statement parser, model building |
+| DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
+| McpMode.kt | 661 | MCP server |
+| WorkspaceIndex.kt | 570 | the index |
+| DataStructures.kt | 425 | the AST model |
+| SmaliLanguageServer.kt | 349 | the LSP server: handshake, indexing, capabilities |
+| SmaliTextDocumentService.kt | 283 | document lifecycle and requests |
+| HoverProvider.kt | 237 | hover |
+| ReferenceProvider.kt | 228 | references and member families |
+| Types.kt | 221 | descriptor and class-name helpers |
+| InstructionText.kt | 219 | instruction scanner and register frame |
+| WorkspaceSymbolProvider.kt | 218 | workspace symbol search |
+| CompletionProvider.kt | 188 | completion |
+| DiagnosticProvider.kt | 183 | diagnostics |
+| ResourceTable.kt | 166 | `public.xml` and values per workspace root |
+| AssemblerChecks.kt | 162 | assembler checks for hand edits |
+| Registers.kt | 151 | register hover, highlight and the frame hover |
+| WorkspaceScanner.kt | 141 | parallel scan |
+| Symbol.kt | 140 | `symbolAt` and the symbol kinds |
+| RenameProvider.kt | 130 | rename |
+| CallHierarchyProvider.kt | 124 | call hierarchy |
+| DocumentHighlightProvider.kt | 122 | document highlight |
+| SmaliWorkspaceService.kt | 121 | watched files, workspace symbols |
+| CodeLensProvider.kt | 108 | reference and subtype counts |
+| TypeHierarchyProvider.kt | 105 | type hierarchy |
+| InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
+| JvmTuning.kt | 89 | heap settings applied in-process |
+| ResourceLiterals.kt | 83 | resource hover, definition and hints |
+| WriteQueue.kt | 73 | the writer thread and the request helper |
+| DocumentSymbolProvider.kt | 73 | outline |
+| StringPool.kt | 72 | per-index interning |
+| Literals.kt | 66 | the one literal a line carries |
+| Cli.kt | 64 | command line, usage, version |
+| DefinitionProvider.kt | 63 | definition |
+| InlayHints.kt | 60 | resource names and decimal values after literals |
+| UsageList.kt | 60 | packed usage sites |
+| LabelMap.kt | 58 | packed labels and label references |
+| SmaliParser.kt | 51 | parser entry |
+| FrameworkResources.kt | 48 | the bundled `android.R` names |
+| ImplementationProvider.kt | 46 | implementations |
+| Logging.kt | 39 | logback setup |
+| Main.kt | 33 | entry point |
+| FoldingRangeProvider.kt | 22 | folding ranges |
+| StringLiterals.kt | 18 | the string operand under the caret |

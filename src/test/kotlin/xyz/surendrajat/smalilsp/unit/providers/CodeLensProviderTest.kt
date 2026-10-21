@@ -33,6 +33,27 @@ class CodeLensProviderTest {
     }
 
     @Test
+    fun `the class line counts references and subtypes`() {
+        indexContent("file:///test/Foo.smali", ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;\n.method public constructor <init>()V\n    .registers 1\n    return-void\n.end method\n")
+        indexContent("file:///test/Bar.smali", ".class public Lcom/example/Bar;\n.super Lcom/example/Foo;\n.method public constructor <init>()V\n    .registers 1\n    invoke-direct {p0}, Lcom/example/Foo;-><init>()V\n    return-void\n.end method\n")
+        indexContent("file:///test/Shape.smali", ".class public interface abstract Lcom/example/Shape;\n.super Ljava/lang/Object;\n")
+        indexContent("file:///test/Circle.smali", ".class public Lcom/example/Circle;\n.super Ljava/lang/Object;\n.implements Lcom/example/Shape;\n")
+
+        val foo = provider.provideCodeLenses("file:///test/Foo.smali")
+        val classLenses = foo.filter { it.range.start.line == 0 }
+        assertEquals(2, classLenses.size, "references and subclasses: $classLenses")
+        assertEquals(Range(Position(0, 0), Position(0, ".class public Lcom/example/Foo;".length)), classLenses[0].range)
+        assertEquals("class", (classLenses[0].data as JsonObject)["memberType"].asString)
+        assertEquals("2 references", provider.resolveCodeLens(classLenses[0]).command.title, "Bar's `.super` and its call")
+        assertEquals("1 subclass", classLenses[1].command.title, "already resolved")
+
+        assertEquals("1 implementation", provider.provideCodeLenses("file:///test/Shape.smali").filter { it.range.start.line == 0 }[1].command.title)
+        val bar = provider.provideCodeLenses("file:///test/Bar.smali").filter { it.range.start.line == 0 }
+        assertEquals(1, bar.size, "nothing extends Bar, so no subtype lens")
+        assertEquals("0 references", provider.resolveCodeLens(bar[0]).command.title)
+    }
+
+    @Test
     fun `provides code lens for methods`() {
         val content = """
             .class public Lcom/example/Foo;
@@ -213,6 +234,15 @@ class CodeLensProviderTest {
         val resolved = provider.resolveCodeLens(valueLens)
         assertNotNull(resolved.command)
         assertTrue(resolved.command.title.contains("2 references"), "Expected '2 references', got '${resolved.command.title}'")
+    }
+
+    @Test
+    fun `a lens spans its declaration line only`() {
+        val content = ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;\n.field public count:I\n.method public calculate(II)I\n    .registers 4\n    add-int v0, p1, p2\n    return v0\n.end method"
+        indexContent("file:///test/Foo.smali", content)
+        val byName = provider.provideCodeLenses("file:///test/Foo.smali").associateBy { (it.data as JsonObject).get("memberName").asString }
+        assertEquals(Range(Position(3, 0), Position(3, ".method public calculate(II)I".length)), byName["calculate"]!!.range)
+        assertEquals(Range(Position(2, 0), Position(2, ".field public count:I".length)), byName["count"]!!.range)
     }
 
     @Test
