@@ -59,9 +59,13 @@ debug forms of `.param`/`.local`, member names spelled like opcodes, keywords or
 
 Whitespace, including newlines, separates tokens the way the assembler's lexer treats it, so a
 hand-written statement may still wrap. Tokens are spans into the source, never objects: the
-lexer advances a cursor and leaves the current token's kind and bounds in fields, and the
-parser slices names and descriptors straight out of the text and interns them. Positions are
-UTF-16 string indices, so every LSP column is exact, including lines with astral characters.
+lexer advances a cursor and leaves the current token's kind and bounds in fields, classifies
+ASCII through lookup tables (the JDK's Unicode tables only for anything beyond), and the parser
+interns names and descriptors straight from their ranges: `StringPool.intern(source, start,
+end)` hashes the range and answers from a per-thread cache before creating any substring, so a
+scan allocates about half of what it did (2 GB instead of 4 GB per two scans of ProtonMail).
+Positions are UTF-16 string indices, so every LSP column is exact, including lines with astral
+characters.
 
 The parser has no unbounded recursion: array dimensions are a loop, and annotations nested
 deeper than 64 levels are a syntax error, so no input can overflow the stack; 57,000 randomly
@@ -236,8 +240,12 @@ large app.
 ### 3.3 Scanning (`WorkspaceScanner.kt`)
 
 `maxOf(2, cores)` coroutine workers drain a bounded channel of files, each reading, parsing
-and indexing its file. The index is safe for concurrent `indexFile` calls: maps are concurrent,
-usage lists synchronize per symbol, file ids are allocated and retired under one lock. Through the real
+and indexing its file. Files are walked with `Files.walkFileTree`, whose attributes answer
+"regular file?" without a second stat (117 ms instead of 154 ms over ProtonMail's tree), and
+read as bytes: baksmali writes ASCII, so a file without a high bit decodes as Latin-1, one copy
+instead of a UTF-8 decode (288 ms instead of 427 ms for ProtonMail's 126 MB on 12 threads).
+The index is safe for concurrent `indexFile` calls: maps are concurrent, usage lists
+synchronize per symbol, file ids are allocated and retired under one lock. Through the real
 server on 12 cores, including file reads:
 
 | | Mastodon | ProtonMail | 76 K-file app |
