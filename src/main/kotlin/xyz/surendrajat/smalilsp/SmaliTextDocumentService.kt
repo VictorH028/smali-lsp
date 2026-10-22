@@ -26,6 +26,7 @@ import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import java.io.File
+import xyz.surendrajat.smalilsp.util.SourceFiles
 import java.net.URI
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -169,7 +170,7 @@ class SmaliTextDocumentService(
             if (index.removeFile(uri)) logger.debug("Removed from index (closed without a file on disk): $uri")
             return
         }
-        val text = file.readText(Charsets.UTF_8)
+        val text = SourceFiles.read(file)
         if (text == buffer) { index.dropBody(uri); return }
         val parsed = parser.parse(uri, text)
         if (parsed != null) index.indexFile(parsed, keepBody = false) else index.removeFile(uri)

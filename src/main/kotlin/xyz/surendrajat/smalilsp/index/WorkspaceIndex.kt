@@ -6,6 +6,7 @@ import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.parser.SmaliParser
+import xyz.surendrajat.smalilsp.util.SourceFiles
 import xyz.surendrajat.smalilsp.util.StringPool
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
@@ -321,7 +322,7 @@ class WorkspaceIndex {
 
     private fun body(key: String): SmaliFile? {
         synchronized(bodies) { bodies[key]?.let { return it } }
-        val text = documentContents[key] ?: try { File(URI(key)).readText(Charsets.UTF_8) } catch (_: Exception) { return null }
+        val text = documentContents[key] ?: try { SourceFiles.read(File(URI(key))) } catch (_: Exception) { return null }
         val parsed = SmaliParser(strings).parse(key, text) ?: return null
         synchronized(bodies) { bodies[key] = parsed }
         return parsed
