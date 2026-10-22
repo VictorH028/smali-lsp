@@ -57,6 +57,23 @@ class WorkspaceScannerTest {
     }
 
     @Test
+    fun `a symlinked workspace root and a symlinked file are scanned, under the names the client uses`() = runBlocking {
+        val real = File(tempDir, "real").apply { mkdirs() }
+        File(real, "A.smali").writeText(".class public Lcom/A;\n.super Ljava/lang/Object;")
+        val elsewhere = File(tempDir, "elsewhere.smali").apply { writeText(".class public Lcom/B;\n.super Ljava/lang/Object;") }
+        java.nio.file.Files.createSymbolicLink(File(real, "B.smali").toPath(), elsewhere.toPath())
+        val link = File(tempDir, "link")
+        java.nio.file.Files.createSymbolicLink(link.toPath(), real.toPath())
+
+        val result = scanner.scanDirectory(link)
+
+        assertEquals(2, result.filesProcessed, "the root link is followed, the file link too")
+        assertEquals(2, index.getStats().classes)
+        val uri = index.getUri("Lcom/A;")!!
+        assertTrue(uri.contains("/link/"), "files are indexed under the path the client opens them by: $uri")
+    }
+
+    @Test
     fun `scan directory with single smali file`() = runBlocking {
         // Create a simple smali file
         val smaliFile = File(tempDir, "Test.smali")

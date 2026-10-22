@@ -122,12 +122,18 @@ class WorkspaceScanner(
             return emptyList()
         }
         
-        // One stat per entry, from the walk's attributes. Links are not followed: a symlinked
-        // directory would recurse until the path is too long or index its files twice.
+        // One stat per entry, from the walk's attributes. Links below the root are not followed:
+        // a symlinked directory would recurse until the path is too long or index its files
+        // twice. A root that is itself a link is entered, and its files keep the root's spelling,
+        // which is the one the client opens them by.
+        val root = directory.toPath()
+        val walkRoot = if (Files.isSymbolicLink(root)) root.toRealPath() else root
         val found = ArrayList<File>()
-        Files.walkFileTree(directory.toPath(), object : SimpleFileVisitor<Path>() {
+        Files.walkFileTree(walkRoot, object : SimpleFileVisitor<Path>() {
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                if (file.fileName.toString().endsWith(".smali") && (attrs.isRegularFile || (attrs.isSymbolicLink && Files.isRegularFile(file)))) found.add(file.toFile())
+                if (file.fileName.toString().endsWith(".smali") && (attrs.isRegularFile || (attrs.isSymbolicLink && Files.isRegularFile(file)))) {
+                    found.add((if (walkRoot === root) file else root.resolve(walkRoot.relativize(file))).toFile())
+                }
                 return FileVisitResult.CONTINUE
             }
             override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
