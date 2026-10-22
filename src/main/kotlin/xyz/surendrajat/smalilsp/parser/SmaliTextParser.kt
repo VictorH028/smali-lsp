@@ -109,8 +109,14 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         lex()
     }
 
-    private fun isWordChar(c: Char): Boolean =
-        c.isLetterOrDigit() || c == '$' || c == '_' || c == '-' || c.code > 0x7F
+    private fun isWordChar(c: Char): Boolean = if (c.code < 128) WORD_ASCII[c.code] else true
+
+    /** Letters, digits, `-` and `_`: what a directive's name is made of. */
+    private fun Char.isDirectiveNameChar(): Boolean = if (code < 128) DIRECTIVE_ASCII[code] else isLetterOrDigit()
+    private fun Char.isDigitChar(): Boolean = if (code < 128) this in '0'..'9' else isDigit()
+
+    private fun internTok(): String = strings.intern(source, tokStart, tokEnd)
+    private fun tokIn(words: Set<String>): Boolean { for (w in words) if (tokIs(w)) return true; return false }
 
     private fun lexString() {
         pos++
@@ -143,16 +149,16 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
 
     /** `.5` is a number; `.end method` and `.restart local` are one directive; `.name` is a directive. */
     private fun lexDot() {
-        if (pos + 1 < source.length && source[pos + 1].isDigit()) { lexNumber(); return }
+        if (pos + 1 < source.length && source[pos + 1].isDigitChar()) { lexNumber(); return }
         var end = pos + 1
-        while (end < source.length && (source[end].isLetterOrDigit() || source[end] == '-' || source[end] == '_')) end++
+        while (end < source.length && source[end].isDirectiveNameChar()) end++
         if (end == pos + 1) { pos++; kind = T.DOT; return }
         val word = source.substring(pos + 1, end)
         if (word == "end" || word == "restart") {
             var ws = end
             while (ws < source.length && (source[ws] == ' ' || source[ws] == '\t')) ws++
             var wend = ws
-            while (wend < source.length && (source[wend].isLetterOrDigit() || source[wend] == '-' || source[wend] == '_')) wend++
+            while (wend < source.length && source[wend].isDirectiveNameChar()) wend++
             val second = source.substring(ws, wend)
             if (wend > ws && second in END_WORDS && (word == "end" || second == "local")) { pos = wend; kind = T.DIRECTIVE; return }
         }
@@ -192,7 +198,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
             while (e2 < source.length && isWordChar(source[e2])) e2++
             if (e2 > end + 1 && InstructionShapes[source.substring(start, e2)] != null) { pos = e2; kind = T.IDENT; return }
         }
-        if (source[start].isDigit()) {
+        if (source[start].isDigitChar()) {
             val numberEnd = scanNumber(start)
             if (numberEnd >= end) { pos = numberEnd; return }
         }
@@ -229,9 +235,9 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         val n = source.length
         fun digits(hex: Boolean): Int {   // Digits: digit ([digit_]* digit)?
             val s = i
-            while (i < n && (if (hex) source[i].isHexDigit() else source[i].isDigit())) {
+            while (i < n && (if (hex) source[i].isHexDigit() else source[i].isDigitChar())) {
                 i++
-                while (i < n && source[i] == '_') { if (i + 1 < n && (if (hex) source[i + 1].isHexDigit() else source[i + 1].isDigit())) i++ else break }
+                while (i < n && source[i] == '_') { if (i + 1 < n && (if (hex) source[i + 1].isHexDigit() else source[i + 1].isDigitChar())) i++ else break }
             }
             return i - s
         }
@@ -245,7 +251,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
             if (j < n && (source[j] == 'p' || source[j] == 'P') && j + 1 < n) {
                 var k = j + 1
                 if (source[k] == '+' || source[k] == '-') k++
-                if (k < n && source[k].isDigit()) { i = k; digits(false); if (i < n && source[i] in "fFdD") i++; kind = T.FLOAT; return i }
+                if (k < n && source[k].isDigitChar()) { i = k; digits(false); if (i < n && source[i] in "fFdD") i++; kind = T.FLOAT; return i }
             }
             if (i == digitsStart) return from
             if (i < n && source[i] in "lLsStT") i++
@@ -259,17 +265,17 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         }
         val intStart = i
         digits(false)
-        if (i == intStart && !(source[i] == '.' && i + 1 < n && source[i + 1].isDigit())) return from
+        if (i == intStart && !(source[i] == '.' && i + 1 < n && source[i + 1].isDigitChar())) return from
         // float forms
         var isFloat = false
-        if (i < n && source[i] == '.' && (i + 1 >= n || source[i + 1].isDigit() || i > intStart)) {
-            if (i + 1 < n && source[i + 1].isDigit()) { i++; digits(false); isFloat = true }
+        if (i < n && source[i] == '.' && (i + 1 >= n || source[i + 1].isDigitChar() || i > intStart)) {
+            if (i + 1 < n && source[i + 1].isDigitChar()) { i++; digits(false); isFloat = true }
             else if (i > intStart) { i++; isFloat = true }   // `1.`
         }
         if (i < n && (source[i] == 'e' || source[i] == 'E')) {
             var k = i + 1
             if (k < n && (source[k] == '+' || source[k] == '-')) k++
-            if (k < n && source[k].isDigit()) { i = k; digits(false); isFloat = true }
+            if (k < n && source[k].isDigitChar()) { i = k; digits(false); isFloat = true }
         }
         if (i < n && source[i] in "fFdD") { i++; isFloat = true }
         if (isFloat) { kind = T.FLOAT; return i }
@@ -431,10 +437,10 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         advance()
         classModifiers.clear()
         while (kind != T.TYPE) {
-            if (isWord() && tokText in CLASS_MODIFIERS) { classModifiers.add(strings.intern(tokText)); advance() }
+            if (isWord() && tokIn(CLASS_MODIFIERS)) { classModifiers.add(internTok()); advance() }
             else fail("Expected a class name, not ${describe()}")
         }
-        className = strings.intern(tokText)
+        className = internTok()
         classNameSpan = Span(tokLine, tokCol, tokCol + (tokEnd - tokStart))
         advance()
         classRange = range(startLine, startCol, lastLine, lastEnd)
@@ -443,7 +449,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     private fun superDirective() {
         advance()
         if (kind != T.TYPE) fail("Expected the superclass name, not ${describe()}")
-        superClass = strings.intern(tokText)
+        superClass = internTok()
         superClassRange = range(tokLine, tokCol, tokLine, tokCol + (tokEnd - tokStart))
         advance()
     }
@@ -451,7 +457,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     private fun implementsDirective() {
         advance()
         if (kind != T.TYPE) fail("Expected the interface name, not ${describe()}")
-        val name = strings.intern(tokText)
+        val name = internTok()
         interfaces.add(name)
         interfaceRanges[name] = range(tokLine, tokCol, tokLine, tokCol + (tokEnd - tokStart))
         advance()
@@ -466,7 +472,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         val startCol = tokCol
         advance()
         val modifiers = ArrayList<String>()
-        while (isWord() && tokText in FIELD_MODIFIERS && !nameIsNext()) { modifiers.add(strings.intern(tokText)); advance() }
+        while (isWord() && tokIn(FIELD_MODIFIERS) && !nameIsNext()) { modifiers.add(internTok()); advance() }
         // name
         val nameLine = tokLine
         val nameStart = tokCol
@@ -474,7 +480,8 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         if (kind == T.SUB) advance()
         if (!isIdentifier()) fail("Expected the field name, not ${describe()}")
         advance()
-        val nameText = source.substring(nameTextStart, tokStart).trimEnd()
+        var nameTextEnd = tokStart
+        while (nameTextEnd > nameTextStart && source[nameTextEnd - 1].isWhitespace()) nameTextEnd--
         if (kind != T.COLON) fail("Expected ':' and the field type after the field name")
         val colonLine = tokLine
         val colonCol = tokCol
@@ -487,7 +494,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         if (kind == T.ASSIGN) { advance(); assignableValue() }
         while (kind == T.DIRECTIVE && tokIs(".annotation")) annotationDirective()
         if (kind == T.DIRECTIVE && tokIs(".end field")) advance()
-        val name = strings.intern(nameText)
+        val name = strings.intern(source, nameTextStart, nameTextEnd)
         fields.add(FieldDefinition(
             name = name,
             type = strings.intern(typeText),
@@ -534,7 +541,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     /** Consumes a type token, recording it as a reference when inside an annotation, `.local` or prototype. */
     private fun consumeType() {
         if (typeRefDepth > 0) {
-            if (kind == T.TYPE) typeRefs.add(TypeRef(strings.intern(tokText), tokLine, tokCol, tokCol + (tokEnd - tokStart)))
+            if (kind == T.TYPE) typeRefs.add(TypeRef(internTok(), tokLine, tokCol, tokCol + (tokEnd - tokStart)))
             else if (kind == T.COMPOUND) {
                 val text = tokText
                 for (type in Types.parseTypeSequence(text)) {
@@ -603,7 +610,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         val startCol = tokCol
         advance()
         val modifiers = ArrayList<String>()
-        while (isWord() && tokText in METHOD_MODIFIERS && !signatureIsNext()) { modifiers.add(strings.intern(tokText)); advance() }
+        while (isWord() && tokIn(METHOD_MODIFIERS) && !signatureIsNext()) { modifiers.add(internTok()); advance() }
         // signature: (SUB? identifier | LT identifier GT) ( params ) return
         val sigLine = tokLine
         val sigCol = tokCol
@@ -613,7 +620,8 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
             T.SUB -> { advance(); if (!isIdentifier()) fail("Expected the method name, not ${describe()}"); advance() }
             else -> { if (!isIdentifier()) fail("Expected the method name, not ${describe()}"); advance() }
         }
-        val nameText = source.substring(sigStart, tokStart).trimEnd()
+        var sigEnd = tokStart
+        while (sigEnd > sigStart && source[sigEnd - 1].isWhitespace()) sigEnd--
         if (kind != T.LPAREN) fail("Expected '(' after the method name, not ${describe()}")
         val lparenLine = tokLine
         val lparenCol = tokCol
@@ -644,7 +652,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         inMethod = false
         val startChar = startCol
         methods.add(MethodDefinition(
-            name = strings.intern(nameText),
+            name = strings.intern(source, sigStart, sigEnd),
             descriptor = descriptor,
             startLine = startLine, startChar = startChar, endLine = lastLine, endChar = lastEnd,
             modifiers = strings.internModifiers(modifiers),
@@ -679,7 +687,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         val startCol = tokCol
         advance()
         if (!isIdentifier()) fail("Expected a label name after ':'")
-        val name = strings.intern(tokText)
+        val name = internTok()
         val end = tokCol + (tokEnd - tokStart)
         advance()
         val definition = LabelDefinition(name, startLine, startCol, end)
@@ -693,7 +701,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         val startCol = tokCol
         advance()
         if (!isIdentifier() || tokLine != startLine) fail("Expected a label name after ':'")
-        val ref = LabelRef(strings.intern(tokText), startLine, startCol, tokCol + (tokEnd - tokStart))
+        val ref = LabelRef(internTok(), startLine, startCol, tokCol + (tokEnd - tokStart))
         advance()
         return ref
     }
@@ -746,7 +754,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
         advance()
         if (typed) {
             if (kind != T.TYPE) fail("Expected the exception class, not ${describe()}")
-            typeRefs.add(TypeRef(strings.intern(tokText), tokLine, tokCol, tokCol + (tokEnd - tokStart)))
+            typeRefs.add(TypeRef(internTok(), tokLine, tokCol, tokCol + (tokEnd - tokStart)))
             advance()
         }
         expect(T.LBRACE, "'{'")
@@ -887,15 +895,15 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     // ======================================================================
 
     /** A reference operand's text, position and whether it was one contiguous run on one line (as the builder recorded). */
-    private class Target(val text: String, val line: Int, val contiguousStart: Int)
+    /** An operand's text: a range of [source] when it holds no blank or comment ([start] >= 0), else the tokens joined in [text]. */
+    private class Target(val text: String?, val line: Int, val contiguousStart: Int, val start: Int = -1, val end: Int = -1)
 
     private fun instruction() {
         if (!isWord()) fail("Expected an instruction, a label or a directive, not ${describe()}")
-        val opcodeText = tokText
-        val shape = InstructionShapes[opcodeText] ?: fail("Unknown opcode '$opcodeText'")
+        val opcode = internTok()
+        val shape = InstructionShapes[opcode] ?: fail("Unknown opcode '$opcode'")
         val startLine = tokLine
         val startChar = tokCol
-        val opcode = strings.intern(opcodeText)
         advance()
         when (shape) {
             OperandShape.NONE -> {}
@@ -908,14 +916,14 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
             OperandShape.R_STRING -> {
                 register(); comma()
                 if (kind != T.STRING) fail("Expected a string literal, not ${describe()}")
-                val value = strings.internLiteral(source.substring(tokStart + 1, tokEnd - 1))
+                val value = strings.internLiteral(source, tokStart + 1, tokEnd - 1)
                 advance()
                 instructions.add(ConstStringInstruction(value, startLine, startChar, lastLine, lastEnd))
             }
             OperandShape.R_FIELD -> { register(); comma(); val t = fieldTarget(); addFieldAccess(opcode, t, startLine, startChar) }
             OperandShape.RR_FIELD -> { register(); comma(); register(); comma(); val t = fieldTarget(); addFieldAccess(opcode, t, startLine, startChar) }
             OperandShape.LABEL -> jump(opcode, startLine, startChar)
-            OperandShape.R_LABEL -> { register(); comma(); if (opcodeText.startsWith("if-")) jump(opcode, startLine, startChar) else labelRefs.add(labelOperand()) }
+            OperandShape.R_LABEL -> { register(); comma(); if (opcode.startsWith("if-")) jump(opcode, startLine, startChar) else labelRefs.add(labelOperand()) }
             OperandShape.RR_LABEL -> { register(); comma(); register(); comma(); jump(opcode, startLine, startChar) }
             OperandShape.LIST_METHOD -> { registerList(); comma(); val t = methodTarget(); addInvoke(opcode, t, startLine, startChar) }
             OperandShape.RANGE_METHOD -> { registerRange(); comma(); val t = methodTarget(); addInvoke(opcode, t, startLine, startChar) }
@@ -1000,12 +1008,20 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     /** The text of the operand just consumed: the source slice when it holds no blank or comment, else the tokens joined. */
     private fun target(startIndex: Int, startLine: Int, startCol: Int): Target {
         val endIndex = lastIndex
-        val slice = source.substring(startIndex, endIndex)
-        var contiguous = true
-        for (ch in slice) if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '#') { contiguous = false; break }
-        if (contiguous) return Target(slice, startLine, startCol)
-        return Target(joinedTokens(startIndex, endIndex), startLine, -1)
+        for (i in startIndex until endIndex) {
+            val ch = source[i]
+            if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '#') return Target(joinedTokens(startIndex, endIndex), startLine, -1)
+        }
+        return Target(null, startLine, startCol, startIndex, endIndex)
     }
+
+    /** The canonical string of the operand's [from, to) range, or of the joined text's. */
+    private fun internOf(target: Target, from: Int, to: Int): String =
+        if (target.start >= 0) strings.intern(source, target.start + from, target.start + to) else strings.intern(target.text!!.substring(from, to))
+
+    private fun targetLength(target: Target): Int = if (target.start >= 0) target.end - target.start else target.text!!.length
+    private fun targetIndexOf(target: Target, what: String, from: Int): Int =
+        if (target.start >= 0) source.indexOf(what, target.start + from).let { if (it < 0 || it + what.length > target.end) -1 else it - target.start } else target.text!!.indexOf(what, from)
 
     /** The tokens of a span without the blanks and comments between them. */
     private fun joinedTokens(start: Int, end: Int): String {
@@ -1111,34 +1127,30 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     }
 
     private fun addInvoke(opcode: String, target: Target, startLine: Int, startChar: Int) {
-        val text = target.text
-        val arrow = text.indexOf("->")
+        val arrow = targetIndexOf(target, "->", 0)
         if (arrow < 0) return
-        val signature = text.substring(arrow + 2)
-        val paren = signature.indexOf('(')
+        val paren = targetIndexOf(target, "(", arrow + 2)
         if (paren < 0) return
         instructions.add(InvokeInstruction(
             opcode = opcode,
-            className = strings.intern(text.substring(0, arrow)),
-            methodName = strings.intern(signature.substring(0, paren)),
-            descriptor = strings.intern(signature.substring(paren)),
+            className = internOf(target, 0, arrow),
+            methodName = internOf(target, arrow + 2, paren),
+            descriptor = internOf(target, paren, targetLength(target)),
             startLine = startLine, startChar = startChar, endLine = lastLine, endChar = lastEnd,
             targetLine = target.line, targetStart = target.contiguousStart
         ))
     }
 
     private fun addFieldAccess(opcode: String, target: Target, startLine: Int, startChar: Int) {
-        val text = target.text
-        val arrow = text.indexOf("->")
+        val arrow = targetIndexOf(target, "->", 0)
         if (arrow < 0) return
-        val member = text.substring(arrow + 2)
-        val colon = member.indexOf(':')
+        val colon = targetIndexOf(target, ":", arrow + 2)
         if (colon < 0) return
         instructions.add(FieldAccessInstruction(
             opcode = opcode,
-            className = strings.intern(text.substring(0, arrow)),
-            fieldName = strings.intern(member.substring(0, colon)),
-            fieldType = strings.intern(member.substring(colon + 1)),
+            className = internOf(target, 0, arrow),
+            fieldName = internOf(target, arrow + 2, colon),
+            fieldType = internOf(target, colon + 1, targetLength(target)),
             startLine = startLine, startChar = startChar, endLine = lastLine, endChar = lastEnd,
             targetLine = target.line, targetStart = target.contiguousStart
         ))
@@ -1147,7 +1159,7 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
     private fun addType(opcode: String, target: Target, startLine: Int, startChar: Int) {
         instructions.add(TypeInstruction(
             opcode = opcode,
-            className = strings.intern(target.text),
+            className = internOf(target, 0, targetLength(target)),
             startLine = startLine, startChar = startChar, endLine = lastLine, endChar = lastEnd,
             typeLine = target.line, typeStart = target.contiguousStart
         ))
@@ -1155,6 +1167,9 @@ class SmaliTextParser(private val uri: String, private val source: String, priva
 
     companion object {
         private const val PRIMITIVES = "ZBSCIJFD"
+        /** ASCII name characters: letters, digits, `$`, `_`, `-`; anything beyond ASCII counts too, as the grammar had it. */
+        private val WORD_ASCII = BooleanArray(128).also { t -> for (c in 'a'..'z') t[c.code] = true; for (c in 'A'..'Z') t[c.code] = true; for (c in '0'..'9') t[c.code] = true; t['$'.code] = true; t['_'.code] = true; t['-'.code] = true }
+        private val DIRECTIVE_ASCII = BooleanArray(128).also { t -> for (c in 'a'..'z') t[c.code] = true; for (c in 'A'..'Z') t[c.code] = true; for (c in '0'..'9') t[c.code] = true; t['_'.code] = true; t['-'.code] = true }
         private const val MAX_NESTING = 64
         private val END_WORDS = setOf("method", "field", "annotation", "local", "packed-switch", "sparse-switch", "array-data", "param", "subannotation")
         private val CLASS_MODIFIERS = setOf("public", "private", "protected", "final", "annotation", "synthetic", "static", "abstract", "enum", "interface")

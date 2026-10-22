@@ -19,6 +19,30 @@ class StringPool {
         for (s in COMMON) pool[s] = s
     }
 
+    private class Cache { val values = arrayOfNulls<String>(CACHE_SIZE) }
+    private val caches = ThreadLocal.withInitial { Cache() }
+
+    /**
+     * The canonical instance of `source[start, end)` without creating the substring when this
+     * thread interned the same text recently: most tokens of a scan repeat (owners, descriptors,
+     * opcodes), so the per-thread cache answers them from the range's hash and a region compare.
+     */
+    fun intern(source: String, start: Int, end: Int): String {
+        var h = 0
+        for (i in start until end) h = 31 * h + source[i].code
+        val cache = caches.get().values
+        val slot = (h xor (h ushr 16)) and (CACHE_SIZE - 1)
+        val hit = cache[slot]
+        if (hit != null && hit.hashCode() == h && hit.length == end - start && source.regionMatches(start, hit, 0, end - start)) return hit
+        val s = intern(source.substring(start, end))
+        cache[slot] = s
+        return s
+    }
+
+    /** [internLiteral] from a range of [source]. */
+    fun internLiteral(source: String, start: Int, end: Int): String =
+        if (end - start <= MAX_LITERAL_LENGTH) intern(source, start, end) else source.substring(start, end)
+
     /** The canonical instance of [s]. Thread-safe. */
     fun intern(s: String): String {
         val existing = pool[s]
@@ -48,6 +72,7 @@ class StringPool {
         private const val MAX_SIZE = 500_000
         private const val MAX_MODIFIER_SETS = 4_096
         private const val MAX_LITERAL_LENGTH = 64
+        private const val CACHE_SIZE = 8192
 
         private val COMMON = listOf(
             // Modifiers
