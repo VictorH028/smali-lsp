@@ -250,7 +250,8 @@ server on 12 cores, including file reads:
 
 | | Mastodon | ProtonMail | 76 K-file app |
 |---|---|---|---|
-| Cold | 0.8 s | 1.6 s | 6 s |
+| Cold JVM | 1.0 s | 2.2 s | 6.1 s |
+| Warm JVM | 0.3 s | 1.1 s | 3.3 s |
 
 ### 3.4 String literals
 
@@ -535,8 +536,8 @@ only one index is built at a time.
 
 ## 9. Verification
 
-- `*.unit.*` (467 tests, ~4 s), `*.regression.*` (74, ~1 s), `*.integration.*` (136, ~65 s with
-  the fixtures present; one skip). Run the categories separately: each fork holds a parsed app.
+- `*.unit.*` (532 tests), `*.regression.*` (8), `*.integration.*` (76 with the fixtures
+  present; one skip). Run the categories separately: each fork holds a parsed app.
 - `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
   `.method` or `.field`.
 - `RealApkInvariantsTest`: properties that hold for any apktool project (every invoke in the
@@ -591,6 +592,7 @@ only one index is built at a time.
 | WriteQueue.kt | the writer thread and the request helper |
 | DocumentSymbolProvider.kt | outline |
 | Literals.kt | the one literal a line carries |
+| SourceFiles.kt | file reads: bytes, Latin-1 when pure ASCII, else UTF-8 |
 | Cli.kt | command line, usage, version |
 | DefinitionProvider.kt | definition |
 | InlayHints.kt | resource names and decimal values after literals |

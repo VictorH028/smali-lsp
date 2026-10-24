@@ -110,9 +110,15 @@ class CompletionProvider(
      */
     private fun openBlock(uri: String, line: Int): String? {
         val lines = index.getLines(uri) ?: return null
+        val file = index.findFileByUri(uri)
+        val method = file?.methodAt(line)
         val stack = ArrayList<String>()
         var tentative = false
-        for (i in 0 until minOf(line, lines.size)) {
+        var i = (method?.startLine ?: 0) - 1
+        val end = minOf(line, lines.size)
+        while (++i < end) {
+            // at class level, methods are closed blocks: skip their bodies
+            if (method == null) file?.methodAt(i)?.let { inside -> if (inside.endLine < end) { i = inside.endLine; return@let } }
             val text = lines[i].trim()
             if (text.isEmpty()) continue
             val first = text.substringBefore(' ').removeSuffix(",")

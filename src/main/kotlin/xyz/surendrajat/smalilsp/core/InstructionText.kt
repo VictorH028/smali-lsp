@@ -65,9 +65,6 @@ class InstructionScanner {
     fun registerText(i: Int): String = line.substring(starts[i], ends[i])
     fun register(i: Int): RegisterToken = RegisterToken(line, starts[i], ends[i], parameters[i], numbers[i])
 
-    /** The opcode starts with [prefix] (`invoke-`, `move-result`). */
-    fun opcodeStartsWith(prefix: String): Boolean = opcodeEnd - opcodeStart >= prefix.length && line.startsWith(prefix, opcodeStart)
-
     /** The scanned line as an instruction object. */
     fun toInstruction(): DecodedInstruction =
         DecodedInstruction(line, opcodeStart, opcodeEnd, List(registerCount) { register(it) }, isRange, literal)
