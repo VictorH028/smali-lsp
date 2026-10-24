@@ -362,10 +362,15 @@ whose declarations are unreachable.
 - **Diagnostics**: syntax errors on the offending token and the file-local checks are
   published at once: a jump to an undefined label, a label defined twice, and the assembler
   checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per
-  operand, five 4-bit registers for `35c` calls, literal ranges for `11n`/`21s`/`21h`/`22b`/`22s`,
-  `move-result` placement); unresolved classes in `.super`, `.implements`, field types and
-  instruction targets wait for indexing to finish and are reported only when the class's
-  package is one the workspace defines classes in (the file's own package included). A
+  operand, five 4-bit registers for `35c` calls, the second register of a wide pair, literal
+  ranges for `11n`/`21s`/`21h`/`22b`/`22s`, the register count of a call against its
+  descriptor's slots, `return` and `move-result` kinds against the method's and the call's
+  return type, `move-result` placement, one `.registers` or `.locals`); unresolved classes in
+  `.super`, `.implements`, field types and instruction targets wait for indexing to finish and
+  are reported only when the class's package is one the workspace defines classes in (the
+  file's own package included), and a call or field access whose kind contradicts the
+  declaration the workspace holds (`invoke-static` on an instance method, `sget` on an instance
+  field, and the reverse) is an error naming the right opcode. A
   decompiled app also references classes it does not ship, such as `org.xmlpull` from the
   platform or an optional library like Conscrypt behind a runtime check, and those are not
   errors; a hand-edited name inside the app's own packages is. The three fixtures went from

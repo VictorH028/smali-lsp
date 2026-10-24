@@ -15,7 +15,10 @@ import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.util.Types
 import org.slf4j.LoggerFactory
 
-/** Diagnostics: syntax errors from the parser, label and assembler checks, and undefined classes once the index can tell. */
+/**
+ * Diagnostics: syntax errors from the parser, label and assembler checks, and, once the index can
+ * tell, undefined classes and calls or field accesses whose kind contradicts the member's declaration.
+ */
 class DiagnosticProvider(
     private val parser: SmaliParser,
     private val index: WorkspaceIndex
@@ -83,10 +86,7 @@ class DiagnosticProvider(
         }
     }
     
-    /**
-     * Compute semantic diagnostics for a parsed file.
-     * Checks for undefined references, missing classes, etc.
-     */
+    /** Undefined classes, and a call or field access of the wrong kind for the member the workspace declares. */
     private fun computeSemanticDiagnostics(uri: String, file: SmaliFile): List<Diagnostic> {
         val diagnostics = mutableListOf<Diagnostic>()
         val ownPackage = Types.packageOf(file.classDefinition.name)
@@ -126,8 +126,8 @@ class DiagnosticProvider(
                 val className: String
                 val range: Range
                 when (instruction) {
-                    is InvokeInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range }
-                    is FieldAccessInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range }
+                    is InvokeInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range; invokeKind(instruction)?.let(diagnostics::add) }
+                    is FieldAccessInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range; fieldAccessKind(instruction)?.let(diagnostics::add) }
                     is TypeInstruction -> { className = instruction.className; range = instruction.typeSpan?.toRange() ?: instruction.range }
                     is JumpInstruction, is ConstStringInstruction -> continue   // labels are checked above; string literals need nothing
                 }
@@ -155,6 +155,39 @@ class DiagnosticProvider(
         return diagnostics
     }
         
+    /**
+     * `invoke-static` on an instance method, or an instance call on a static one, decidable when
+     * a workspace class declares the method. The fix named is the call the member needs:
+     * `invoke-direct` for a private method or a constructor, `invoke-interface` for an
+     * interface's, `invoke-virtual` otherwise, keeping the `/range` form.
+     */
+    private fun invokeKind(call: InvokeInstruction): Diagnostic? {
+        val static = call.opcode.startsWith("invoke-static")
+        val target = index.resolveMethod(call.className, call.methodName, call.descriptor) ?: return null
+        if (("static" in target.method.modifiers) == static) return null
+        val use = when {
+            !static -> "invoke-static"
+            target.method.isConstructor || "private" in target.method.modifiers -> "invoke-direct"
+            "interface" in target.file.classDefinition.modifiers -> "invoke-interface"
+            else -> "invoke-virtual"
+        } + if (call.opcode.endsWith("/range")) "/range" else ""
+        val member = if (static) "an instance method" else "a static method"
+        return createDiagnostic(opcodeRange(call.startLine, call.startChar, call.opcode), "${call.opcode} calls ${call.methodName}${call.descriptor}, $member; use $use", DiagnosticSeverity.Error, "invoke-kind")
+    }
+
+    /** `sget`/`sput` on an instance field or `iget`/`iput` on a static one, decidable when a workspace class declares the field. */
+    private fun fieldAccessKind(access: FieldAccessInstruction): Diagnostic? {
+        val static = access.opcode[0] == 's'
+        val target = index.resolveField(access.className, access.fieldName, access.fieldType) ?: return null
+        if (("static" in target.field.modifiers) == static) return null
+        val use = (if (static) "i" else "s") + access.opcode.substring(1)
+        val member = if (static) "an instance field" else "a static field"
+        return createDiagnostic(opcodeRange(access.startLine, access.startChar, access.opcode), "${access.opcode} on ${access.fieldName}, $member; use $use", DiagnosticSeverity.Error, "field-access-kind")
+    }
+
+    /** An instruction's range starts at its opcode. */
+    private fun opcodeRange(line: Int, start: Int, opcode: String) = Range(Position(line, start), Position(line, start + opcode.length))
+
     /**
      * A class reference is reported only when it looks like a mistake: the class is not in the
      * workspace, not a platform class, and its package is one the workspace defines classes in.
