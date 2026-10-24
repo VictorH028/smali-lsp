@@ -380,6 +380,16 @@ whose declarations are unreachable.
   written by `./gradlew generateAndroidPublic` from the `public.xml` of the framework apktool
   ships; public ids never change, so one table serves every app). The literal is read
   from the line on demand, like registers, so the AST is untouched.
+- **Semantic tokens**: `SemanticTokensProvider` classifies every token of an open file: class,
+  member, type and label tokens from the AST's spans (the owner, name and descriptor types of
+  each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,
+  opcodes, registers, literals, strings, comments) from a scan of the lines; where the two
+  overlap the AST wins. Never a re-parse. The last full result per open file is kept, with the
+  text it came from, so `full/delta` answers with one edit (common prefix and suffix) and an
+  unchanged buffer with none; `range` scans only its lines and walks only the methods that
+  reach them, which is what an editor asks for first on a 180 K-line file (0.2 ms there, 68 ms
+  for the full 342 K tokens). SDK classes and members carry `defaultLibrary`, statics `static`.
+  `label` is a custom type in the legend; the others are the standard ones.
 - **Inlay hints**: `InlayHints` scans the requested lines once with `Literals.find`, which
   reads the one literal a line can carry: the last operand of an instruction, a `.field` value,
   an annotation element, an `.array-data` element, a `.sparse-switch` key or the `.packed-switch`
@@ -504,13 +514,14 @@ only one index is built at a time.
 
 | File | Lines | Role |
 |------|-------|------|
-| SmaliTextParser.kt | 1,164 | the front end: lexer, statement parser, model building |
+| SmaliTextParser.kt | 1,179 | the front end: lexer, statement parser, model building |
 | DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
-| McpMode.kt | 661 | MCP server |
-| WorkspaceIndex.kt | 570 | the index |
-| DataStructures.kt | 425 | the AST model |
-| SmaliLanguageServer.kt | 349 | the LSP server: handshake, indexing, capabilities |
-| SmaliTextDocumentService.kt | 283 | document lifecycle and requests |
+| McpMode.kt | 673 | MCP server |
+| WorkspaceIndex.kt | 626 | the index |
+| DataStructures.kt | 435 | the AST model |
+| SmaliLanguageServer.kt | 354 | the LSP server: handshake, indexing, capabilities |
+| SmaliTextDocumentService.kt | 302 | document lifecycle and requests |
+| SemanticTokensProvider.kt | 290 | semantic tokens |
 | HoverProvider.kt | 237 | hover |
 | ReferenceProvider.kt | 228 | references and member families |
 | Types.kt | 221 | descriptor and class-name helpers |
@@ -520,26 +531,26 @@ only one index is built at a time.
 | DiagnosticProvider.kt | 183 | diagnostics |
 | ResourceTable.kt | 166 | `public.xml` and values per workspace root |
 | AssemblerChecks.kt | 162 | assembler checks for hand edits |
+| WorkspaceScanner.kt | 158 | parallel scan |
 | Registers.kt | 151 | register hover, highlight and the frame hover |
-| WorkspaceScanner.kt | 141 | parallel scan |
 | Symbol.kt | 140 | `symbolAt` and the symbol kinds |
 | RenameProvider.kt | 130 | rename |
-| CallHierarchyProvider.kt | 124 | call hierarchy |
+| CallHierarchyProvider.kt | 125 | call hierarchy |
 | DocumentHighlightProvider.kt | 122 | document highlight |
 | SmaliWorkspaceService.kt | 121 | watched files, workspace symbols |
 | CodeLensProvider.kt | 108 | reference and subtype counts |
 | TypeHierarchyProvider.kt | 105 | type hierarchy |
+| JvmTuning.kt | 102 | heap settings applied in-process |
 | InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
-| JvmTuning.kt | 89 | heap settings applied in-process |
+| StringPool.kt | 97 | per-index interning |
 | ResourceLiterals.kt | 83 | resource hover, definition and hints |
 | WriteQueue.kt | 73 | the writer thread and the request helper |
 | DocumentSymbolProvider.kt | 73 | outline |
-| StringPool.kt | 72 | per-index interning |
 | Literals.kt | 66 | the one literal a line carries |
 | Cli.kt | 64 | command line, usage, version |
 | DefinitionProvider.kt | 63 | definition |
 | InlayHints.kt | 60 | resource names and decimal values after literals |
-| UsageList.kt | 60 | packed usage sites |
+| UsageList.kt | 59 | packed usage sites |
 | LabelMap.kt | 58 | packed labels and label references |
 | SmaliParser.kt | 51 | parser entry |
 | FrameworkResources.kt | 48 | the bundled `android.R` names |

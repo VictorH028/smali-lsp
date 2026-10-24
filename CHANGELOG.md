@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Semantic tokens (`textDocument/semanticTokens` full, delta and range): every token classified from the open file's model and a line scan, so editors without a smali grammar get highlighting (#1)
+
 ### Changed
 
 - The index keeps declarations only for files that are not open and parses a file again when a request needs its body: heap after indexing 118 MB on ProtonMail and 447 MB on a 76 K-file app (from 198 MB and 711 MB), scan and request times unchanged

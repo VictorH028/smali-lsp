@@ -20,6 +20,7 @@ import xyz.surendrajat.smalilsp.providers.DocumentHighlightProvider
 import xyz.surendrajat.smalilsp.providers.DocumentSymbolProvider
 import xyz.surendrajat.smalilsp.providers.FoldingRangeProvider
 import xyz.surendrajat.smalilsp.providers.InlayHints
+import xyz.surendrajat.smalilsp.providers.SemanticTokensProvider
 import xyz.surendrajat.smalilsp.providers.ImplementationProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
@@ -58,6 +59,7 @@ class SmaliTextDocumentService(
     private val implementationProvider = ImplementationProvider(index)
     private val documentHighlightProvider = DocumentHighlightProvider(index)
     private val foldingRangeProvider = FoldingRangeProvider()
+    private val semanticTokensProvider = SemanticTokensProvider(index)
     private var client: LanguageClient? = null
 
     /** Open file URIs, so diagnostics can be refreshed once workspace indexing completes. */
@@ -154,6 +156,7 @@ class SmaliTextDocumentService(
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         openFiles.remove(uri)
+        semanticTokensProvider.forget(uri)
         logger.debug("didClose: {}", uri)
         writes.submit("didClose $uri") {
             val buffer = index.getDocumentContent(uri)
@@ -209,6 +212,21 @@ class SmaliTextDocumentService(
     override fun documentHighlight(params: DocumentHighlightParams): CompletableFuture<MutableList<out DocumentHighlight>> =
         writes.request("documentHighlight", { params.at }, { mutableListOf() }) {
             documentHighlightProvider.highlights(params.textDocument.uri, params.position).toMutableList()
+        }
+
+    override fun semanticTokensFull(params: SemanticTokensParams): CompletableFuture<SemanticTokens> =
+        writes.request("semanticTokensFull", { params.textDocument.uri }, { SemanticTokens(emptyList()) }) {
+            semanticTokensProvider.full(params.textDocument.uri) ?: SemanticTokens(emptyList())
+        }
+
+    override fun semanticTokensFullDelta(params: SemanticTokensDeltaParams): CompletableFuture<Either<SemanticTokens, SemanticTokensDelta>> =
+        writes.request("semanticTokensFullDelta", { params.textDocument.uri }, { Either.forLeft(SemanticTokens(emptyList())) }) {
+            semanticTokensProvider.delta(params.textDocument.uri, params.previousResultId) ?: Either.forLeft(SemanticTokens(emptyList()))
+        }
+
+    override fun semanticTokensRange(params: SemanticTokensRangeParams): CompletableFuture<SemanticTokens> =
+        writes.request("semanticTokensRange", { params.textDocument.uri }, { SemanticTokens(emptyList()) }) {
+            semanticTokensProvider.range(params.textDocument.uri, params.range) ?: SemanticTokens(emptyList())
         }
 
     override fun inlayHint(params: InlayHintParams): CompletableFuture<MutableList<InlayHint>> =

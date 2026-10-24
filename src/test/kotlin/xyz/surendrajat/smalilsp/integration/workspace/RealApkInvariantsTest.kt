@@ -93,6 +93,7 @@ class RealApkInvariantsTest {
         dynamicTest("concurrent reads give the same answers as sequential ones") { concurrentReads(fx) },
         dynamicTest("workspace symbol search finds classes by simple name") { symbolSearch(fx) },
         dynamicTest("diagnostics report no syntax errors and no undefined workspace classes") { diagnostics(fx) },
+        dynamicTest("semantic tokens are well-formed") { semanticTokens(fx) },
         dynamicTest("re-indexing and remove+add are no-ops") { idempotentReindex(fx) },
     )
 
@@ -421,7 +422,44 @@ class RealApkInvariantsTest {
         assertEquals(emptyList<String>(), localProblems.take(10), "${fx.dir.name}: ${localProblems.size} label or assembler diagnostics on valid files")
     }
 
-    // ---------- 12. idempotent re-index ----------
+    // ---------- 12. semantic tokens ----------
+
+    /** Every sampled file's tokens are ordered, inside their lines, never overlapping, and each token's text fits its class. */
+    private fun semanticTokens(fx: Fixture) {
+        val provider = xyz.surendrajat.smalilsp.providers.SemanticTokensProvider(fx.index)
+        val files = fx.files
+        var tokens = 0
+        val bad = mutableListOf<String>()
+        for (i in sample(300, files.size, 12)) {
+            val file = files[i]
+            val lines = fx.index.getLines(file.uri) ?: continue
+            val list = provider.collect(file.uri) ?: continue
+            var lastLine = -1; var lastEnd = 0
+            for (t in list) {
+                tokens++
+                val text = lines.getOrNull(t.line)?.let { if (t.col + t.length <= it.length) it.substring(t.col, t.col + t.length) else null }
+                if (text == null) { bad.add("${file.uri}:${t.line} token past the line end"); continue }
+                if (t.line < lastLine || (t.line == lastLine && t.col < lastEnd)) bad.add("${file.uri}:${t.line} overlap at ${t.col}")
+                lastLine = t.line; lastEnd = t.col + t.length
+                val ok = when (t.type) {
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.STRING -> text.startsWith("\"") || text.startsWith("'")
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.COMMENT -> text.startsWith("#")
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.LABEL -> text.startsWith(":")
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.VARIABLE -> text.matches(Regex("v\\d+"))
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.PARAMETER -> text.matches(Regex("p\\d+"))
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.NUMBER -> text.first().isDigit() || text.startsWith("-")
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.KEYWORD -> text.startsWith(".") || text == "true" || text == "false" || text == "null" || xyz.surendrajat.smalilsp.parser.InstructionShapes[text] != null
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.TYPE, xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.CLASS -> text.startsWith("L") || text.startsWith("[") || (text.length == 1 && text[0] in "VZBSCIJFD")
+                    else -> text.isNotBlank()
+                }
+                if (!ok) bad.add("${file.uri}:${t.line} `${text}` as type ${t.type}")
+            }
+        }
+        assertTrue(tokens > 1000, "${fx.dir.name}: only $tokens tokens over the sample?")
+        assertEquals(emptyList<String>(), bad.take(10), "${fx.dir.name}: ${bad.size} malformed tokens")
+    }
+
+    // ---------- 13. idempotent re-index ----------
 
     private fun idempotentReindex(fx: Fixture) {
         val index = fx.index

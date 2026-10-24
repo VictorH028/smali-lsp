@@ -9,6 +9,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Go to Definition** — classes, methods, fields, labels and resource ids
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; string literals too
 - **Hover** — signatures, types, class info, reference counts, registers (`p1` is which parameter), the method's frame, string literals, resource ids with their values, opcode docs
+- **Semantic tokens** — every token classified (directives, opcodes, registers, types, members, labels, literals, comments): highlighting for editors without a smali grammar, precise colours for those with one; full, delta and range
 - **Inlay hints** — resource names or values after `0x7f…` and `android.R` ids, the decimal value after other hex literals
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
@@ -35,6 +36,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search, best 500 |
 | `textDocument/codeLens` + `codeLens/resolve` | counts resolved lazily |
 | `textDocument/inlayHint` | resource names and values, decimal values |
+| `textDocument/semanticTokens/full` `full/delta` `range` | from the open file's model and a line scan, never a re-parse; SDK classes and members carry `defaultLibrary` |
 | `textDocument/completion` | trigger characters `L`, `>`, `/` |
 | `textDocument/prepareRename` + `rename` | methods, fields, labels |
 | `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |

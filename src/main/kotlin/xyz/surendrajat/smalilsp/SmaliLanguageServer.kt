@@ -10,6 +10,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.indexer.WorkspaceScanner
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
 import xyz.surendrajat.smalilsp.providers.CodeLensProvider
+import xyz.surendrajat.smalilsp.providers.SemanticTokensProvider
 import xyz.surendrajat.smalilsp.providers.CompletionProvider
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
@@ -257,6 +258,8 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setDocumentHighlightProvider(true)
         capabilities.setFoldingRangeProvider(true)
         capabilities.setInlayHintProvider(true)
+        // Semantic tokens: full, delta and range, for editors without a smali grammar
+        capabilities.setSemanticTokensProvider(SemanticTokensWithRegistrationOptions(SemanticTokensProvider.legend, SemanticTokensServerFull(true), true))
 
         // Folders added or removed during the session are indexed or dropped
         capabilities.workspace = WorkspaceServerCapabilities().apply {
