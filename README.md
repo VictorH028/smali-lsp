@@ -8,7 +8,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 - **Go to Definition** — classes, methods, fields, labels and resource ids
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; string literals too
-- **Hover** — signatures, types, class info, reference counts, registers (`p1` is which parameter), the method's frame, string literals, resource ids with their values, opcode docs
+- **Hover** — the declaration as smali, then the Java-style signature with each parameter's register, the owner and the reference count; platform members link to the Android reference; registers (`p1` is which parameter), the method's frame, labels, string literals, resource ids with their values, opcode docs
 - **Semantic tokens** — every token classified (directives, opcodes, registers, types, members, labels, literals, comments): highlighting for editors without a smali grammar, precise colours for those with one; full, delta and range
 - **Inlay hints** — resource names or values after `0x7f…` and `android.R` ids, the decimal value after other hex literals
 - **Call Hierarchy** — incoming/outgoing call graphs for any method

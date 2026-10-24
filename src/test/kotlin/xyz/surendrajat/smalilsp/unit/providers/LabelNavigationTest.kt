@@ -165,7 +165,7 @@ class LabelNavigationTest {
         )
         for ((name, count, kind) in labels) {
             val text = hoverAt(flowUri, flow.definitionOf(name).start)
-            assertTrue(text.contains("**Label:** `:$name`") && text.contains("**References:** $count") && text.contains("**Type:** $kind"), text)
+            assertTrue(text.startsWith("`:$name` · $kind · ${when (count) { 0 -> "no references"; 1 -> "1 reference"; else -> "$count references" }}"), text)
         }
     }
 
@@ -193,8 +193,8 @@ class LabelNavigationTest {
         assertEquals(listOf(secondDef), definitions.findDefinition(twinsUri, secondJumps[0].start).map { it.range })
         assertEquals(listOf(firstDef, firstJump), references.findReferences(twinsUri, firstDef.start).map { it.range })
         assertEquals(listOf(secondDef) + secondJumps, references.findReferences(twinsUri, secondJumps[1].start).map { it.range })
-        assertTrue(hoverAt(twinsUri, firstDef.start).contains("**References:** 1"))
-        assertTrue(hoverAt(twinsUri, secondDef.start).contains("**References:** 2"))
+        assertTrue(hoverAt(twinsUri, firstDef.start).contains(" · 1 reference · "))
+        assertTrue(hoverAt(twinsUri, secondDef.start).contains(" · 2 references · "))
         assertEquals(listOf(firstJump, firstDef).map { it.name() }, renamed(twinsUri, firstDef.start, "done"))
         assertEquals((secondJumps + secondDef).map { it.name() }, renamed(twinsUri, secondJumps[0].start, "done"))
     }
@@ -206,7 +206,7 @@ class LabelNavigationTest {
         val caret = Position(5, 11)
         assertTrue(definitions.findDefinition(uri, caret).isEmpty())
         assertEquals(listOf(Range(Position(5, 9), Position(5, 17))), references.findReferences(uri, caret).map { it.range }, "the reference itself is still listed")
-        assertEquals("**Jump to label:** `:nowhere`", hoverAt(uri, caret))
+        assertEquals("`:nowhere` · no such label in this method", hoverAt(uri, caret))
         assertNull(rename.prepareRename(uri, caret))
         assertNull(rename.rename(uri, caret, "somewhere"))
     }

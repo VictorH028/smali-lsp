@@ -11,6 +11,7 @@
 
 ### Changed
 
+- Hover leads with the declaration as smali, then one line with the Java-style signature, each parameter's register, the owner and the reference count; platform members link to the Android reference; opcode, type, label and string hovers are one line each
 - The index keeps declarations only for files that are not open and parses a file again when a request needs its body: heap after indexing 118 MB on ProtonMail and 447 MB on a 76 K-file app (from 198 MB and 711 MB), scan and request times unchanged
 - One full collection right after the scan: committed heap drops to the live set at once (200 MB on ProtonMail, 664 MB on the large app) instead of a minute later
 - Usage sites are four ints instead of five: a re-indexed file gets a fresh id and the old one is retired, so no site carries a generation (live heap 109 MB on ProtonMail, 415 MB on the large app)

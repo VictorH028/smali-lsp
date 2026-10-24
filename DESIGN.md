@@ -399,6 +399,16 @@ whose declarations are unreachable.
   the real-app invariants check on every sampled file, so the formatter is also the statement
   of the layout. Edits are per changed line; range formatting lays out the whole document and
   keeps the lines asked for.
+- **Hover**: the declaration as smali in a code block (`.class` with its `.super` and
+  `.implements`, the `.method` or `.field` line, a platform member's reference as written),
+  then one line to take in at a glance: the Java-style signature with short type names and
+  the register each parameter arrives in, the owner, the reference count through the member
+  family, member and subtype counts for a class. A class or member the workspace does not
+  define links to its page on developer.android.com when it is one the site documents (java,
+  javax, android, androidx, dalvik, org.json, org.w3c, org.xml), else says it is not in the
+  workspace. Opcode hovers show the syntax as smali, the description, and the operands, byte
+  and format on one line; types, labels and strings are one line each. Registers, resource
+  ids and the `.registers` frame keep their own forms.
 - **Semantic tokens**: `SemanticTokensProvider` classifies every token of an open file: class,
   member, type and label tokens from the AST's spans (the owner, name and descriptor types of
   each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,

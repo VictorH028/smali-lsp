@@ -887,11 +887,11 @@ class McpModeTest {
             val methodHover = JsonParser.parseString(getToolResultText(
                 callTool(stdin, stdout, 305, "smali_hover", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "main"))
             )).asJsonObject
-            assertTrue(methodHover.get("contents").asString.contains("**Method:** `main`"), methodHover.toString())
+            assertTrue(methodHover.get("contents").asString.contains(" main("), methodHover.toString())
             val sdkHover = JsonParser.parseString(getToolResultText(
                 callTool(stdin, stdout, 306, "smali_hover", mapOf("class_name" to "Ljava/io/PrintStream;", "member_name" to "println", "descriptor" to "(Ljava/lang/String;)V"))
             )).asJsonObject
-            assertTrue(sdkHover.get("contents").asString.contains("SDK Method"), sdkHover.toString())
+            assertTrue(sdkHover.get("contents").asString.contains("developer.android.com/reference/java/io/PrintStream#println(java.lang.String)"), sdkHover.toString())
 
             // Agent-facing errors, not dead JSON-RPC calls
             val unknownMember = callTool(stdin, stdout, 307, "smali_find_references", mapOf("class_name" to "Lcom/example/test/MainActivity;", "member_name" to "nope"))

@@ -86,7 +86,7 @@ class BodyDroppingTest {
         val callerUri = indexFromDisk(write("Caller.smali", caller))
         val calleeUri = indexFromDisk(write("Callee.smali", callee))
         val hover = assertNotNull(HoverProvider(index).provideHover(callerUri, caller.positionOf("invoke-static {}, Lcom/Callee;->work", "work", 1)))
-        assertTrue(hover.contents.right.value.contains("**Method:** `work`"), hover.contents.right.value)
+        assertTrue(hover.contents.right.value.contains(" work("), hover.contents.right.value)
         assertEquals(calleeUri, DefinitionProvider(index).findDefinition(callerUri, caller.positionOf("invoke-static {}, Lcom/Callee;->work", "work", 1)).single().uri)
         assertEquals(2, ReferenceProvider(index).findReferences(calleeUri, callee.positionOf(".method public static work", "work", 1), includeDeclaration = false).size, "call sites came from the body at index time")
 

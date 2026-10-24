@@ -59,12 +59,12 @@ class StringLiteralTest {
     @Test
     fun `hover shows the text and how many places load it`() {
         val shared = assertNotNull(hovers.provideHover("file:///A.smali", a.positionOf("\"shared\"", "shared", 2))).contents.right.value
-        assertEquals("**String:** `\"shared\"`\n\n**References:** 3", shared)
+        assertEquals("`\"shared\"` · 3 references", shared)
         val fenced = assertNotNull(hovers.provideHover("file:///A.smali", a.positionOf("only", "only", 1))).contents.right.value
-        assertEquals("**String:** ``\"only `here`\"``\n\n**References:** 1", fenced, "a backtick in the value needs a longer fence")
+        assertEquals("``\"only `here`\"`` · 1 reference", fenced, "a backtick in the value needs a longer fence")
         val register = assertNotNull(hovers.provideHover("file:///A.smali", a.positionOf("\"shared\"", "v0", 1))).contents.right.value
         assertTrue(register.startsWith("**Register** `v0`"), "the register wins on its token: $register")
         val opcode = assertNotNull(hovers.provideHover("file:///A.smali", a.positionOf("\"shared\"", "const-string", 3))).contents.right.value
-        assertTrue(opcode.contains("const-string") && !opcode.contains("**String:**"), "the opcode wins on its token: $opcode")
+        assertTrue(opcode.contains("const-string") && !opcode.contains("\"shared\""), "the opcode wins on its token: $opcode")
     }
 }

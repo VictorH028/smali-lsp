@@ -76,7 +76,7 @@ class RegisterTest {
     @Test
     fun `a local register shows its slot and debug name, and the opcode hover still wins on the opcode`() {
         assertEquals("**Register** `v0`: local 1 of 2\n\n**Local:** total: `int`\n\n**Frame:** 7 registers (2 local, 5 parameter) in `run`", hoverAt("const/4 v0", "v0"))
-        assertTrue(hoverAt("const/4 v0", "const/4", 2).contains("CONST/4"), "the opcode word documents the instruction")
+        assertTrue(hoverAt("const/4 v0", "const/4", 2).contains("const/4 vA"), "the opcode word documents the instruction")
     }
 
     @Test

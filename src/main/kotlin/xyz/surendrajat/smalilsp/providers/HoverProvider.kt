@@ -10,8 +10,9 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.util.Types
 
 /**
- * Hover: class hierarchy, member signatures, field types, primitive types, labels, string
- * literals, and Dalvik opcode documentation, as Markdown. The symbol under the caret comes from
+ * Hover, as Markdown: the declaration as smali in a code block, then one line a reader can
+ * take in at a glance, with the Java-style signature, the owner and a count of references. A
+ * platform member links to its reference page. The symbol under the caret comes from
  * [SmaliFile.symbolAt]; registers, resource ids, the `.registers` frame and the opcode lookup
  * read the line text, because they have no AST node.
  */
@@ -33,7 +34,7 @@ class HoverProvider(
             is Symbol.Primitive -> hoverForPrimitiveType(symbol.type)
             is Symbol.LabelDecl -> hoverForLabel(symbol.label, symbol.method)
             is Symbol.LabelRef -> symbol.method.labels[symbol.name]?.let { hoverForLabel(it, symbol.method) }
-                ?: Hover(MarkupContent(MarkupKind.MARKDOWN, "**Jump to label:** `:${symbol.name}`"))
+                ?: markdown("`:${symbol.name}` · no such label in this method")
             is Symbol.OnInstruction -> hoverForRegister(uri, file, position) ?: hoverForOpcodeKeyword(uri, position) ?: hoverForString(uri, position, symbol)
         }
     }
@@ -41,18 +42,8 @@ class HoverProvider(
     /** A string literal: its text and how many `const-string` instructions in the workspace load the same value. */
     private fun hoverForString(uri: String, position: Position, symbol: Symbol): Hover? {
         val value = StringLiterals.at(workspaceIndex, uri, position, symbol)?.value ?: return null
-        val shown = if (value.length > 200) value.substring(0, 199) + "\u2026" else value
-        val md = "**String:** ${codeSpan("\"$shown\"")}\n\n**References:** ${workspaceIndex.findStringUsages(value).size}"
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
-    }
-
-    /** [text] as a Markdown code span, fenced with one more backtick than its longest run of them. */
-    private fun codeSpan(text: String): String {
-        var longest = 0
-        var run = 0
-        for (c in text) { run = if (c == '`') run + 1 else 0; longest = maxOf(longest, run) }
-        val fence = "`".repeat(longest + 1)
-        return "$fence$text$fence"
+        val shown = if (value.length > 200) value.substring(0, 199) + "…" else value
+        return markdown("${codeSpan("\"$shown\"")} · ${count(workspaceIndex.findStringUsages(value).size, "reference")}")
     }
 
     /** On a `.registers` or `.locals` line: the method's frame, with the registers the locals, `this` and each parameter occupy. */
@@ -75,93 +66,68 @@ class HoverProvider(
         return Registers.hover(method, file.classDefinition.name, lines, register, position.line)
     }
 
+    /** `:cond_0` · Conditional branch target · 2 references · lines 12, 20 */
     private fun hoverForLabel(labelDef: LabelDefinition, method: MethodDefinition): Hover {
-        val referenceCount = method.labelRefs.count { it.name == labelDef.name }
-        val md = buildString {
-            append("**Label:** `:${labelDef.name}`\n\n")
-            append("**References:** $referenceCount\n\n")
-            val labelType = when {
-                labelDef.name.startsWith("cond_") -> "Conditional branch target"
-                labelDef.name.startsWith("goto_") -> "Unconditional branch target"
-                labelDef.name.startsWith("try_start") -> "Try block start"
-                labelDef.name.startsWith("try_end") -> "Try block end"
-                labelDef.name.startsWith("catch_") -> "Exception handler"
-                labelDef.name.startsWith("catchall_") -> "Catch-all exception handler"
-                labelDef.name.startsWith("switch_") -> "Switch branch target"
-                labelDef.name.startsWith("pswitch_") -> "Packed switch target"
-                labelDef.name.startsWith("sswitch_") -> "Sparse switch target"
-                labelDef.name.startsWith("array_") -> "Array data target"
-                else -> "Branch target"
-            }
-            append("**Type:** $labelType")
+        val refs = method.labelRefs.filter { it.name == labelDef.name }
+        val kind = when {
+            labelDef.name.startsWith("cond_") -> "Conditional branch target"
+            labelDef.name.startsWith("goto_") -> "Unconditional branch target"
+            labelDef.name.startsWith("try_start") -> "Try block start"
+            labelDef.name.startsWith("try_end") -> "Try block end"
+            labelDef.name.startsWith("catch_") -> "Exception handler"
+            labelDef.name.startsWith("catchall_") -> "Catch-all exception handler"
+            labelDef.name.startsWith("switch_") -> "Switch branch target"
+            labelDef.name.startsWith("pswitch_") -> "Packed switch target"
+            labelDef.name.startsWith("sswitch_") -> "Sparse switch target"
+            labelDef.name.startsWith("array_") -> "Array data target"
+            else -> "Branch target"
         }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        val lines = refs.map { it.line + 1 }.sorted().let { if (it.size > 5) it.take(5).joinToString(", ") + ", …" else it.joinToString(", ") }
+        val from = if (refs.isEmpty()) "" else " · line${if (refs.size == 1) "" else "s"} $lines"
+        return markdown("`:${labelDef.name}` · $kind · ${count(refs.size, "reference")}$from")
     }
 
+    /** The `.class`, `.super` and `.implements` lines, then the readable name with member and subtype counts. */
     private fun hoverForClass(classDef: ClassDefinition): Hover? {
         val file = workspaceIndex.findClass(classDef.name) ?: return null
-        val md = buildString {
-            append("**Class:** `${Types.readableName(file.classDefinition.name)}`\n\n")
-            if (file.classDefinition.modifiers.isNotEmpty()) {
-                append("**Modifiers:** ${file.classDefinition.modifiers.joinToString(", ")}\n\n")
-            }
-            file.classDefinition.superClass?.let {
-                append("**Extends:** `${Types.readableName(it)}`\n\n")
-            }
-            if (file.classDefinition.interfaces.isNotEmpty()) {
-                append("**Implements:**\n")
-                file.classDefinition.interfaces.forEach { iface ->
-                    append("- `${Types.readableName(iface)}`\n")
-                }
-                append("\n")
-            }
-            append("**Methods:** ${file.methods.size}  ")
-            append("**Fields:** ${file.fields.size}")
+        val definition = file.classDefinition
+        val declaration = buildString {
+            append(".class ")
+            if (definition.modifiers.isNotEmpty()) append(definition.modifiers.joinToString(" ")).append(' ')
+            append(definition.name)
+            definition.superClass?.let { append("\n.super ").append(it) }
+            for (iface in definition.interfaces) append("\n.implements ").append(iface)
         }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        val facts = mutableListOf("`${Types.readableName(definition.name)}`", count(file.methods.size, "method"), count(file.fields.size, "field"))
+        workspaceIndex.getDirectSubclasses(definition.name).size.let { if (it > 0) facts.add(if (it == 1) "1 subclass" else "$it subclasses") }
+        workspaceIndex.getDirectImplementors(definition.name).size.let { if (it > 0) facts.add(count(it, "implementor")) }
+        return markdown(code(declaration) + "\n" + facts.joinToString(" · "))
     }
 
-    /** The declaration's signature with the register each parameter arrives in, where it is declared, and how many calls bind to it (through subclasses and overrides). */
+    /** The `.method` line, then the Java-style signature with the register each parameter arrives in, the owner and how many calls bind to it (through subclasses and overrides). */
     private fun hoverForMethod(method: MethodDefinition, className: String): Hover {
-        val md = buildString {
-            append("**Method:** `${method.name}`\n\n")
-            append("**Declared in:** `${Types.readableName(className)}`\n\n")
-            if (method.modifiers.isNotEmpty()) {
-                append("**Modifiers:** ${method.modifiers.joinToString(", ")}\n\n")
-            }
-            val params = method.parameters.joinToString(", ") { Types.readableName(it.type) }
-            val returnType = Types.readableName(method.returnType)
-            append("**Signature:** `($params)$returnType`\n\n")
-            if (method.parameters.isNotEmpty()) {
-                append("**Parameters:**\n")
-                var slot = if ("static" in method.modifiers) 0 else 1
-                method.parameters.forEach { param ->
-                    val width = RegisterFrame.slots(param.type)
-                    append("- ${Registers.span("p", slot, slot + width - 1)} `${Types.readableName(param.type)}`")
-                    param.name?.let { append(" $it") }
-                    append("\n")
-                    slot += width
-                }
-                append("\n")
-            }
-            append("**Returns:** `$returnType`\n\n")
-            append("**References:** ${references.methodFamily(className, method.name, method.descriptor).usages.size}")
-        }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        val declaration = ".method " + (if (method.modifiers.isEmpty()) "" else method.modifiers.joinToString(" ") + " ") + method.name + method.descriptor
+        val usages = references.methodFamily(className, method.name, method.descriptor).usages.size
+        return markdown(code(declaration) + "\n`${signature(method)}` in `${Types.readableName(className)}` · ${count(usages, "reference")}")
     }
 
-    /** The field's type, where it is declared, and how many accesses bind to it. */
-    private fun hoverForField(field: FieldDefinition, className: String): Hover {
-        val md = buildString {
-            append("**Field:** `${field.name}`\n\n")
-            append("**Declared in:** `${Types.readableName(className)}`\n\n")
-            if (field.modifiers.isNotEmpty()) {
-                append("**Modifiers:** ${field.modifiers.joinToString(", ")}\n\n")
-            }
-            append("**Type:** `${Types.readableName(field.type)}`\n\n")
-            append("**References:** ${references.fieldFamily(className, field.name, field.type).usages.size}")
+    /** `String[] A(m p0, int p1)`: short type names, each parameter with its register, a `.param` name in quotes after it. */
+    private fun signature(method: MethodDefinition): String {
+        var slot = if ("static" in method.modifiers) 0 else 1
+        val params = method.parameters.joinToString(", ") { param ->
+            val width = RegisterFrame.slots(param.type)
+            val register = if (width == 1) "p$slot" else "p$slot..p${slot + width - 1}"
+            slot += width
+            "${short(param.type)} $register" + (param.name?.let { " \"$it\"" } ?: "")
         }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        return "${short(method.returnType)} ${method.name}($params)"
+    }
+
+    /** The `.field` line, then the readable type and name, the owner and how many accesses bind to it. */
+    private fun hoverForField(field: FieldDefinition, className: String): Hover {
+        val declaration = ".field " + (if (field.modifiers.isEmpty()) "" else field.modifiers.joinToString(" ") + " ") + field.name + ":" + field.type
+        val usages = references.fieldFamily(className, field.name, field.type).usages.size
+        return markdown(code(declaration) + "\n`${short(field.type)} ${field.name}` in `${Types.readableName(className)}` · ${count(usages, "reference")}")
     }
 
     /** Opcode documentation when the caret is on the first word of an instruction line. */
@@ -175,7 +141,7 @@ class HoverProvider(
         val opcodeEnd = opcodeStart + trimmed.indexOf(' ').let { if (it == -1) trimmed.length else it }
         if (position.character < opcodeStart || position.character >= opcodeEnd) return null
         val info = DalvikOpcodeDatabase.lookup(lineContent.substring(opcodeStart, opcodeEnd)) ?: return null
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, info.toMarkdown()))
+        return markdown(info.toMarkdown())
     }
 
     /** [type] may be an array; the hover describes its element class. */
@@ -183,32 +149,44 @@ class HoverProvider(
         if (Types.isPrimitive(type)) return hoverForPrimitiveType(type)
         val file = workspaceIndex.findClass(Types.className(type) ?: type)
         if (file != null) return hoverForClass(file.classDefinition)
-        return unresolved("Class", type, "**Class:** `${Types.readableName(type)}`")
+        return markdown(code(type) + "\n`${Types.readableName(type)}` · ${elsewhere(Types.className(type) ?: type, null)}")
     }
 
     fun hoverForMethodReference(className: String, methodName: String, descriptor: String): Hover? {
         workspaceIndex.resolveMethod(className, methodName, descriptor)?.let { return hoverForMethod(it.method, it.file.classDefinition.name) }
-        return unresolved("Method", className, "**Method:** `${className}.${methodName}`", "**Descriptor:** `${descriptor}`")
+        val close = descriptor.indexOf(')')
+        val params = if (close < 0) emptyList() else Types.parseTypeStrings(descriptor.substring(0, close + 1))
+        val returnType = if (close < 0 || close + 1 >= descriptor.length) "V" else descriptor.substring(close + 1)
+        val signature = "${short(returnType)} $methodName(${params.joinToString(", ") { short(it) }})"
+        val anchor = "#" + (if (methodName == "<init>") Types.simpleName(className) else methodName) + "(" + params.joinToString(",%20") { Types.readableName(it).replace('$', '.') } + ")"
+        return markdown(code("$className->$methodName$descriptor") + "\n`$signature` in `${Types.readableName(className)}` · ${elsewhere(className, anchor)}")
     }
 
     fun hoverForFieldReference(className: String, fieldName: String, fieldType: String): Hover? {
         workspaceIndex.resolveField(className, fieldName, fieldType)?.let { return hoverForField(it.field, it.file.classDefinition.name) }
-        return unresolved("Field", className, "**Field:** `${className}.${fieldName}`", "**Type:** `${Types.readableName(fieldType)}`")
+        return markdown(code("$className->$fieldName:$fieldType") + "\n`${short(fieldType)} $fieldName` in `${Types.readableName(className)}` · ${elsewhere(className, "#$fieldName")}")
     }
 
-    /** The hover for a class or member the workspace does not define: a platform one, or one the app does not ship. */
-    private fun unresolved(kind: String, className: String, vararg lines: String): Hover {
-        val md = buildString {
-            for (line in lines) append(line).append("\n\n")
-            append(if (Types.isSdkClass(className)) "*SDK $kind* - Part of Android SDK or Java standard library" else "*Not found in workspace*")
+    /** What to say about a class the workspace does not define: a link to its reference page when it has one, else that it is not here. */
+    private fun elsewhere(className: String, anchor: String?): String {
+        val link = referenceUrl(className)
+        return when {
+            link != null -> "[Android reference]($link${anchor ?: ""})"
+            Types.isSdkClass(className) -> "*Platform type*"
+            else -> "*Not found in workspace*"
         }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
     }
 
+    /** `developer.android.com/reference/java/lang/String` for the platform and AndroidX classes it documents; null for arrays, primitives and everything else. */
+    private fun referenceUrl(className: String): String? {
+        if (!className.startsWith("L") || DOCUMENTED.none { className.startsWith(it) }) return null
+        return "https://developer.android.com/reference/" + className.substring(1, className.length - 1).replace('$', '.')
+    }
+
+    /** `int` · 32-bit signed integer; `int[][]` · 2-dimensional array of `int` (32-bit signed integer) */
     private fun hoverForPrimitiveType(type: String): Hover {
-        val arrayDim = type.takeWhile { it == '[' }.length
+        val dimensions = type.takeWhile { it == '[' }.length
         val base = type.trimStart('[')
-        val typeName = Types.readableName(base)
         val description = when (base.firstOrNull()) {
             'I' -> "32-bit signed integer"
             'J' -> "64-bit signed integer"
@@ -221,17 +199,38 @@ class HoverProvider(
             'V' -> "no return value"
             else -> "unknown primitive type"
         }
-        val md = buildString {
-            if (arrayDim > 0) {
-                append("**Primitive Array:** `${Types.readableName(type)}`\n\n")
-                append("**Base Type:** `${typeName}` ($description)\n\n")
-                append("**Dimensions:** $arrayDim\n\n")
-            } else {
-                append("**Primitive Type:** `${typeName}`\n\n")
-                append("**Description:** $description\n\n")
-            }
-            append("*Built-in type* - Part of the Dalvik/Java type system")
-        }
-        return Hover(MarkupContent(MarkupKind.MARKDOWN, md))
+        val name = Types.readableName(base)
+        return markdown(when (dimensions) {
+            0 -> "`$name` · $description"
+            1 -> "`$name[]` · array of `$name` ($description)"
+            else -> "`${Types.readableName(type)}` · $dimensions-dimensional array of `$name` ($description)"
+        })
+    }
+
+    private fun markdown(text: String) = Hover(MarkupContent(MarkupKind.MARKDOWN, text))
+
+    private fun code(smali: String) = "```smali\n$smali\n```"
+
+    /** `java.lang.String[]` → `String[]`, `com.app.Outer$Inner` → `Inner`. */
+    private fun short(type: String): String {
+        val readable = Types.readableName(type)
+        val bracket = readable.indexOf('[')
+        val base = if (bracket < 0) readable else readable.substring(0, bracket)
+        return base.substringAfterLast('.').substringAfterLast('$') + (if (bracket < 0) "" else readable.substring(bracket))
+    }
+
+    private fun count(n: Int, noun: String) = when (n) { 0 -> "no ${noun}s"; 1 -> "1 $noun"; else -> "$n ${noun}s" }
+
+    /** [text] as a Markdown code span, fenced with one more backtick than its longest run of them. */
+    private fun codeSpan(text: String): String {
+        var longest = 0
+        var run = 0
+        for (c in text) { run = if (c == '`') run + 1 else 0; longest = maxOf(longest, run) }
+        val fence = "`".repeat(longest + 1)
+        return "$fence$text$fence"
+    }
+
+    private companion object {
+        val DOCUMENTED = listOf("Ljava/", "Ljavax/", "Landroid/", "Landroidx/", "Ldalvik/", "Lorg/json/", "Lorg/w3c/", "Lorg/xml/", "Lorg/xmlpull/")
     }
 }

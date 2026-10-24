@@ -124,10 +124,10 @@ class DalvikOpcodeDatabaseTest {
     fun `toMarkdown includes key fields`() {
         val info = DalvikOpcodeDatabase.lookup("invoke-virtual")!!
         val md = info.toMarkdown()
-        assertTrue(md.contains("INVOKE-VIRTUAL"))
+        assertTrue(md.startsWith("```smali\ninvoke-virtual "))
         assertTrue(md.contains("0x6E"))
         assertTrue(md.contains("35c"))
-        assertTrue(md.contains("Syntax"))
+        assertTrue(md.contains("format `35c`"))
         assertTrue(md.contains("meth@BBBB"))
     }
 
