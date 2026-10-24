@@ -8,16 +8,19 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 - **Go to Definition** — classes, methods, fields, labels and resource ids
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; string literals too
-- **Hover** — signatures, types, class info, reference counts, registers (`p1` is which parameter), the method's frame, string literals, resource ids with their values, opcode docs
+- **Hover** — the declaration as smali and a one-line signature with each parameter's register; registers, frames, labels, strings, resource ids, opcode docs; platform members link to the Android reference
+- **Semantic tokens** — every token classified, full, delta and range: highlighting for editors without a smali grammar
 - **Inlay hints** — resource names or values after `0x7f…` and `android.R` ids, the decimal value after other hex literals
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
 - **Code Lens** — reference counts on classes, methods and fields; subclass and implementation counts
-- **Completion** — class names (ranked), members including inherited ones, opcodes
+- **Completion** — the members the opcode and register count allow, classes of the kind the operand needs, labels, registers, directives, opcodes as snippets
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors, undefined or duplicate labels, undefined classes in the app's own packages, and what the assembler would reject after a hand edit
+- **Diagnostics** — syntax errors, labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit
+- **Quick fixes** — one code action per diagnostic with a single right answer
+- **Formatting** — baksmali's layout for the document or a range; blank lines, strings and comments stay as written
 - **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** — 224 opcodes, including `invoke-custom`, `invoke-polymorphic` and method handles
@@ -30,12 +33,15 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `initialize` / `initialized` / `shutdown` / `exit` | workspace folders or `rootUri`; indexing after `initialized`, with progress |
 | `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer while open, the disk version after close |
 | `textDocument/publishDiagnostics` | syntax errors at once, undefined classes once indexing has finished |
+| `textDocument/codeAction` | quick fixes for the diagnostics on the requested lines |
+| `textDocument/formatting` · `rangeFormatting` | baksmali's layout, one edit per changed line |
 | `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow overrides and calls through subclasses |
 | `textDocument/foldingRange` | methods, annotations, switch tables, array data |
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search, best 500 |
 | `textDocument/codeLens` + `codeLens/resolve` | counts resolved lazily |
 | `textDocument/inlayHint` | resource names and values, decimal values |
-| `textDocument/completion` | trigger characters `L`, `>`, `/` |
+| `textDocument/semanticTokens/full` `full/delta` `range` | from the open file's model, never a re-parse |
+| `textDocument/completion` | trigger characters `L`, `>`, `/`, `:`, `.`, `{` |
 | `textDocument/prepareRename` + `rename` | methods, fields, labels |
 | `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
 | `textDocument/prepareTypeHierarchy` + `typeHierarchy/supertypes` `subtypes` | |
@@ -172,8 +178,8 @@ Measured on three apktool projects on a 12-core Apple Silicon laptop, JDK 21:
 
 | | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
 | --- | --- | --- | --- |
-| Index the workspace (cold) | 0.8 s | 1.6 s | 6 s |
-| Heap after indexing | — | 178 MB | 659 MB |
+| Index the workspace, cold / warm JVM | 1.0 / 0.3 s | 2.2 / 1.1 s | 6.1 / 3.3 s |
+| Heap after indexing | — | 109 MB | 415 MB |
 | Re-index one file on edit, p95 | — | 0.2 ms | 0.6 ms |
 | Workspace symbol search | — | 4–14 ms | 19–25 ms |
 

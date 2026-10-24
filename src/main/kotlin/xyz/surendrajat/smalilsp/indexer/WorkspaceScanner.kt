@@ -7,6 +7,12 @@ import xyz.surendrajat.smalilsp.parser.SmaliParser
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Files
+import xyz.surendrajat.smalilsp.util.SourceFiles
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.Path
+import java.nio.file.FileVisitResult
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -101,11 +107,11 @@ class WorkspaceScanner(
      */
     private fun processFile(file: File) {
         val uri = file.toPath().toUri().toString()  // file:///…, the form LSP clients send
-        val content = file.readText(Charsets.UTF_8)
+        val content = SourceFiles.read(file)
         
         val smaliFile = parser.parse(uri, content)
             ?: throw IllegalStateException("Parse returned null for $uri")
-        index.indexFile(smaliFile)
+        index.indexFile(smaliFile, keepBody = false)
     }
     
     /**
@@ -116,12 +122,23 @@ class WorkspaceScanner(
             return emptyList()
         }
         
-        // Symlinked directories are skipped: a link back up the tree would otherwise recurse
-        // until the path is too long, and a link elsewhere would index its files twice
-        return directory.walkTopDown()
-            .onEnter { it == directory || !Files.isSymbolicLink(it.toPath()) }
-            .filter { it.isFile && it.extension == "smali" }
-            .toList()
+        // One stat per entry, from the walk's attributes. Links below the root are not followed:
+        // a symlinked directory would recurse until the path is too long or index its files
+        // twice. A root that is itself a link is entered, and its files keep the root's spelling,
+        // which is the one the client opens them by.
+        val root = directory.toPath()
+        val walkRoot = if (Files.isSymbolicLink(root)) root.toRealPath() else root
+        val found = ArrayList<File>()
+        Files.walkFileTree(walkRoot, object : SimpleFileVisitor<Path>() {
+            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                if (file.fileName.toString().endsWith(".smali") && (attrs.isRegularFile || (attrs.isSymbolicLink && Files.isRegularFile(file)))) {
+                    found.add((if (walkRoot === root) file else root.resolve(walkRoot.relativize(file))).toFile())
+                }
+                return FileVisitResult.CONTINUE
+            }
+            override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
+        })
+        return found
     }
 }
 

@@ -45,14 +45,18 @@ class HoverTypeOperandTest {
         .super $widget
     """.trimIndent()
 
-    private val builtIn = "*Built-in type* - Part of the Dalvik/Java type system"
-    private val widgetHover = "**Class:** `com.app.Widget`\n\n**Modifiers:** public\n\n**Extends:** `java.lang.Object`\n\n**Methods:** 0  **Fields:** 0"
-    private val partHover = "**Class:** `com.app.Widget\$Part`\n\n**Modifiers:** public, final\n\n**Extends:** `com.app.Widget`\n\n**Methods:** 0  **Fields:** 0"
-    private fun sdk(name: String) = "**Class:** `$name`\n\n*SDK Class* - Part of Android SDK or Java standard library"
-    private fun primitive(name: String, description: String) =
-        "**Primitive Type:** `$name`\n\n**Description:** $description\n\n$builtIn"
+    private val widgetHover = "```smali\n.class public Lcom/app/Widget;\n.super Ljava/lang/Object;\n```\n`com.app.Widget` · no methods · no fields"
+    private val partHover = "```smali\n.class public final Lcom/app/Widget\$Part;\n.super Lcom/app/Widget;\n```\n`com.app.Widget\$Part` · no methods · no fields"
+    /** A platform class or an array of one: the descriptor, the readable name and the link to its page, built from the name. */
+    private fun sdk(name: String): String {
+        val dimensions = name.count { it == '[' }
+        val base = name.substringBefore("[")
+        val descriptor = "[".repeat(dimensions) + "L" + base.replace('.', '/') + ";"
+        return "```smali\n$descriptor\n```\n`$name` · [Android reference](https://developer.android.com/reference/${base.replace('.', '/').replace('$', '.')})"
+    }
+    private fun primitive(name: String, description: String) = "`$name` · $description"
     private fun primitiveArray(name: String, description: String, dimensions: Int) =
-        "**Primitive Array:** `$name${"[]".repeat(dimensions)}`\n\n**Base Type:** `$name` ($description)\n\n**Dimensions:** $dimensions\n\n$builtIn"
+        if (dimensions == 1) "`$name[]` · array of `$name` ($description)" else "`$name${"[]".repeat(dimensions)}` · $dimensions-dimensional array of `$name` ($description)"
 
     private val intHover = primitive("int", "32-bit signed integer")
     private val booleanHover = primitive("boolean", "true or false")
@@ -149,8 +153,10 @@ class HoverTypeOperandTest {
             val provider = HoverProvider(workspaceWith(uri, source))
             val last = Position(first.line, first.character + type.type.length - 1)
             val where = "${type.type} in ${context.name}"
-            assertEquals(type.hover, provider.provideHover(uri, first)?.contents?.right?.value, "first character of $where")
-            assertEquals(type.hover, provider.provideHover(uri, last)?.contents?.right?.value, "last character of $where")
+            // the subtype counts depend on the context: the cell itself may extend or implement the widget
+            fun hover(at: Position) = provider.provideHover(uri, at)?.contents?.right?.value?.replace(Regex("( · \\d+ (subclass(es)?|implementors?))+$"), "")
+            assertEquals(type.hover, hover(first), "first character of $where")
+            assertEquals(type.hover, hover(last), "last character of $where")
         }
     }
 
@@ -189,9 +195,10 @@ class HoverTypeOperandTest {
     """.trimIndent()
 
     private val uri = "file:///Probe.smali"
-    private val probeHover = "**Class:** `com.app.Probe`\n\n**Modifiers:** public\n\n**Extends:** `java.lang.Object`\n\n**Methods:** 2  **Fields:** 2"
-    private fun initHover() = "**Method:** `<init>`\n\n**Declared in:** `com.app.Probe`\n\n**Modifiers:** public, constructor\n\n**Signature:** `()void`\n\n**Returns:** `void`\n\n**References:** " +
-        ReferenceProvider(index).findMethodReferences("Lcom/app/Probe;", "<init>", "()V", includeDeclaration = false).size
+    private val probeHover = "```smali\n.class public Lcom/app/Probe;\n.super Ljava/lang/Object;\n```\n`com.app.Probe` · 2 methods · 2 fields"
+    private fun initHover() = "```smali\n.method public constructor <init>()V\n```\n`void <init>()` in `com.app.Probe` · " +
+        references(ReferenceProvider(index).findMethodReferences("Lcom/app/Probe;", "<init>", "()V", includeDeclaration = false).size)
+    private fun references(n: Int) = when (n) { 0 -> "no references"; 1 -> "1 reference"; else -> "$n references" }
 
     private lateinit var index: WorkspaceIndex
     private lateinit var provider: HoverProvider
@@ -214,7 +221,7 @@ class HoverTypeOperandTest {
         assertNull(hoverAt("items:", ".field", 2))
         assertNull(hoverAt("items:", "static"))
         val itemAccesses = ReferenceProvider(index).findFieldReferences("Lcom/app/Probe;", "items", "[Ljava/lang/String;", includeDeclaration = false).size
-        assertEquals("**Field:** `items`\n\n**Declared in:** `com.app.Probe`\n\n**Modifiers:** private, static, final\n\n**Type:** `java.lang.String[]`\n\n**References:** $itemAccesses", hoverAt("items:", "items", 2))
+        assertEquals("```smali\n.field private static final items:[Ljava/lang/String;\n```\n`String[] items` in `com.app.Probe` · ${references(itemAccesses)}", hoverAt("items:", "items", 2))
         assertNull(hoverAt(".end method", ".end", 2))
     }
 
@@ -228,7 +235,7 @@ class HoverTypeOperandTest {
         for ((marker, hex) in opcodes) {
             val opcode = marker.substringBefore(' ')
             val hover = hoverAt(marker, opcode, 2)
-            assertTrue(hover != null && hover.startsWith("## ${opcode.uppercase()}\n\n**Opcode:** `0x$hex`\n\n"), "$opcode: $hover")
+            assertTrue(hover != null && hover.startsWith("```smali\n$opcode") && hover.contains("opcode `0x$hex`"), "$opcode: $hover")
         }
         assertTrue(assertNotNull(hoverAt("check-cast", "v0")).contains("Register"))
         assertTrue(assertNotNull(hoverAt("filled-new-array {", "v1")).contains("Register"))
@@ -242,9 +249,9 @@ class HoverTypeOperandTest {
         assertEquals(longArrayHover, hoverAt("new-array", "[J", 2), "end of the line")
         assertEquals(probeHover, hoverAt("invoke-static", "->"), "the arrow right after the owner")
         val name = hoverAt(".method public static run", "(")
-        assertTrue(name != null && name.startsWith("**Method:** `run`\n\n**Declared in:** `com.app.Probe`\n\n**Modifiers:** public, static\n\n"), "the parenthesis right after the name: $name")
+        assertTrue(name != null && name.startsWith("```smali\n.method public static run(ILjava/lang/String;[JZ)Landroid/os/Bundle;\n```\n`Bundle run(int p0, String p1, long[] p2, boolean p3)` in `com.app.Probe` · "), "the parenthesis right after the name: $name")
         val call = hoverAt("invoke-static", ")")
-        assertTrue(call != null && call.startsWith("**Method:** `run`\n\n"), "a descriptor delimiter in a call is the method: $call")
+        assertTrue(call != null && call.startsWith("```smali\n.method public static run("), "a descriptor delimiter in a call is the method: $call")
         assertNull(hoverAt(".method public static run", ")"), "a descriptor delimiter in a declaration is nothing")
     }
 
@@ -272,15 +279,15 @@ class HoverTypeOperandTest {
         assertNull(hoverAt("# trailing comment", "#"))
         assertNull(hoverAt("# trailing comment", "comment"))
         val opcode = hoverAt("# trailing comment", "const/4", 2)
-        assertTrue(opcode != null && opcode.startsWith("## CONST/4\n\n**Opcode:** `0x12`\n\n"), "the opcode before the comment: $opcode")
+        assertTrue(opcode != null && opcode.startsWith("```smali\nconst/4 vA, #+B\n```") && opcode.contains("opcode `0x12`"), "the opcode before the comment: $opcode")
     }
 
     @Test
     fun `a workspace class named like an SDK class shows the class, not the SDK label`() {
         assertEquals(sdk("java.lang.Object"), hoverAt(".super", "Ljava/lang/Object;", 3))
         index.openSource("file:///Object.smali", ".class public Ljava/lang/Object;\n.super Ljava/lang/Object;")
-        assertEquals(
-            "**Class:** `java.lang.Object`\n\n**Modifiers:** public\n\n**Extends:** `java.lang.Object`\n\n**Methods:** 0  **Fields:** 0",
+        assertTrue(
+            hoverAt(".super", "Ljava/lang/Object;", 3)!!.startsWith("```smali\n.class public Ljava/lang/Object;\n.super Ljava/lang/Object;\n```\n`java.lang.Object` · no methods · no fields"),
             hoverAt(".super", "Ljava/lang/Object;", 3)
         )
     }

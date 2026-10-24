@@ -231,6 +231,7 @@ class McpMode {
                 val index = WorkspaceIndex()
                 val result = WorkspaceScanner(index).scanDirectory(dir) { _, _ -> }
                 index.trimUsages()
+                JvmTuning.compactAfterScan()
                 index.resources.load(ResourceTable.publicXml(dir))
                 session = Session(dir.absolutePath, index)
                 index to result
@@ -395,7 +396,7 @@ class McpMode {
             uriArg
         ) { args, s ->
             val uri = args.require("uri")
-            val file = s!!.index.findFileByUri(uri) ?: throw ToolError("File not found in index: $uri")
+            val file = s!!.index.findDeclarations(uri) ?: throw ToolError("File not found in index: $uri")
             val className = file.classDefinition.name
             val symbols = mutableListOf<Map<String, Any?>>()
             symbols.add(mapOf(

@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.1.0] - 2026-10-24
+
+### Added
+
+- Semantic tokens: full, delta and range, so editors without a smali grammar get highlighting (#1)
+- Assembler checks for call arity, `return` and `move-result` kinds, wide pairs past the frame, a second frame directive, and static against instance members when the workspace declares them
+- Quick fixes (`textDocument/codeAction`) for every diagnostic with one right answer
+- Formatting and range formatting in baksmali's layout, one edit per changed line
+
+### Changed
+
+- Completion offers what the opcode can take: members by kind and register count, classes by the kind the operand needs, labels, registers, directives and snippet-shaped opcodes while typing; obfuscated owners with non-ASCII names complete too
+- Hover leads with the declaration as smali and one line with the signature, each parameter's register, the owner and the reference count; platform members link to the Android reference
+- Memory: closed files keep only their declarations and parse again on demand, usage sites are four ints, one full collection after the scan. Heap after indexing 198 → 109 MB on ProtonMail and 711 → 415 MB on a 76 K-file app, committed memory at that level at once instead of a minute later
+- Scan: files read as bytes, the tree walked with its attributes, ASCII lexed through tables, tokens interned from their source ranges: half the garbage per scan, warm scans about 20 percent faster on the large app; the parsed model is byte-identical on every fixture file
+
+### Fixed
+
+- A workspace root that is a symbolic link is scanned again
+
 ## [2.0.0] - 2026-10-19
 
 ### Breaking

@@ -249,6 +249,76 @@ class LspStdioTest {
     }
 
     @Test
+    fun `formatting comes back as one edit per changed line over stdio`() {
+        writeWorkspace()
+        val text = ".class public Lcom/app/Fmt;\n.super Ljava/lang/Object;\n.method public run()V\n.registers 2\n  const/4 v0,0x1\n    return-void\n.end method\n"
+        val file = workspace.resolve("smali/com/app/Fmt.smali").toFile().apply { writeText(text) }
+        val uri = file.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            val caps = client.initializeAndIndex(initParams(client)).getAsJsonObject("capabilities")
+            assertTrue(caps["documentFormattingProvider"].asBoolean && caps["documentRangeFormattingProvider"].asBoolean)
+            client.open(file, text)
+            val options = mapOf("tabSize" to 4, "insertSpaces" to true)
+            val edits = client.result("textDocument/formatting", mapOf("textDocument" to client.textDocument(uri), "options" to options)).asJsonArray
+            assertEquals(listOf("    .registers 2", "    const/4 v0, 0x1"), edits.map { it.asJsonObject["newText"].asString })
+            assertEquals(listOf(3, 4), edits.map { it.asJsonObject.getAsJsonObject("range").getAsJsonObject("start")["line"].asInt })
+            val range = mapOf("start" to mapOf("line" to 4, "character" to 0), "end" to mapOf("line" to 5, "character" to 0))
+            val ranged = client.result("textDocument/rangeFormatting", mapOf("textDocument" to client.textDocument(uri), "range" to range, "options" to options)).asJsonArray
+            assertEquals(listOf("    const/4 v0, 0x1"), ranged.map { it.asJsonObject["newText"].asString }, "line 4 only: a selection ending at the start of line 5 leaves it out")
+        }
+    }
+
+    @Test
+    fun `quick fixes come back as code actions over stdio`() {
+        writeWorkspace()
+        val text = ".class public Lcom/app/Fix;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    const/4 v0, 0x10\n    return-void\n.end method\n"
+        val file = workspace.resolve("smali/com/app/Fix.smali").toFile().apply { writeText(text) }
+        val uri = file.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            val init = client.initializeAndIndex(initParams(client))
+            assertEquals(listOf("quickfix"), init.getAsJsonObject("capabilities").getAsJsonObject("codeActionProvider").getAsJsonArray("codeActionKinds").map { it.asString })
+            client.open(file, text)
+            val line4 = mapOf("line" to 4, "character" to 0)
+            val actions = client.result("textDocument/codeAction", mapOf("textDocument" to client.textDocument(uri), "range" to mapOf("start" to line4, "end" to line4), "context" to mapOf("diagnostics" to emptyList<Any>()))).asJsonArray
+            assertEquals(listOf("Use const/16"), actions.map { it.asJsonObject["title"].asString }, "$actions")
+            val action = actions[0].asJsonObject
+            assertEquals("quickfix", action["kind"].asString)
+            assertEquals("literal-out-of-range", action.getAsJsonArray("diagnostics")[0].asJsonObject["code"].asString)
+            val edit = action.getAsJsonObject("edit").getAsJsonObject("changes").getAsJsonArray(uri)[0].asJsonObject
+            assertEquals("const/16", edit["newText"].asString)
+            assertEquals(listOf(4, 4, 4, 11), edit.getAsJsonObject("range").let { r -> listOf(r.getAsJsonObject("start")["line"].asInt, r.getAsJsonObject("start")["character"].asInt, r.getAsJsonObject("end")["line"].asInt, r.getAsJsonObject("end")["character"].asInt) }, "the opcode token")
+            assertEquals(0, client.result("textDocument/codeAction", mapOf("textDocument" to client.textDocument(uri), "range" to mapOf("start" to mapOf("line" to 5, "character" to 0), "end" to mapOf("line" to 5, "character" to 0)), "context" to mapOf("diagnostics" to emptyList<Any>()))).asJsonArray.size(), "nothing to fix on return-void")
+        }
+    }
+
+    @Test
+    fun `semantic tokens come back full, as a delta and for a range over stdio`() {
+        writeWorkspace()
+        val text = ".class public Lcom/app/Tok;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    const/16 v0, 0x3e8\n    return-void\n.end method\n"
+        val file = workspace.resolve("smali/com/app/Tok.smali").toFile().apply { writeText(text) }
+        val uri = file.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            val init = client.initializeAndIndex(initParams(client))
+            val provider = init.getAsJsonObject("capabilities").getAsJsonObject("semanticTokensProvider")
+            assertEquals(listOf("keyword", "modifier", "type"), provider.getAsJsonObject("legend").getAsJsonArray("tokenTypes").take(3).map { it.asString })
+            assertTrue(provider.getAsJsonObject("full")["delta"].asBoolean && provider["range"].asBoolean)
+            client.open(file, text)
+            val full = client.result("textDocument/semanticTokens/full", mapOf("textDocument" to client.textDocument(uri))).asJsonObject
+            val data = full.getAsJsonArray("data")
+            assertTrue(data.size() >= 5 * 12 && data.size() % 5 == 0, "tokens for the directives, names, types, registers, the literal: ${data.size()}")
+            assertEquals(listOf(0, 0, 6, 0, 0), data.take(5).map { it.asInt }, "`.class` is the first token: line 0, column 0, 6 chars, keyword")
+            val resultId = full["resultId"].asString
+            client.notify("textDocument/didChange", mapOf("textDocument" to mapOf("uri" to uri, "version" to 2), "contentChanges" to listOf(mapOf("text" to text.replace("0x3e8", "0x3e8 # changed")))))
+            val delta = client.result("textDocument/semanticTokens/full/delta", mapOf("textDocument" to client.textDocument(uri), "previousResultId" to resultId)).asJsonObject
+            assertEquals(1, delta.getAsJsonArray("edits").size(), "one inserted comment token: $delta")
+            assertEquals(5, delta.getAsJsonArray("edits")[0].asJsonObject.getAsJsonArray("data").size())
+            val ranged = client.result("textDocument/semanticTokens/range", mapOf("textDocument" to client.textDocument(uri), "range" to mapOf("start" to mapOf("line" to 4, "character" to 0), "end" to mapOf("line" to 4, "character" to 30)))).asJsonObject
+            assertEquals(5 * 4, ranged.getAsJsonArray("data").size(), "opcode, register, literal and the new comment on line 4: ${ranged}")
+            assertEquals(4, ranged.getAsJsonArray("data")[0].asInt, "relative to line 0")
+        }
+    }
+
+    @Test
     fun `the server exits when the client closes the connection`() {
         writeWorkspace()
         LspStdioClient().use { client ->

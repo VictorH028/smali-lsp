@@ -27,29 +27,15 @@ object DalvikOpcodeDatabase {
         val example: String = "",
         val exampleDesc: String = ""
     ) {
-        /**
-         * Generate rich markdown documentation for hover display.
-         */
+        /** The syntax as smali, the description, then the operands, the opcode byte and the format on one line. */
         fun toMarkdown(): String = buildString {
-            append("## ${name.uppercase()}\n\n")
-            append("**Opcode:** `0x$opcode`\n\n")
-            append("**Format:** `$formatId`\n\n")
-            append("**Syntax:** `$syntax`\n\n")
-            append("$shortDesc\n\n")
-            append(longDesc)
-
-            if (argsInfo.isNotEmpty()) {
-                append("\n\n**Arguments:** $argsInfo")
-            }
-            if (example.isNotEmpty()) {
-                append("\n\n**Example:** `$example`")
-                if (exampleDesc.isNotEmpty()) {
-                    append("\n\n*$exampleDesc*")
-                }
-            }
-            if (note.isNotEmpty()) {
-                append("\n\n**Note:** $note")
-            }
+            append("```smali\n").append(syntax).append("\n```\n")
+            append(shortDesc)
+            if (longDesc.isNotEmpty() && longDesc != shortDesc) append(' ').append(longDesc)
+            if (note.isNotEmpty()) append("\n\n").append(note)
+            append("\n\n")
+            if (argsInfo.isNotEmpty()) append(argsInfo).append(" · ")
+            append("opcode `0x").append(opcode).append("` · format `").append(formatId).append('`')
         }
 
         /**

@@ -42,13 +42,13 @@ class CallHierarchyProvider(
 
         val callers = LinkedHashMap<Pair<String, Int>, Pair<MethodDefinition, MutableList<Range>>>()
         for (site in callSites) {
-            val file = index.findFileByUri(site.uri) ?: continue
+            val file = index.findDeclarations(site.uri) ?: continue
             val method = file.methodAt(site.range.start.line) ?: continue
             callers.getOrPut(file.uri to method.startLine) { method to mutableListOf() }.second.add(site.range)
         }
         return callers.map { (key, value) ->
             CallHierarchyIncomingCall().apply {
-                from = createItem(index.findFileByUri(key.first)!!, value.first)
+                from = createItem(index.findDeclarations(key.first)!!, value.first)
                 fromRanges = value.second
             }
         }
@@ -60,7 +60,8 @@ class CallHierarchyProvider(
      */
     fun outgoingCalls(item: CallHierarchyItem): List<CallHierarchyOutgoingCall> {
         val itemClass = item.detail ?: return emptyList()
-        val file = index.findClass(itemClass) ?: return emptyList()
+        // The callee's file may be closed: ask for its body
+        val file = index.findClass(itemClass)?.let { index.findFileByUri(it.uri) } ?: return emptyList()
 
         val method = file.methodAt(item.range.start.line)?.takeIf { it.range == item.range }
             ?: return emptyList()

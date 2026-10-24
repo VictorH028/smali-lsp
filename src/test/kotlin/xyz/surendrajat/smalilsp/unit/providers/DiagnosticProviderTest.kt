@@ -164,7 +164,7 @@ class DiagnosticProviderTest {
 
             .method public foo()V
                 invoke-virtual {v0}, Lcom/example/Missing4;->bar()V
-                invoke-static {v1}, Lcom/example/Missing5;->baz()I
+                invoke-static {}, Lcom/example/Missing5;->baz()I
                 return-void
             .end method
         """.trimIndent()
@@ -435,5 +435,64 @@ class DiagnosticProviderTest {
             .end method
         """.trimIndent()
         assertEquals(emptyList<String>(), provider.computeDiagnostics("file:///Tables.smali", source).map { it.text })
+    }
+
+    @Test
+    fun `a call or field access of the wrong kind for the member the workspace declares`() {
+        scan("file:///Util.smali", """
+            .class public Lcom/example/Util;
+            .super Ljava/lang/Object;
+
+            .field public static COUNT:I
+
+            .field public name:Ljava/lang/String;
+
+            .method public static go()V
+                .registers 0
+                return-void
+            .end method
+
+            .method public run()V
+                .registers 1
+                return-void
+            .end method
+
+            .method private secret()V
+                .registers 1
+                return-void
+            .end method
+        """.trimIndent())
+        val source = """
+            .class public Lcom/example/Test;
+            .super Ljava/lang/Object;
+
+            .method public foo(Lcom/example/Util;)V
+                .registers 3
+                invoke-virtual {p1}, Lcom/example/Util;->go()V
+                invoke-static {}, Lcom/example/Util;->go()V
+                invoke-static {}, Lcom/example/Util;->run()V
+                invoke-static {}, Lcom/example/Util;->secret()V
+                invoke-virtual/range {p1 .. p1}, Lcom/example/Util;->go()V
+                sget v0, Lcom/example/Util;->COUNT:I
+                iget v0, p1, Lcom/example/Util;->COUNT:I
+                sget-object v0, Lcom/example/Util;->name:Ljava/lang/String;
+                iput-object v0, p1, Lcom/example/Util;->name:Ljava/lang/String;
+                invoke-static {}, Lcom/example/Unknown;->go()V
+                invoke-virtual {p1}, Ljava/lang/Object;->hashCode()I
+                return-void
+            .end method
+        """.trimIndent()
+        val diagnostics = diagnosticsOf(source)
+        assertEquals(listOf(
+            "invoke-virtual calls go()V, a static method; use invoke-static",
+            "invoke-static calls run()V, an instance method; use invoke-virtual",
+            "invoke-static calls secret()V, an instance method; use invoke-direct",
+            "invoke-virtual/range calls go()V, a static method; use invoke-static/range",
+            "iget on COUNT, a static field; use sget",
+            "sget-object on name, an instance field; use iget-object",
+            "Class 'Lcom/example/Unknown;' not found in workspace or SDK"
+        ), diagnostics.map { it.text }, "a member outside the workspace cannot be judged")
+        assertEquals(rangeOf(source, "invoke-virtual {p1}, Lcom/example/Util;->go()V", "invoke-virtual"), diagnostics[0].range, "the opcode is underlined")
+        assertEquals(setOf(DiagnosticSeverity.Error), diagnostics.dropLast(1).map { it.severity }.toSet())
     }
 }

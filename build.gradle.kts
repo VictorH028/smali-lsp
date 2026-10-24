@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "xyz.surendrajat"
-version = "2.0.0"
+version = "2.1.0"
 
 repositories {
     mavenCentral()
@@ -59,6 +59,8 @@ kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.fromTarget(targetJavaVersion.toString()))
         freeCompilerArgs.add("-Xjdk-release=$targetJavaVersion")
+        // No runtime null checks on parameters and platform-type calls: the hot paths are all Kotlin
+        freeCompilerArgs.addAll("-Xno-param-assertions", "-Xno-call-assertions", "-Xno-receiver-assertions")
         // The build is warning-free; keep it that way
         allWarningsAsErrors.set(true)
     }

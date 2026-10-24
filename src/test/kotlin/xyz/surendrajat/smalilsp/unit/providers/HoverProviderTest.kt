@@ -75,12 +75,12 @@ class HoverProviderTest {
     @Test
     fun `class name shows the class`() {
         val hover = hoverAt(".class", "Lcom/app/MyActivity;", 6)!!
-        assertTrue(hover.contains("**Class:** `com.app.MyActivity`"), hover)
+        assertTrue(hover.contains("```smali\n.class public final Lcom/app/MyActivity;"), hover)
         assertTrue(hover.contains("public") && hover.contains("final"), hover)
-        assertTrue(hover.contains("**Extends:** `com.app.BaseActivity`"), hover)
-        assertTrue(hover.contains("- `java.io.Serializable`"), hover)
-        assertTrue(hover.contains("**Methods:** 1  **Fields:** 2"), hover)
-        assertFalse(hover.contains("Lcom/app/"), "readable names, not descriptors: $hover")
+        assertTrue(hover.contains("\n.super Lcom/app/BaseActivity;\n"), hover)
+        assertTrue(hover.contains("\n.implements Ljava/io/Serializable;\n"), hover)
+        assertTrue(hover.contains("`com.app.MyActivity` · 1 method · 2 fields"), hover)
+        assertTrue(hover.endsWith("· 1 method · 2 fields"), "the readable line closes the hover: $hover")
         assertNull(hoverAt(".class", ".class", 2), "the directive keyword")
         assertNull(hoverAt(".class", "final"))
     }
@@ -88,55 +88,55 @@ class HoverProviderTest {
     @Test
     fun `super and implements show the referenced class`() {
         val base = hoverAt(".super", "Lcom/app/BaseActivity;", 8)!!
-        assertTrue(base.contains("**Class:** `com.app.BaseActivity`") && base.contains("**Methods:** 1"), base)
+        assertTrue(base.contains("`com.app.BaseActivity`") && base.contains("1 method"), base)
         val sdk = hoverAt(".implements", "Ljava/io/Serializable;", 3)!!
-        assertTrue(sdk.contains("**Class:** `java.io.Serializable`") && sdk.contains("*SDK Class*"), sdk)
+        assertTrue(sdk.contains("`java.io.Serializable`") && sdk.contains("developer.android.com/reference/java/io/Serializable)"), sdk)
     }
 
     @Test
     fun `method declaration`() {
         val hover = hoverAt(".method", "onClick", 3)!!
-        assertTrue(hover.contains("**Method:** `onClick`"), hover)
-        assertTrue(hover.contains("**Modifiers:** public"), hover)
-        assertTrue(hover.contains("**Signature:** `(android.view.View, int)void`"), hover)
-        assertTrue(hover.contains("- `p1` `android.view.View`\n- `p2` `int`\n"), "each parameter with its register: $hover")
-        assertTrue(hoverAt(".method", "Landroid/view/View;", 5)!!.contains("*SDK Class*"))
-        assertTrue(hoverAt(".method", "I", after = "View;")!!.contains("**Primitive Type:** `int`"))
+        assertTrue(hover.contains("```smali\n.method public onClick(Landroid/view/View;I)V\n```"), hover)
+        assertTrue(hover.contains(" in `com.app.MyActivity` · "), hover)
+        assertTrue(hover.contains("`void onClick(View p1, int p2)`"), hover)
+        assertTrue(!hover.contains("Lcom/app/") || hover.indexOf("Lcom/app/") < hover.indexOf("`void onClick"), "descriptors only in the code block: $hover")
+        assertTrue(hoverAt(".method", "Landroid/view/View;", 5)!!.contains("developer.android.com/reference/android/view/View)"))
+        assertTrue(hoverAt(".method", "I", after = "View;")!!.contains("`int` · 32-bit signed integer"))
         assertNull(hoverAt(".method", "public"))
     }
 
     @Test
     fun `field declaration`() {
         val hover = hoverAt("TAG:", "TAG", 1)!!
-        assertTrue(hover.contains("**Field:** `TAG`"), hover)
-        assertTrue(hover.contains("private, static, final"), hover)
-        assertTrue(hover.contains("**Type:** `java.lang.String`"), hover)
-        assertTrue(hoverAt("count:I", "I", after = ":")!!.contains("**Primitive Type:** `int`"))
+        assertTrue(hover.contains("```smali\n.field private static final TAG:Ljava/lang/String;\n```"), hover)
+        assertTrue(hover.contains("`String TAG` in `com.app.MyActivity` · "), hover)
+        assertTrue(hover.endsWith(" reference") || hover.endsWith(" references"), hover)
+        assertTrue(hoverAt("count:I", "I", after = ":")!!.contains("`int` · 32-bit signed integer"))
         assertNull(hoverAt("TAG:", "private"))
     }
 
     @Test
     fun `member references`() {
         val declared = hoverAt("invoke-virtual {p0, p1}", "onCreate", 2)!!
-        assertTrue(declared.contains("**Method:** `onCreate`") && declared.contains("protected"), declared)
+        assertTrue(declared.contains(".method protected onCreate(") && declared.contains(" onCreate(Bundle p1)` in `com.app.BaseActivity`"), declared)
         val sdk = hoverAt("getId", "getId", 2)!!
-        assertTrue(sdk.contains("**Method:** `Landroid/view/View;.getId`") && sdk.contains("*SDK Method*"), sdk)
-        assertTrue(hoverAt("getId", "I", after = "getId()")!!.contains("**Primitive Type:** `int`"))
-        assertTrue(hoverAt("invoke-virtual {p0, p1}", "Lcom/app/BaseActivity;", 3)!!.contains("**Class:** `com.app.BaseActivity`"))
+        assertTrue(sdk.contains("```smali\nLandroid/view/View;->getId()I\n```") && sdk.contains("`int getId()` in `android.view.View` · [Android reference](https://developer.android.com/reference/android/view/View#getId())"), sdk)
+        assertTrue(hoverAt("getId", "I", after = "getId()")!!.contains("`int` · 32-bit signed integer"))
+        assertTrue(hoverAt("invoke-virtual {p0, p1}", "Lcom/app/BaseActivity;", 3)!!.contains("`com.app.BaseActivity`"))
         val field = hoverAt("iget-object", "tag", 1)!!
-        assertTrue(field.contains("**Field:** `tag`") && field.contains("protected"), field)
-        assertTrue(hoverAt("iget v0", "I", after = "count:")!!.contains("**Primitive Type:** `int`"))
+        assertTrue(field.contains(".field protected tag:"), field)
+        assertTrue(hoverAt("iget v0", "I", after = "count:")!!.contains("`int` · 32-bit signed integer"))
         val array = hoverAt("new-array", "[I", 1)!!
-        assertTrue(array.contains("**Primitive Array:** `int[]`"), array)
+        assertTrue(array.contains("`int[]` · array of `int`"), array)
     }
 
     @Test
     fun `labels count every reference`() {
         val definition = hoverAt("    :cond_0", ":cond_0", 2)!!
-        assertTrue(definition.contains("**Label:** `:cond_0`"), definition)
-        assertTrue(definition.contains("**References:** 2"), "if-eqz and .catch: $definition")
+        assertTrue(definition.startsWith("`:cond_0` · Conditional branch target · "), definition)
+        assertTrue(definition.contains(" · 2 references · lines "), "if-eqz and .catch: $definition")
         assertTrue(definition.contains("Conditional branch target"), definition)
-        assertTrue(hoverAt("if-eqz", ":cond_0", 3)!!.contains("**Label:** `:cond_0`"))
+        assertTrue(hoverAt("if-eqz", ":cond_0", 3)!!.startsWith("`:cond_0` · "))
         assertTrue(hoverAt(".catch", ":try_end_0", 3)!!.contains("Try block end"))
     }
 
@@ -193,7 +193,7 @@ class HoverProviderTest {
         )
         for ((directive, readable) in directives) {
             val hover = hoverIn(indented, text, directive, "L${readable.replace('.', '/')};")
-            assertTrue(hover != null && hover.contains("**Class:** `$readable`"), "$directive: $hover")
+            assertTrue(hover != null && hover.contains("`$readable` · "), "$directive: $hover")
         }
     }
 
@@ -205,9 +205,9 @@ class HoverProviderTest {
         val text = ".class public Lcom/app/Named;\n.super Lcom/app/My_Class;\n\n.annotation system Lcom/app/My-Class;\n.end annotation"
         index.openSource(named, text)
         val underscore = hoverIn(named, text, ".super", "Lcom/app/My_Class;")
-        assertTrue(underscore != null && underscore.contains("**Class:** `com.app.My_Class`"), "underscore: $underscore")
+        assertTrue(underscore != null && underscore.contains("`com.app.My_Class` · "), "underscore: $underscore")
         val hyphen = hoverIn(named, text, ".annotation", "Lcom/app/My-Class;")
-        assertTrue(hyphen != null && hyphen.contains("**Class:** `com.app.My-Class`"), "hyphen: $hyphen")
+        assertTrue(hyphen != null && hyphen.contains("`com.app.My-Class` · "), "hyphen: $hyphen")
     }
 
     @Test

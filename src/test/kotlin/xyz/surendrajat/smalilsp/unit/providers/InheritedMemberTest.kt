@@ -65,9 +65,9 @@ class InheritedMemberTest {
         val definition = DefinitionProvider(index).findDefinition("file:///Caller.smali", onChildGreet).single()
         assertEquals("file:///Base.smali", definition.uri)
         val hover = HoverProvider(index).provideHover("file:///Caller.smali", onChildGreet)!!.contents.right.value
-        assertTrue(hover.contains("**Method:** `greet`") && !hover.contains("Not found"), hover)
+        assertTrue(hover.contains(" greet(") && !hover.contains("Not found"), hover)
         val fieldHover = HoverProvider(index).provideHover("file:///Caller.smali", onChildCount)!!.contents.right.value
-        assertTrue(fieldHover.contains("**Field:** `count`") && fieldHover.contains("protected"), fieldHover)
+        assertTrue(fieldHover.contains(".field protected count:"), fieldHover)
     }
 
     @Test

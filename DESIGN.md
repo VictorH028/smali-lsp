@@ -59,9 +59,13 @@ debug forms of `.param`/`.local`, member names spelled like opcodes, keywords or
 
 Whitespace, including newlines, separates tokens the way the assembler's lexer treats it, so a
 hand-written statement may still wrap. Tokens are spans into the source, never objects: the
-lexer advances a cursor and leaves the current token's kind and bounds in fields, and the
-parser slices names and descriptors straight out of the text and interns them. Positions are
-UTF-16 string indices, so every LSP column is exact, including lines with astral characters.
+lexer advances a cursor and leaves the current token's kind and bounds in fields, classifies
+ASCII through lookup tables (the JDK's Unicode tables only for anything beyond), and the parser
+interns names and descriptors straight from their ranges: `StringPool.intern(source, start,
+end)` hashes the range and answers from a per-thread cache before creating any substring, so a
+scan allocates about half of what it did (2 GB instead of 4 GB per two scans of ProtonMail).
+Positions are UTF-16 string indices, so every LSP column is exact, including lines with astral
+characters.
 
 The parser has no unbounded recursion: array dimensions are a loop, and annotations nested
 deeper than 64 levels are a syntax error, so no input can overflow the stack; 57,000 randomly
@@ -163,7 +167,7 @@ that token, as editors expect.
 
 | Structure | Key | Value |
 |-----------|-----|-------|
-| `filesByUri` | canonical `file:///…` URI | `SmaliFile` |
+| `filesByUri` | canonical `file:///…` URI | `SmaliFile`: with its body while the file is open, declarations only otherwise |
 | `uriByClass` | `Lcom/Foo;` | canonical URI of its definition (last indexed wins) |
 | `subclassIndex`, `implementorsIndex` | parent / interface | direct subclasses / implementors |
 | `simpleNameIndex` | `Outer$Inner` | full class names |
@@ -174,17 +178,29 @@ that token, as editors expect.
 
 Files are keyed by canonical URI: the scanner's and the client's forms of one file are one
 entry, and a file whose class name changes on edit replaces its old entry instead of leaving a
-ghost class. Field keys include the type, since DEX allows two fields of one name. Declarations
+ghost class. The instruction lists are most of the AST's memory (60 of ProtonMail's 113 MB) and
+matter only for the open files and the occasional call-hierarchy lookup, so the scanner, the
+watcher and `didClose` index a file without its body (`indexFile(file, keepBody = false)`):
+the usage tables are built from the full parse, then `withoutBody()` is stored. `findFileByUri`
+parses such a file again from the disk (or the open text) when a request needs its body and
+keeps the last 32 bodies; `findDeclarations` returns what is stored. The distinct string
+literals of each file live in a side map so a declarations-only entry can still be retracted.
+Live heap after indexing: ProtonMail 198 → 118 MB, the 76 K-file app 711 → 447 MB, with scan
+and request times unchanged. Field keys include the type, since DEX allows two fields of one name. Declarations
 have no table: `findMethod`/`findField` look in the class's `SmaliFile` and walk up the
 hierarchy, and return the name-token location.
 
-### 3.2 `UsageList` and generations
+### 3.2 `UsageList` and file ids
 
-A usage list is a packed `IntArray`, five ints per site: file id, the file's generation when
-the site was added, line, start column, end column. Every file has an id and a generation.
-Re-indexing a file bumps its generation, which retires all of its earlier entries in O(1)
-instead of walking every symbol the file touched. Readers skip retired entries; a compaction
-drops them once they make up a quarter of all entries (and at least 100 K), amortized O(1).
+A usage list is a packed `IntArray`, four ints per site: file id, line, start column, end
+column. Every indexing of a file gets a fresh id and retires the file's previous id, which
+retires all of its earlier entries in O(1) instead of walking every symbol the file touched;
+a site is stale exactly when its id is no longer alive, so it carries no generation. Ids are
+never reused (an `alive` flag and a contribution count per id, grown under one lock). Readers
+skip retired entries; a compaction drops them once they make up a quarter of all entries (and
+at least 100 K), amortized O(1). Dropping the generation column took the packed sites from
+43.8 to 35.4 MB on ProtonMail (live heap 119 → 109 MB) and the large app's live heap from
+448 to 415 MB, with scan and request times unchanged.
 
 Why: the previous `ConcurrentHashMap<String, Set<Location>>` tables cost ~130 bytes per site
 and removal scanned every usage set the file touched, so a keystroke in a file that calls
@@ -216,23 +232,31 @@ heap (about 0.4 s of CPU per gigabyte), so it is not left running: every request
 notification re-arms it, and a cycle that followed no activity disarms it. Measured on the
 real server over stdio: committed heap 1,256 → 400 MB on ProtonMail and 2,992 → 1,556 MB on
 the large app, a minute after indexing, with the scan time unchanged and a remark pause of 2
-to 4 ms; a JVM without these flags is left as it is.
+to 4 ms; a JVM without these flags is left as it is. The initial scan's garbage does not wait
+for that minute: one explicit full collection right after the scan (`compactAfterScan`, 46 ms
+on ProtonMail) compacts and uncommits it at once, to 200 MB on ProtonMail and 664 MB on the
+large app.
 
 ### 3.3 Scanning (`WorkspaceScanner.kt`)
 
 `maxOf(2, cores)` coroutine workers drain a bounded channel of files, each reading, parsing
-and indexing its file. The index is safe for concurrent `indexFile` calls: maps are concurrent,
-usage lists synchronize per symbol, generations are bumped under one lock. Through the real
+and indexing its file. Files are walked with `Files.walkFileTree`, whose attributes answer
+"regular file?" without a second stat (117 ms instead of 154 ms over ProtonMail's tree), and
+read as bytes: baksmali writes ASCII, so a file without a high bit decodes as Latin-1, one copy
+instead of a UTF-8 decode (288 ms instead of 427 ms for ProtonMail's 126 MB on 12 threads).
+The index is safe for concurrent `indexFile` calls: maps are concurrent, usage lists
+synchronize per symbol, file ids are allocated and retired under one lock. Through the real
 server on 12 cores, including file reads:
 
 | | Mastodon | ProtonMail | 76 K-file app |
 |---|---|---|---|
-| Cold | 0.8 s | 1.6 s | 6 s |
+| Cold JVM | 1.0 s | 2.2 s | 6.1 s |
+| Warm JVM | 0.3 s | 1.1 s | 3.3 s |
 
 ### 3.4 String literals
 
-`const-string` values go into a usage table like members (value → sites), retired by the file's
-generation like everything else, so a search after an edit never rebuilds anything. The search
+`const-string` values go into a usage table like members (value → sites), retired with the
+file's id like everything else, so a search after an edit never rebuilds anything. The search
 is a case-insensitive `contains` over the table, allocation-free. `getStats().strings` is a
 count map kept incrementally. The table costs about 7 MB on ProtonMail and 20 MB on the
 76 K-file app.
@@ -333,16 +357,34 @@ whose declarations are unreachable.
 - **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
   scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
   query over the 76 K-file app's 660 K names.
-- **Completion**: after `->`, the members of the owner and of its workspace supertypes (own
-  members first, overrides hiding what they override); class names ranked by match kind,
-  length and name so the list is stable across keystrokes; opcodes at the start of a line.
+- **Completion**: what the caret's context can take, so the list is short and right. After
+  `->`, the owner's members and the inherited ones (an override hiding what it overrides),
+  narrowed by the opcode: static methods for `invoke-static`, the owner's own private methods
+  and constructors for `invoke-direct`, instance methods otherwise, and when the braces are
+  complete only the methods whose register count they hold (`this` and wide parameters counted
+  as the frame counts them); fields by the static-ness and type the field opcode moves. Before
+  it, class names of the kind the operand needs: concrete for `new-instance`, an interface for
+  `.implements` and an `invoke-interface` owner, non-interface for `.super`, a workspace
+  throwable for `.catch`. After `:`, the method's labels; on `v` or `p` (or right after `{`),
+  the frame's registers with `this`, the parameter type or the local slot; after `.`, the
+  directives that belong at the caret with the innermost open block's `.end` first; on an
+  empty line inside a method every opcode, the `move-result` a preceding call needs first, each
+  inserting its operand shape as tab stops when the client takes snippets. Class names are
+  ranked by match kind, length and name; the list is scanned once keeping the best fifty, with
+  the kind check only for a name that would make the fifty, so the worst case (an `L` alone on
+  the 76 K-file app) stays at a few milliseconds.
 - **Diagnostics**: syntax errors on the offending token and the file-local checks are
   published at once: a jump to an undefined label, a label defined twice, and the assembler
   checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per
-  operand, five 4-bit registers for `35c` calls, literal ranges for `11n`/`21s`/`21h`/`22b`/`22s`,
-  `move-result` placement); unresolved classes in `.super`, `.implements`, field types and
-  instruction targets wait for indexing to finish and are reported only when the class's
-  package is one the workspace defines classes in (the file's own package included). A
+  operand, five 4-bit registers for `35c` calls, the second register of a wide pair, literal
+  ranges for `11n`/`21s`/`21h`/`22b`/`22s`, the register count of a call against its
+  descriptor's slots, `return` and `move-result` kinds against the method's and the call's
+  return type, `move-result` placement, one `.registers` or `.locals`); unresolved classes in
+  `.super`, `.implements`, field types and instruction targets wait for indexing to finish and
+  are reported only when the class's package is one the workspace defines classes in (the
+  file's own package included), and a call or field access whose kind contradicts the
+  declaration the workspace holds (`invoke-static` on an instance method, `sget` on an instance
+  field, and the reverse) is an error naming the right opcode. A
   decompiled app also references classes it does not ship, such as `org.xmlpull` from the
   platform or an optional library like Conscrypt behind a runtime check, and those are not
   errors; a hand-edited name inside the app's own packages is. The three fixtures went from
@@ -357,6 +399,40 @@ whose declarations are unreachable.
   written by `./gradlew generateAndroidPublic` from the `public.xml` of the framework apktool
   ships; public ids never change, so one table serves every app). The literal is read
   from the line on demand, like registers, so the AST is untouched.
+- **Quick fixes**: a diagnostic with one right answer carries it in its `data` (`Fixes`: the
+  opcode to use, that the line goes, the `/range` form, the frame count, the label meant), set
+  where the check already knows it. `CodeActionProvider` recomputes the file's diagnostics on
+  request, keeps those on the requested lines and builds each edit from the current text, so a
+  stale diagnostic on the client's side cannot misplace an edit. A fix that would have to guess
+  (a register for `return`, the registers a call is missing) is not offered.
+- **Formatting**: `SmaliFormatter` re-indents by a stack of blocks (`.method`, `.annotation`,
+  `.subannotation`, a switch or array payload, an annotation value's braces, a `.field` or
+  `.param` that turns out to carry annotations) and re-spaces each line's tokens, strings and
+  comments kept verbatim. It never joins or splits a line and leaves blank lines where they
+  are, because baksmali's own vary with the section. baksmali output formats to itself, which
+  the real-app invariants check on every sampled file, so the formatter is also the statement
+  of the layout. Edits are per changed line; range formatting lays out the whole document and
+  keeps the lines asked for.
+- **Hover**: the declaration as smali in a code block (`.class` with its `.super` and
+  `.implements`, the `.method` or `.field` line, a platform member's reference as written),
+  then one line to take in at a glance: the Java-style signature with short type names and
+  the register each parameter arrives in, the owner, the reference count through the member
+  family, member and subtype counts for a class. A class or member the workspace does not
+  define links to its page on developer.android.com when it is one the site documents (java,
+  javax, android, androidx, dalvik, org.json, org.w3c, org.xml), else says it is not in the
+  workspace. Opcode hovers show the syntax as smali, the description, and the operands, byte
+  and format on one line; types, labels and strings are one line each. Registers, resource
+  ids and the `.registers` frame keep their own forms.
+- **Semantic tokens**: `SemanticTokensProvider` classifies every token of an open file: class,
+  member, type and label tokens from the AST's spans (the owner, name and descriptor types of
+  each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,
+  opcodes, registers, literals, strings, comments) from a scan of the lines; where the two
+  overlap the AST wins. Never a re-parse. The last full result per open file is kept, with the
+  text it came from, so `full/delta` answers with one edit (common prefix and suffix) and an
+  unchanged buffer with none; `range` scans only its lines and walks only the methods that
+  reach them, which is what an editor asks for first on a 180 K-line file (0.2 ms there, 68 ms
+  for the full 342 K tokens). SDK classes and members carry `defaultLibrary`, statics `static`.
+  `label` is a custom type in the legend; the others are the standard ones.
 - **Inlay hints**: `InlayHints` scans the requested lines once with `Literals.find`, which
   reads the one literal a line can carry: the last operand of an instruction, a `.field` value,
   an annotation element, an `.array-data` element, a `.sparse-switch` key or the `.packed-switch`
@@ -460,8 +536,8 @@ only one index is built at a time.
 
 ## 9. Verification
 
-- `*.unit.*` (467 tests, ~4 s), `*.regression.*` (74, ~1 s), `*.integration.*` (136, ~65 s with
-  the fixtures present; one skip). Run the categories separately: each fork holds a parsed app.
+- `*.unit.*` (532 tests), `*.regression.*` (8), `*.integration.*` (76 with the fixtures
+  present; one skip). Run the categories separately: each fork holds a parsed app.
 - `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
   `.method` or `.field`.
 - `RealApkInvariantsTest`: properties that hold for any apktool project (every invoke in the
@@ -479,49 +555,53 @@ only one index is built at a time.
 
 ## 10. File inventory
 
-| File | Lines | Role |
-|------|-------|------|
-| SmaliTextParser.kt | 1,164 | the front end: lexer, statement parser, model building |
-| DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
-| McpMode.kt | 661 | MCP server |
-| WorkspaceIndex.kt | 570 | the index |
-| DataStructures.kt | 425 | the AST model |
-| SmaliLanguageServer.kt | 349 | the LSP server: handshake, indexing, capabilities |
-| SmaliTextDocumentService.kt | 283 | document lifecycle and requests |
-| HoverProvider.kt | 237 | hover |
-| ReferenceProvider.kt | 228 | references and member families |
-| Types.kt | 221 | descriptor and class-name helpers |
-| InstructionText.kt | 219 | instruction scanner and register frame |
-| WorkspaceSymbolProvider.kt | 218 | workspace symbol search |
-| CompletionProvider.kt | 188 | completion |
-| DiagnosticProvider.kt | 183 | diagnostics |
-| ResourceTable.kt | 166 | `public.xml` and values per workspace root |
-| AssemblerChecks.kt | 162 | assembler checks for hand edits |
-| Registers.kt | 151 | register hover, highlight and the frame hover |
-| WorkspaceScanner.kt | 141 | parallel scan |
-| Symbol.kt | 140 | `symbolAt` and the symbol kinds |
-| RenameProvider.kt | 130 | rename |
-| CallHierarchyProvider.kt | 124 | call hierarchy |
-| DocumentHighlightProvider.kt | 122 | document highlight |
-| SmaliWorkspaceService.kt | 121 | watched files, workspace symbols |
-| CodeLensProvider.kt | 108 | reference and subtype counts |
-| TypeHierarchyProvider.kt | 105 | type hierarchy |
-| InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
-| JvmTuning.kt | 89 | heap settings applied in-process |
-| ResourceLiterals.kt | 83 | resource hover, definition and hints |
-| WriteQueue.kt | 73 | the writer thread and the request helper |
-| DocumentSymbolProvider.kt | 73 | outline |
-| StringPool.kt | 72 | per-index interning |
-| Literals.kt | 66 | the one literal a line carries |
-| Cli.kt | 64 | command line, usage, version |
-| DefinitionProvider.kt | 63 | definition |
-| InlayHints.kt | 60 | resource names and decimal values after literals |
-| UsageList.kt | 60 | packed usage sites |
-| LabelMap.kt | 58 | packed labels and label references |
-| SmaliParser.kt | 51 | parser entry |
-| FrameworkResources.kt | 48 | the bundled `android.R` names |
-| ImplementationProvider.kt | 46 | implementations |
-| Logging.kt | 39 | logback setup |
-| Main.kt | 33 | entry point |
-| FoldingRangeProvider.kt | 22 | folding ranges |
-| StringLiterals.kt | 18 | the string operand under the caret |
+| File | Role |
+|------|------|
+| SmaliTextParser.kt | the front end: lexer, statement parser, model building |
+| DalvikOpcodeDatabase.kt | opcode documentation for hover and completion |
+| McpMode.kt | MCP server |
+| WorkspaceIndex.kt | the index |
+| DataStructures.kt | the AST model |
+| AssemblerChecks.kt | assembler checks for hand edits |
+| SmaliLanguageServer.kt | the LSP server: handshake, indexing, capabilities |
+| SmaliTextDocumentService.kt | document lifecycle and requests |
+| SemanticTokensProvider.kt | semantic tokens |
+| HoverProvider.kt | hover |
+| ReferenceProvider.kt | references and member families |
+| Types.kt | descriptor and class-name helpers |
+| InstructionText.kt | instruction scanner and register frame |
+| WorkspaceSymbolProvider.kt | workspace symbol search |
+| DiagnosticProvider.kt | diagnostics |
+| CodeActionProvider.kt | quick fixes from the diagnostics' fix data |
+| SmaliFormatter.kt | formatting |
+| CompletionProvider.kt | completion |
+| ResourceTable.kt | `public.xml` and values per workspace root |
+| WorkspaceScanner.kt | parallel scan |
+| Registers.kt | register hover, highlight and the frame hover |
+| Symbol.kt | `symbolAt` and the symbol kinds |
+| RenameProvider.kt | rename |
+| CallHierarchyProvider.kt | call hierarchy |
+| DocumentHighlightProvider.kt | document highlight |
+| SmaliWorkspaceService.kt | watched files, workspace symbols |
+| CodeLensProvider.kt | reference and subtype counts |
+| TypeHierarchyProvider.kt | type hierarchy |
+| JvmTuning.kt | heap settings applied in-process |
+| InstructionShapes.kt | opcode → operand shape, derived from the grammar |
+| StringPool.kt | per-index interning |
+| ResourceLiterals.kt | resource hover, definition and hints |
+| WriteQueue.kt | the writer thread and the request helper |
+| DocumentSymbolProvider.kt | outline |
+| Literals.kt | the one literal a line carries |
+| SourceFiles.kt | file reads: bytes, Latin-1 when pure ASCII, else UTF-8 |
+| Cli.kt | command line, usage, version |
+| DefinitionProvider.kt | definition |
+| InlayHints.kt | resource names and decimal values after literals |
+| UsageList.kt | packed usage sites |
+| LabelMap.kt | packed labels and label references |
+| SmaliParser.kt | parser entry |
+| FrameworkResources.kt | the bundled `android.R` names |
+| ImplementationProvider.kt | implementations |
+| Logging.kt | logback setup |
+| Main.kt | entry point |
+| FoldingRangeProvider.kt | folding ranges |
+| StringLiterals.kt | the string operand under the caret |

@@ -33,6 +33,16 @@ data class SmaliFile(
 /** The lines of a directive block, from its opening directive to its `.end`. */
 data class Block(val startLine: Int, val endLine: Int)
 
+/**
+ * The declarations only: methods without instructions and labels, no directive type references,
+ * no blocks. What the index keeps for a file that is not open; the body is parsed again on demand.
+ */
+fun SmaliFile.withoutBody(): SmaliFile = copy(
+    methods = methods.map { if (it.instructions.isEmpty() && it.labels.isEmpty() && it.labelRefs.isEmpty() && it.duplicateLabels.isEmpty()) it else it.copy(instructions = emptyList(), labels = emptyMap(), labelRefs = emptyList(), duplicateLabels = emptyList()) },
+    typeRefs = emptyList(),
+    blocks = emptyList()
+)
+
 /** A file's blocks as one int array behind the `List` interface: a large app has half a million. */
 class BlockList private constructor(private val lines: IntArray) : AbstractList<Block>(), RandomAccess {
     override val size: Int get() = lines.size / 2

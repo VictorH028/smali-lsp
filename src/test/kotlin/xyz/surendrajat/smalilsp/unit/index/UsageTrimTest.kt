@@ -16,31 +16,32 @@ class UsageTrimTest {
     @Test
     fun `trim keeps every entry and later adds still work`() {
         val list = UsageList()
-        for (i in 0 until 37) list.add(i % 3, 1, i, i * 2, i * 2 + 1)
+        for (i in 0 until 37) list.add(i % 3, i, i * 2, i * 2 + 1)
         list.trim()
         assertEquals(37 * UsageList.STRIDE, list.snapshot().size)
-        list.add(9, 1, 99, 0, 3)
+        list.add(9, 99, 0, 3)
         val s = list.snapshot()
         assertEquals(38 * UsageList.STRIDE, s.size)
-        assertEquals(listOf(9, 1, 99, 0, 3), s.takeLast(5))
-        assertEquals(listOf(0, 1, 0, 0, 1), s.take(5))
+        assertEquals(listOf(9, 99, 0, 3), s.takeLast(4))
+        assertEquals(listOf(0, 0, 0, 1), s.take(4))
         val empty = UsageList()
         empty.trim()
         assertEquals(0, empty.snapshot().size)
-        empty.add(1, 1, 1, 1, 2)
-        assertEquals(5, empty.snapshot().size)
+        empty.add(1, 1, 1, 2)
+        assertEquals(4, empty.snapshot().size)
     }
 
     @Test
-    fun `compact after trim still drops stale generations`() {
+    fun `compact after trim drops the sites of retired file ids`() {
         val list = UsageList()
-        list.add(0, 1, 1, 0, 1)
-        list.add(1, 1, 2, 0, 1)
-        list.add(0, 2, 3, 0, 1)
+        list.add(0, 1, 0, 1)
+        list.add(1, 2, 0, 1)
+        list.add(2, 3, 0, 1)
+        list.add(7, 4, 0, 1)
         list.trim()
-        val gen = AtomicIntegerArray(intArrayOf(2, 1))
-        assertEquals(1, list.compact(gen), "file 0 moved to generation 2, its generation-1 site is stale")
-        assertEquals(listOf(1, 1, 2, 0, 1, 0, 2, 3, 0, 1), list.snapshot().toList())
+        val alive = AtomicIntegerArray(intArrayOf(0, 1, 1))
+        assertEquals(2, list.compact(alive), "file 0 was retired; file 7 is beyond the array, so it is not alive either")
+        assertEquals(listOf(1, 2, 0, 1, 2, 3, 0, 1), list.snapshot().toList())
     }
 
     @Test

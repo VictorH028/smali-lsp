@@ -100,7 +100,7 @@ class SmaliWorkspaceService(
                 if (!file.exists() || !file.isFile) return
                 val smaliFile = parser.parse(uri, file.readText(Charsets.UTF_8))
                 if (smaliFile != null) {
-                    index.indexFile(smaliFile)
+                    index.indexFile(smaliFile, keepBody = false)
                     logger.debug("Re-indexed from disk ($type): $uri")
                 } else {
                     logger.warn("Failed to parse watched file: $uri")

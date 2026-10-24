@@ -145,6 +145,20 @@ class WorkspaceIndexStorageTest {
     }
 
     @Test
+    fun `re-indexing a file thousands of times neither duplicates nor loses its usages`() {
+        indexSource("file:///Target.smali", source("Lcom/Target;"))
+        val caller = source("Lcom/Caller;", "invoke-virtual {p0}, Lcom/Target;->run()V")
+        repeat(3000) { indexSource("file:///Caller.smali", caller) }
+        val usages = index.findMethodUsages("Lcom/Target;", "run", "()V")
+        assertEquals(listOf("file:///Caller.smali"), usages.map { it.uri }, "one live site after 3000 re-indexes")
+        assertEquals(2, index.getStats().classes)
+        assertTrue(index.removeFile("file:///Caller.smali"))
+        assertEquals(emptyList(), index.findMethodUsages("Lcom/Target;", "run", "()V"))
+        indexSource("file:///Caller.smali", caller)
+        assertEquals(1, index.findMethodUsages("Lcom/Target;", "run", "()V").size, "back after a remove and re-add")
+    }
+
+    @Test
     fun `compaction keeps live usages while dropping retired ones`() {
         val calls = (1..1000).joinToString("\n    ") { "invoke-virtual {p0}, Lcom/Target;->run()V" }
         indexSource("file:///Target.smali", source("Lcom/Target;"))

@@ -119,7 +119,7 @@ class SdkAndArrayTypeTest {
         for ((marker, needle, name) in contexts) {
             val position = at(marker, needle, 3)
             val hover = hoverAt(position, "$needle in `$marker`")
-            assertTrue(hover.contains("**Class:** `$name`") && hover.contains("*SDK Class*"), hover)
+            assertTrue(hover.contains("`$name` · [Android reference](https://developer.android.com/reference/"), hover)
             assertTrue(definitionAt(position).isEmpty(), "$needle in `$marker` has no source")
         }
         val superRefs = referencesAt(at(".super", "Landroid/app/Activity;", 3))
@@ -130,7 +130,7 @@ class SdkAndArrayTypeTest {
     fun `an SDK member hovers, lists the exact owner's call sites and is neither navigable nor renameable`() {
         val length = at("{v1}, Ljava/lang/String;->length", "length", 2)
         val method = hoverAt(length)
-        assertTrue(method.contains("**Method:** `Ljava/lang/String;.length`") && method.contains("**Descriptor:** `()I`") && method.contains("*SDK Method*"), method)
+        assertTrue(method.contains("```smali\nLjava/lang/String;->length()I\n```") && method.contains("`int length()` in `java.lang.String` · [Android reference](https://developer.android.com/reference/java/lang/String#length())"), method)
         assertTrue(definitionAt(length).isEmpty())
         assertNull(renameAt(length))
         val calls = listOf(lineOf("{v1}, Ljava/lang/String;->length"), lineOf("{v2}, Ljava/lang/String;->length"))
@@ -141,11 +141,11 @@ class SdkAndArrayTypeTest {
 
         val out = at("sget-object v2", "out", 1, after = "->")
         val field = hoverAt(out)
-        assertTrue(field.contains("**Field:** `Ljava/lang/System;.out`") && field.contains("**Type:** `java.io.PrintStream`") && field.contains("*SDK Field*"), field)
+        assertTrue(field.contains("```smali\nLjava/lang/System;->out:Ljava/io/PrintStream;\n```") && field.contains("`PrintStream out` in `java.lang.System` · [Android reference](https://developer.android.com/reference/java/lang/System#out)"), field)
         assertTrue(definitionAt(out).isEmpty())
         assertNull(renameAt(out))
         assertEquals(listOf(lineOf("sget-object v2"), lineOf("sget-object v3")), referencesAt(out).map { it.range.start.line }.sorted())
-        assertTrue(hoverAt(at("DISPLAY", "DISPLAY", 2)).contains("**Field:** `Ljava/util/Locale\$Category;.DISPLAY`"), "a nested SDK class keeps its name")
+        assertTrue(hoverAt(at("DISPLAY", "DISPLAY", 2)).contains("developer.android.com/reference/java/util/Locale.Category#DISPLAY"), "a nested SDK class links with a dot")
     }
 
     @Test
@@ -163,7 +163,7 @@ class SdkAndArrayTypeTest {
             assertEquals(fooUri, definition.uri, context)
             assertEquals(fooName, definition.range.start, "$context lands on the class name token")
             val hover = hoverAt(position, context)
-            assertTrue(hover.contains("**Class:** `com.app.Foo`") && !hover.contains("Not found"), "$context: $hover")
+            assertTrue(hover.contains("`com.app.Foo` · ") && !hover.contains("Not found"), "$context: $hover")
         }
         val refs = ReferenceProvider(index).findReferences(fooUri, foo.positionOf(".class", "Lcom/app/Foo;", 3), includeDeclaration = false)
         val arrays = lineOf(".method public arrays")
@@ -177,16 +177,16 @@ class SdkAndArrayTypeTest {
     fun `a primitive array is a built-in type whose owner names no class`() {
         val grid = at("grid:", "[[I", 1)
         val hover = hoverAt(grid)
-        assertTrue(hover.contains("**Primitive Array:** `int[][]`") && hover.contains("**Dimensions:** 2"), hover)
+        assertEquals("`int[][]` · 2-dimensional array of `int` (32-bit signed integer)", hover)
         assertTrue(definitionAt(grid).isEmpty())
 
         val owner = at("{v0}, [I->clone", "[I", 1)
-        assertTrue(hoverAt(owner).contains("**Primitive Array:** `int[]`"))
+        assertEquals("`int[]` · array of `int` (32-bit signed integer)", hoverAt(owner))
         assertTrue(definitionAt(owner).isEmpty() && referencesAt(owner).isEmpty(), "not a class reference")
 
         val clone = at("{v0}, [I->clone", "clone", 2)
         val method = hoverAt(clone)
-        assertTrue(method.contains("**Method:** `[I.clone`") && method.contains("*SDK Method*"), method)
+        assertTrue(method.contains("```smali\n[I->clone()Ljava/lang/Object;\n```") && method.contains("`Object clone()` in `int[]` · *Platform type*"), method)
         assertTrue(definitionAt(clone).isEmpty())
         assertNull(renameAt(clone))
         assertEquals(listOf(lineOf("{v0}, [I->clone"), lineOf("{v1}, [I->clone")), referencesAt(clone).map { it.range.start.line }.sorted())
@@ -203,14 +203,14 @@ class SdkAndArrayTypeTest {
         assertEquals(listenerUri, definition.uri)
         assertEquals(listener.positionOf(".method", "onEvent"), definition.range.start, "the abstract declaration's name token")
         val hover = hoverAt(onEvent)
-        assertTrue(hover.contains("**Method:** `onEvent`") && hover.contains("**Modifiers:** public, abstract"), hover)
+        assertTrue(hover.contains(".method public abstract onEvent("), hover)
         val toListener = ReferenceProvider(index).findReferences(listenerUri, listener.positionOf(".class", "Lcom/app/Listener;", 3), includeDeclaration = true)
         assertEquals(1, toListener.count { it.uri == listenerUri }, "the declaration: $toListener")
         assertEquals(listOf(lineOf(".implements Lcom/app/Listener;"), lineOf("invoke-interface {p0, v0}")), toListener.filter { it.uri == uri }.map { it.range.start.line }.sorted())
 
         val run = at("Ljava/lang/Runnable;->run", "run", 1)
         assertTrue(definitionAt(run).isEmpty())
-        assertTrue(hoverAt(run).contains("*SDK Method*"))
+        assertTrue(hoverAt(run).contains("developer.android.com/reference/java/lang/Runnable#run()"))
         assertEquals(listOf(lineOf("Ljava/lang/Runnable;->run")), referencesAt(run).map { it.range.start.line }, "not Main's implementation")
         assertEquals(listOf(lineOf(".method public run")), referencesAt(at(".method public run", "run", 1)).map { it.range.start.line }, "the implementation is not linked to the SDK interface")
     }
@@ -219,7 +219,7 @@ class SdkAndArrayTypeTest {
     fun `a class outside the SDK that is not indexed is not found rather than SDK`() {
         val missing = at("check-cast", "[[[[[Lcom/app/Missing;", 6)
         val hover = hoverAt(missing)
-        assertTrue(hover.contains("**Class:** `com.app.Missing[][][][][]`") && hover.contains("*Not found in workspace*"), hover)
+        assertTrue(hover.contains("`com.app.Missing[][][][][]` · *Not found in workspace*"), hover)
         assertTrue(definitionAt(missing).isEmpty())
         val operandStart = at("check-cast", "[[[[[Lcom/app/Missing;")
         val operand = Location(uri, Range(operandStart, Position(operandStart.line, operandStart.character + "[[[[[Lcom/app/Missing;".length)))
@@ -229,7 +229,7 @@ class SdkAndArrayTypeTest {
 
         val make = at("invoke-static", "make", 2)
         val method = hoverAt(make)
-        assertTrue(method.contains("**Method:** `Lcom/app/Missing;.make`") && method.contains("*Not found in workspace*"), method)
+        assertTrue(method.contains("Lcom/app/Missing;->make(") && method.contains("*Not found in workspace*"), method)
         assertTrue(definitionAt(make).isEmpty())
         assertEquals(listOf(ownerStart.line), referencesAt(make).map { it.range.start.line }, "the one call site")
     }
@@ -243,7 +243,7 @@ class SdkAndArrayTypeTest {
         index.openSource(modelUri, model)
         val hover = HoverProvider(index).provideHover(modelUri, model.positionOf(".super", "Landroidx/lifecycle/ViewModel;", 3))?.contents?.right?.value
         assertNotNull(hover)
-        assertTrue(hover.contains("**Class:** `androidx.lifecycle.ViewModel`") && hover.contains("**Methods:** 1") && !hover.contains("SDK"), hover)
+        assertTrue(hover.contains("`androidx.lifecycle.ViewModel` · 1 method") && !hover.contains("developer.android.com"), hover)
         val onCleared = model.positionOf("invoke-virtual", "onCleared", 2)
         assertEquals(listOf(viewModelUri), DefinitionProvider(index).findDefinition(modelUri, onCleared).map { it.uri }, "inherited from the bundled class")
         assertNotNull(RenameProvider(index).prepareRename(modelUri, onCleared), "renameable like any workspace member")

@@ -10,6 +10,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.indexer.WorkspaceScanner
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
 import xyz.surendrajat.smalilsp.providers.CodeLensProvider
+import xyz.surendrajat.smalilsp.providers.SemanticTokensProvider
 import xyz.surendrajat.smalilsp.providers.CompletionProvider
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
@@ -122,6 +123,7 @@ class SmaliLanguageServer : LanguageServer {
             ?: params.rootPath?.let { listOf(WorkspaceFolder(File(it).toURI().toString(), "root")) }
             ?: emptyList()
         clientSupportsProgress = params.capabilities?.window?.workDoneProgress == true
+        completionProvider.snippetSupport = params.capabilities?.textDocument?.completion?.completionItem?.snippetSupport == true
         clientSupportsWatcherRegistration = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration == true
 
         return CompletableFuture.completedFuture(createInitializeResult())
@@ -247,7 +249,7 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setCodeLensProvider(CodeLensOptions(true))
 
         // Completion
-        capabilities.setCompletionProvider(CompletionOptions(false, listOf("L", ">", "/")))
+        capabilities.setCompletionProvider(CompletionOptions(false, listOf("L", ">", "/", ":", ".", "{")))
 
         // Rename (with prepare support)
         capabilities.setRenameProvider(RenameOptions(true))
@@ -257,6 +259,11 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setDocumentHighlightProvider(true)
         capabilities.setFoldingRangeProvider(true)
         capabilities.setInlayHintProvider(true)
+        capabilities.setCodeActionProvider(CodeActionOptions(listOf(CodeActionKind.QuickFix)))
+        capabilities.setDocumentFormattingProvider(true)
+        capabilities.setDocumentRangeFormattingProvider(true)
+        // Semantic tokens: full, delta and range, for editors without a smali grammar
+        capabilities.setSemanticTokensProvider(SemanticTokensWithRegistrationOptions(SemanticTokensProvider.legend, SemanticTokensServerFull(true), true))
 
         // Folders added or removed during the session are indexed or dropped
         capabilities.workspace = WorkspaceServerCapabilities().apply {
@@ -283,6 +290,7 @@ class SmaliLanguageServer : LanguageServer {
                 try {
                     indexWorkspace(pendingWorkspaceFolders)
                     index.trimUsages()
+                    JvmTuning.compactAfterScan()
                 } catch (e: Throwable) {
                     logger.error("Failed to index workspace", e)
                 } finally {

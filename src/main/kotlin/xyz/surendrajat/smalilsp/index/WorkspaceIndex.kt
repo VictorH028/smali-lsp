@@ -5,6 +5,8 @@ import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.jsonrpc.CancelChecker
 import xyz.surendrajat.smalilsp.core.*
+import xyz.surendrajat.smalilsp.parser.SmaliParser
+import xyz.surendrajat.smalilsp.util.SourceFiles
 import xyz.surendrajat.smalilsp.util.StringPool
 import xyz.surendrajat.smalilsp.util.Types
 import java.io.File
@@ -23,10 +25,10 @@ import java.util.concurrent.atomic.AtomicLong
  * old entry. Declarations are answered from the file itself; only usages have tables of their
  * own.
  *
- * Usage tables are [UsageList]s: packed ints, no object per site. Every file has an id and a
- * generation. Re-indexing a file bumps its generation, which retires all of its earlier
- * entries at once instead of walking every symbol the file touched. Retired entries are
- * skipped on read and dropped by a compaction once they make up a quarter of the tables.
+ * Usage tables are [UsageList]s: packed ints, no object per site. Every indexing of a file gets
+ * a fresh id and retires the previous one, which retires all of the file's earlier entries at
+ * once instead of walking every symbol the file touched. Retired entries are skipped on read
+ * and dropped by a compaction once they make up a quarter of the tables.
  *
  * Thread-safe: the scanner indexes files concurrently while requests are answered.
  */
@@ -46,11 +48,14 @@ class WorkspaceIndex {
     private val methodCount = AtomicInteger(0)
     private val fieldCount = AtomicInteger(0)
 
-    // ---- file ids and generations (grown under fileLock; readers bounds-check their snapshot) ----
+    // ---- file ids (grown under fileLock; readers bounds-check their snapshot) ----
+    // A file gets a fresh id each time it is indexed; retiring the old id retires every usage
+    // site it added, so a site carries no generation. Ids are never reused.
     private val fileLock = Any()
     private val fileIds = ConcurrentHashMap<String, Int>()
+    private var nextId = 0
     @Volatile private var urisById = arrayOfNulls<String>(1024)
-    @Volatile private var generation = AtomicIntegerArray(1024)
+    @Volatile private var alive = AtomicIntegerArray(1024)
     @Volatile private var contributions = AtomicIntegerArray(1024)
 
     // ---- hierarchy ----
@@ -72,16 +77,33 @@ class WorkspaceIndex {
     private val documentContents = ConcurrentHashMap<String, String>()
     private val documentLines = ConcurrentHashMap<String, List<String>>()
 
+    // ---- bodies: files stored without instructions, re-parsed on demand and kept for a while ----
+    private val bodiless = ConcurrentHashMap.newKeySet<String>()
+    private val bodies = object : LinkedHashMap<String, SmaliFile>(BODY_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SmaliFile>): Boolean = size > BODY_CACHE
+    }
+    /** The distinct string literals each file loads, kept apart from the body so a shell can be retracted. */
+    private val fileStrings = ConcurrentHashMap<String, Array<String>>()
+
     // ======================================================================
     // Indexing
     // ======================================================================
 
-    /** Indexes a file; a file already indexed under the same URI is replaced. Thread-safe. */
-    fun indexFile(file: SmaliFile) {
+    /**
+     * Indexes a file; a file already indexed under the same URI is replaced. With [keepBody] false
+     * the index stores the declarations only and parses the file again when a request needs its
+     * body: the instruction lists are most of the AST's memory and matter only for open files
+     * and the occasional call-hierarchy lookup. Thread-safe.
+     */
+    fun indexFile(file: SmaliFile, keepBody: Boolean = true) {
         val uri = canonicalUri(file.uri)
-        val id = fileId(uri)
-        filesByUri.put(uri, file)?.let { retract(it, uri) }
-        val gen = retireUsages(id)
+        val id = freshId(uri)
+        val stored = if (keepBody) file else file.withoutBody()
+        if (keepBody) bodiless.remove(uri) else bodiless.add(uri)
+        synchronized(bodies) { bodies.remove(uri) }
+        val strings = distinctStrings(file)
+        filesByUri.put(uri, stored)?.let { retract(it, uri) }   // retract takes the old file's strings out of the side map
+        fileStrings[uri] = strings
 
         val className = file.classDefinition.name
         uriByClass[className] = uri
@@ -93,11 +115,11 @@ class WorkspaceIndex {
         }
         methodCount.addAndGet(file.methods.size)
         fieldCount.addAndGet(file.fields.size)
-        updateStringValueCounts(file, delta = 1)
+        updateStringValueCounts(strings, delta = 1)
 
         var added = 0
         forEachUsage(file) { list, line, start, end ->
-            list.add(id, gen, line, start, end)
+            list.add(id, line, start, end)
             added++
         }
         totalEntries.addAndGet(added.toLong())
@@ -113,8 +135,18 @@ class WorkspaceIndex {
         val key = canonicalUri(uri)
         val file = filesByUri.remove(key) ?: return false
         retract(file, key)
-        retireUsages(fileId(key))
+        synchronized(fileLock) { fileIds.remove(key)?.let { retire(it) } }
+        bodiless.remove(key)
+        synchronized(bodies) { bodies.remove(key) }
         return true
+    }
+
+    /** Drops the stored body of a file that is no longer open; the next request for it parses the file again. */
+    fun dropBody(uri: String) {
+        val key = canonicalUri(uri)
+        if (key in bodiless) return
+        val file = filesByUri[key] ?: return
+        if (filesByUri.replace(key, file, file.withoutBody())) bodiless.add(key)
     }
 
     /** Removes every indexed file under [folderUri] (a workspace folder the client closed); returns how many. */
@@ -135,31 +167,29 @@ class WorkspaceIndex {
         for (iface in file.classDefinition.interfaces) implementorsIndex[iface]?.remove(className)
         methodCount.addAndGet(-file.methods.size)
         fieldCount.addAndGet(-file.fields.size)
-        updateStringValueCounts(file, delta = -1)
+        updateStringValueCounts(fileStrings.remove(uri) ?: distinctStrings(file), delta = -1)
     }
 
-    /** Moves the file to a new generation, retiring every usage entry it added so far. */
-    private fun retireUsages(id: Int): Int = synchronized(fileLock) {
-        staleEntries.addAndGet(contributions.getAndSet(id, 0).toLong())
-        generation.incrementAndGet(id)
-    }
-
-    private fun fileId(uri: String): Int {
-        fileIds[uri]?.let { return it }
-        synchronized(fileLock) {
-            fileIds[uri]?.let { return it }
-            val id = fileIds.size
-            if (id >= urisById.size) {
-                val n = urisById.size * 2
-                urisById = urisById.copyOf(n)
-                generation = grow(generation, n)
-                contributions = grow(contributions, n)
-            }
-            urisById[id] = uri
-            generation.set(id, 1)
-            fileIds[uri] = id
-            return id
+    /** A new id for [uri]; the id it had before, if any, is retired with every usage site it added. */
+    private fun freshId(uri: String): Int = synchronized(fileLock) {
+        val id = nextId++
+        if (id >= urisById.size) {
+            val n = urisById.size * 2
+            urisById = urisById.copyOf(n)
+            alive = grow(alive, n)
+            contributions = grow(contributions, n)
         }
+        urisById[id] = uri
+        alive.set(id, 1)
+        fileIds.put(uri, id)?.let { retire(it) }
+        id
+    }
+
+    /** Called with [fileLock] held: the id's sites become stale and its URI reference is dropped. */
+    private fun retire(id: Int) {
+        alive.set(id, 0)
+        urisById[id] = null
+        staleEntries.addAndGet(contributions.getAndSet(id, 0).toLong())
     }
 
     private fun grow(old: AtomicIntegerArray, n: Int): AtomicIntegerArray {
@@ -233,30 +263,32 @@ class WorkspaceIndex {
 
     /**
      * Drops retired entries once they make up a quarter of the tables. Called with [fileLock]
-     * held, so the generation array cannot be replaced (grown) while entries are judged
-     * against it: an entry of a file id beyond the captured array would look retired.
+     * held, so the alive array cannot be replaced (grown) while entries are judged against it:
+     * an entry of a file id beyond the captured array would look retired.
      */
     private fun maybeCompact() {
         val stale = staleEntries.get()
         if (stale < 100_000 || stale * 4 < totalEntries.get()) return
-        val gen = generation
+        val live = alive
         var dropped = 0L
         for (table in listOf(methodUsages, fieldUsages, classRefs, stringUsages)) {
-            for (list in table.values) dropped += list.compact(gen)
+            for (list in table.values) dropped += list.compact(live)
         }
         totalEntries.addAndGet(-dropped)
         staleEntries.set(0)
     }
 
-    private fun updateStringValueCounts(file: SmaliFile, delta: Int) {
-        for (method in file.methods) {
-            for (instr in method.instructions) {
-                if (instr is ConstStringInstruction) {
-                    stringValueCounts.compute(instr.value) { _, existing ->
-                        val next = (existing ?: 0) + delta
-                        if (next > 0) next else null
-                    }
-                }
+    private fun distinctStrings(file: SmaliFile): Array<String> {
+        val values = LinkedHashSet<String>()
+        for (method in file.methods) for (instr in method.instructions) if (instr is ConstStringInstruction) values.add(instr.value)
+        return values.toTypedArray()
+    }
+
+    private fun updateStringValueCounts(values: Array<String>, delta: Int) {
+        for (value in values) {
+            stringValueCounts.compute(value) { _, existing ->
+                val next = (existing ?: 0) + delta
+                if (next > 0) next else null
             }
         }
     }
@@ -273,9 +305,30 @@ class WorkspaceIndex {
     /** URI of the file defining [className]. */
     fun getUri(className: String): String? = uriByClass[className]
 
-    fun findFileByUri(uri: String): SmaliFile? = filesByUri[uri] ?: filesByUri[canonicalUri(uri)]
+    /** The file with its body: as stored when it is open or was indexed with its body, else parsed again from the open text or the disk. */
+    fun findFileByUri(uri: String): SmaliFile? {
+        var key = uri
+        var stored = filesByUri[key]
+        if (stored == null) {
+            key = canonicalUri(uri)
+            stored = filesByUri[key] ?: return null
+        }
+        if (key !in bodiless) return stored
+        return body(key) ?: stored
+    }
 
-    fun findClassNameByUri(uri: String): String? = findFileByUri(uri)?.classDefinition?.name
+    /** The file as stored, which for a file that is not open is its declarations only. Enough for anything that does not read instructions or labels. */
+    fun findDeclarations(uri: String): SmaliFile? = filesByUri[uri] ?: filesByUri[canonicalUri(uri)]
+
+    private fun body(key: String): SmaliFile? {
+        synchronized(bodies) { bodies[key]?.let { return it } }
+        val text = documentContents[key] ?: try { SourceFiles.read(File(URI(key))) } catch (_: Exception) { return null }
+        val parsed = SmaliParser(strings).parse(key, text) ?: return null
+        synchronized(bodies) { bodies[key] = parsed }
+        return parsed
+    }
+
+    fun findClassNameByUri(uri: String): String? = findDeclarations(uri)?.classDefinition?.name
 
     /** Classes whose last path segment is [simpleName] (`Outer$Inner` for nested classes). */
     fun findClassesBySimpleName(simpleName: String): List<SmaliFile> =
@@ -406,16 +459,16 @@ class WorkspaceIndex {
     private fun UsageList?.toLocations(cancel: CancelChecker? = null): List<Location> {
         if (this == null) return emptyList()
         val entries = snapshot()
-        val gen = generation
+        val live = alive
         val uris = urisById
         val out = ArrayList<Location>(entries.size / UsageList.STRIDE)
         var i = 0
         while (i < entries.size) {
             if (cancel != null && i % (UsageList.STRIDE * 4096) == 0) cancel.checkCanceled()
             val fileId = entries[i]
-            if (fileId < gen.length() && gen.get(fileId) == entries[i + 1]) {
-                val line = entries[i + 2]
-                out.add(Location(uris[fileId], Range(Position(line, entries[i + 3]), Position(line, entries[i + 4]))))
+            if (fileId < live.length() && live.get(fileId) != 0) {
+                val line = entries[i + 1]
+                out.add(Location(uris[fileId], Range(Position(line, entries[i + 2]), Position(line, entries[i + 3]))))
             }
             i += UsageList.STRIDE
         }
@@ -523,6 +576,9 @@ class WorkspaceIndex {
     private fun simpleKey(className: String): String = className.removePrefix("L").removeSuffix(";").substringAfterLast('/')
 
     companion object {
+        /** Re-parsed bodies kept for requests that come in bursts on the same closed file. */
+        private const val BODY_CACHE = 32
+
         /**
          * One spelling per file. `file:/x` (java.io.File) and `file://x` become `file:///x`, and
          * percent-encoding is normalized through the path: VS Code sends `Foo%24Bar.smali` for the

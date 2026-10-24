@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
+import xyz.surendrajat.smalilsp.providers.CodeActionProvider
 import xyz.surendrajat.smalilsp.providers.CodeLensProvider
 import xyz.surendrajat.smalilsp.providers.CompletionProvider
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
@@ -20,12 +21,15 @@ import xyz.surendrajat.smalilsp.providers.DocumentHighlightProvider
 import xyz.surendrajat.smalilsp.providers.DocumentSymbolProvider
 import xyz.surendrajat.smalilsp.providers.FoldingRangeProvider
 import xyz.surendrajat.smalilsp.providers.InlayHints
+import xyz.surendrajat.smalilsp.providers.SemanticTokensProvider
+import xyz.surendrajat.smalilsp.providers.SmaliFormatter
 import xyz.surendrajat.smalilsp.providers.ImplementationProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
 import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.providers.TypeHierarchyProvider
 import java.io.File
+import xyz.surendrajat.smalilsp.util.SourceFiles
 import java.net.URI
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -53,10 +57,12 @@ class SmaliTextDocumentService(
     private val logger = LoggerFactory.getLogger(SmaliTextDocumentService::class.java)
     private val parser = SmaliParser(index.strings)
     private val diagnosticProvider = DiagnosticProvider(parser, index)
+    private val codeActionProvider = CodeActionProvider(index, diagnosticProvider)
     private val documentSymbolProvider = DocumentSymbolProvider()
     private val implementationProvider = ImplementationProvider(index)
     private val documentHighlightProvider = DocumentHighlightProvider(index)
     private val foldingRangeProvider = FoldingRangeProvider()
+    private val semanticTokensProvider = SemanticTokensProvider(index)
     private var client: LanguageClient? = null
 
     /** Open file URIs, so diagnostics can be refreshed once workspace indexing completes. */
@@ -153,6 +159,7 @@ class SmaliTextDocumentService(
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         openFiles.remove(uri)
+        semanticTokensProvider.forget(uri)
         logger.debug("didClose: {}", uri)
         writes.submit("didClose $uri") {
             val buffer = index.getDocumentContent(uri)
@@ -169,10 +176,10 @@ class SmaliTextDocumentService(
             if (index.removeFile(uri)) logger.debug("Removed from index (closed without a file on disk): $uri")
             return
         }
-        val text = file.readText(Charsets.UTF_8)
-        if (text == buffer) return
+        val text = SourceFiles.read(file)
+        if (text == buffer) { index.dropBody(uri); return }
         val parsed = parser.parse(uri, text)
-        if (parsed != null) index.indexFile(parsed) else index.removeFile(uri)
+        if (parsed != null) index.indexFile(parsed, keepBody = false) else index.removeFile(uri)
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {
@@ -196,7 +203,7 @@ class SmaliTextDocumentService(
 
     override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<MutableList<Either<SymbolInformation, DocumentSymbol>>> =
         writes.request("documentSymbol", { params.textDocument.uri }, { mutableListOf() }) {
-            val file = index.findFileByUri(params.textDocument.uri) ?: return@request mutableListOf()
+            val file = index.findDeclarations(params.textDocument.uri) ?: return@request mutableListOf()
             documentSymbolProvider.provideDocumentSymbols(file).map { Either.forRight<SymbolInformation, DocumentSymbol>(it) }.toMutableList()
         }
 
@@ -208,6 +215,41 @@ class SmaliTextDocumentService(
     override fun documentHighlight(params: DocumentHighlightParams): CompletableFuture<MutableList<out DocumentHighlight>> =
         writes.request("documentHighlight", { params.at }, { mutableListOf() }) {
             documentHighlightProvider.highlights(params.textDocument.uri, params.position).toMutableList()
+        }
+
+    override fun semanticTokensFull(params: SemanticTokensParams): CompletableFuture<SemanticTokens> =
+        writes.request("semanticTokensFull", { params.textDocument.uri }, { SemanticTokens(emptyList()) }) {
+            semanticTokensProvider.full(params.textDocument.uri) ?: SemanticTokens(emptyList())
+        }
+
+    override fun semanticTokensFullDelta(params: SemanticTokensDeltaParams): CompletableFuture<Either<SemanticTokens, SemanticTokensDelta>> =
+        writes.request("semanticTokensFullDelta", { params.textDocument.uri }, { Either.forLeft(SemanticTokens(emptyList())) }) {
+            semanticTokensProvider.delta(params.textDocument.uri, params.previousResultId) ?: Either.forLeft(SemanticTokens(emptyList()))
+        }
+
+    override fun semanticTokensRange(params: SemanticTokensRangeParams): CompletableFuture<SemanticTokens> =
+        writes.request("semanticTokensRange", { params.textDocument.uri }, { SemanticTokens(emptyList()) }) {
+            semanticTokensProvider.range(params.textDocument.uri, params.range) ?: SemanticTokens(emptyList())
+        }
+
+    override fun codeAction(params: CodeActionParams): CompletableFuture<MutableList<Either<Command, CodeAction>>> =
+        writes.request("codeAction", { params.textDocument.uri }, { mutableListOf() }) {
+            codeActionProvider.actions(params.textDocument.uri, params.range).map { Either.forRight<Command, CodeAction>(it) }.toMutableList()
+        }
+
+    override fun formatting(params: DocumentFormattingParams): CompletableFuture<MutableList<out TextEdit>> =
+        writes.request("formatting", { params.textDocument.uri }, { mutableListOf() }) {
+            val text = index.getDocumentContent(params.textDocument.uri) ?: return@request mutableListOf()
+            SmaliFormatter.edits(text).toMutableList()
+        }
+
+    /** The whole document is laid out and the lines of the range kept; a selection ending at a line's start does not include that line. */
+    override fun rangeFormatting(params: DocumentRangeFormattingParams): CompletableFuture<MutableList<out TextEdit>> =
+        writes.request("rangeFormatting", { params.textDocument.uri }, { mutableListOf() }) {
+            val text = index.getDocumentContent(params.textDocument.uri) ?: return@request mutableListOf()
+            val range = params.range
+            val last = if (range.end.character == 0 && range.end.line > range.start.line) range.end.line - 1 else range.end.line
+            SmaliFormatter.edits(text, range.start.line, last).toMutableList()
         }
 
     override fun inlayHint(params: InlayHintParams): CompletableFuture<MutableList<InlayHint>> =
