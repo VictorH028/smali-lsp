@@ -356,9 +356,22 @@ whose declarations are unreachable.
 - **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
   scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
   query over the 76 K-file app's 660 K names.
-- **Completion**: after `->`, the members of the owner and of its workspace supertypes (own
-  members first, overrides hiding what they override); class names ranked by match kind,
-  length and name so the list is stable across keystrokes; opcodes at the start of a line.
+- **Completion**: what the caret's context can take, so the list is short and right. After
+  `->`, the owner's members and the inherited ones (an override hiding what it overrides),
+  narrowed by the opcode: static methods for `invoke-static`, the owner's own private methods
+  and constructors for `invoke-direct`, instance methods otherwise, and when the braces are
+  complete only the methods whose register count they hold (`this` and wide parameters counted
+  as the frame counts them); fields by the static-ness and type the field opcode moves. Before
+  it, class names of the kind the operand needs: concrete for `new-instance`, an interface for
+  `.implements` and an `invoke-interface` owner, non-interface for `.super`, a workspace
+  throwable for `.catch`. After `:`, the method's labels; on `v` or `p` (or right after `{`),
+  the frame's registers with `this`, the parameter type or the local slot; after `.`, the
+  directives that belong at the caret with the innermost open block's `.end` first; on an
+  empty line inside a method every opcode, the `move-result` a preceding call needs first, each
+  inserting its operand shape as tab stops when the client takes snippets. Class names are
+  ranked by match kind, length and name; the list is scanned once keeping the best fifty, with
+  the kind check only for a name that would make the fifty, so the worst case (an `L` alone on
+  the 76 K-file app) stays at a few milliseconds.
 - **Diagnostics**: syntax errors on the offending token and the file-local checks are
   published at once: a jump to an undefined label, a label defined twice, and the assembler
   checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per

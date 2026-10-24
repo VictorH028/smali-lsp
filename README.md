@@ -14,7 +14,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
 - **Code Lens** — reference counts on classes, methods and fields; subclass and implementation counts
-- **Completion** — class names (ranked), members including inherited ones, opcodes
+- **Completion** — what the opcode can take: static methods for `invoke-static`, instance ones otherwise, only those the register count fits; fields of the type the opcode moves; concrete classes, interfaces or throwables where the operand needs them; labels after `:`, registers with what they hold, directives with the open block's `.end` first, opcodes as snippets of their operand shape
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
@@ -41,7 +41,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `textDocument/codeLens` + `codeLens/resolve` | counts resolved lazily |
 | `textDocument/inlayHint` | resource names and values, decimal values |
 | `textDocument/semanticTokens/full` `full/delta` `range` | from the open file's model and a line scan, never a re-parse; SDK classes and members carry `defaultLibrary` |
-| `textDocument/completion` | trigger characters `L`, `>`, `/` |
+| `textDocument/completion` | trigger characters `L`, `>`, `/`, `:`, `.`, `{` |
 | `textDocument/prepareRename` + `rename` | methods, fields, labels |
 | `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
 | `textDocument/prepareTypeHierarchy` + `typeHierarchy/supertypes` `subtypes` | |

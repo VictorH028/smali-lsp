@@ -123,6 +123,7 @@ class SmaliLanguageServer : LanguageServer {
             ?: params.rootPath?.let { listOf(WorkspaceFolder(File(it).toURI().toString(), "root")) }
             ?: emptyList()
         clientSupportsProgress = params.capabilities?.window?.workDoneProgress == true
+        completionProvider.snippetSupport = params.capabilities?.textDocument?.completion?.completionItem?.snippetSupport == true
         clientSupportsWatcherRegistration = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration == true
 
         return CompletableFuture.completedFuture(createInitializeResult())
@@ -248,7 +249,7 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setCodeLensProvider(CodeLensOptions(true))
 
         // Completion
-        capabilities.setCompletionProvider(CompletionOptions(false, listOf("L", ">", "/")))
+        capabilities.setCompletionProvider(CompletionOptions(false, listOf("L", ">", "/", ":", ".", "{")))
 
         // Rename (with prepare support)
         capabilities.setRenameProvider(RenameOptions(true))
