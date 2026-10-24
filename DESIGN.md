@@ -517,50 +517,50 @@ only one index is built at a time.
 
 ## 10. File inventory
 
-| File | Lines | Role |
-|------|-------|------|
-| SmaliTextParser.kt | 1,179 | the front end: lexer, statement parser, model building |
-| DalvikOpcodeDatabase.kt | 1,042 | opcode documentation for hover and completion |
-| McpMode.kt | 673 | MCP server |
-| WorkspaceIndex.kt | 626 | the index |
-| DataStructures.kt | 435 | the AST model |
-| SmaliLanguageServer.kt | 354 | the LSP server: handshake, indexing, capabilities |
-| SmaliTextDocumentService.kt | 302 | document lifecycle and requests |
-| SemanticTokensProvider.kt | 290 | semantic tokens |
-| HoverProvider.kt | 237 | hover |
-| ReferenceProvider.kt | 228 | references and member families |
-| Types.kt | 221 | descriptor and class-name helpers |
-| InstructionText.kt | 219 | instruction scanner and register frame |
-| WorkspaceSymbolProvider.kt | 218 | workspace symbol search |
-| CompletionProvider.kt | 188 | completion |
-| DiagnosticProvider.kt | 183 | diagnostics |
-| ResourceTable.kt | 166 | `public.xml` and values per workspace root |
-| AssemblerChecks.kt | 162 | assembler checks for hand edits |
-| WorkspaceScanner.kt | 158 | parallel scan |
-| Registers.kt | 151 | register hover, highlight and the frame hover |
-| Symbol.kt | 140 | `symbolAt` and the symbol kinds |
-| RenameProvider.kt | 130 | rename |
-| CallHierarchyProvider.kt | 125 | call hierarchy |
-| DocumentHighlightProvider.kt | 122 | document highlight |
-| SmaliWorkspaceService.kt | 121 | watched files, workspace symbols |
-| CodeLensProvider.kt | 108 | reference and subtype counts |
-| TypeHierarchyProvider.kt | 105 | type hierarchy |
-| JvmTuning.kt | 102 | heap settings applied in-process |
-| InstructionShapes.kt | 98 | opcode → operand shape, derived from the grammar |
-| StringPool.kt | 97 | per-index interning |
-| ResourceLiterals.kt | 83 | resource hover, definition and hints |
-| WriteQueue.kt | 73 | the writer thread and the request helper |
-| DocumentSymbolProvider.kt | 73 | outline |
-| Literals.kt | 66 | the one literal a line carries |
-| Cli.kt | 64 | command line, usage, version |
-| DefinitionProvider.kt | 63 | definition |
-| InlayHints.kt | 60 | resource names and decimal values after literals |
-| UsageList.kt | 59 | packed usage sites |
-| LabelMap.kt | 58 | packed labels and label references |
-| SmaliParser.kt | 51 | parser entry |
-| FrameworkResources.kt | 48 | the bundled `android.R` names |
-| ImplementationProvider.kt | 46 | implementations |
-| Logging.kt | 39 | logback setup |
-| Main.kt | 33 | entry point |
-| FoldingRangeProvider.kt | 22 | folding ranges |
-| StringLiterals.kt | 18 | the string operand under the caret |
+| File | Role |
+|------|------|
+| SmaliTextParser.kt | the front end: lexer, statement parser, model building |
+| DalvikOpcodeDatabase.kt | opcode documentation for hover and completion |
+| McpMode.kt | MCP server |
+| WorkspaceIndex.kt | the index |
+| DataStructures.kt | the AST model |
+| AssemblerChecks.kt | assembler checks for hand edits |
+| SmaliLanguageServer.kt | the LSP server: handshake, indexing, capabilities |
+| SmaliTextDocumentService.kt | document lifecycle and requests |
+| SemanticTokensProvider.kt | semantic tokens |
+| HoverProvider.kt | hover |
+| ReferenceProvider.kt | references and member families |
+| Types.kt | descriptor and class-name helpers |
+| InstructionText.kt | instruction scanner and register frame |
+| WorkspaceSymbolProvider.kt | workspace symbol search |
+| DiagnosticProvider.kt | diagnostics |
+| CompletionProvider.kt | completion |
+| ResourceTable.kt | `public.xml` and values per workspace root |
+| WorkspaceScanner.kt | parallel scan |
+| Registers.kt | register hover, highlight and the frame hover |
+| Symbol.kt | `symbolAt` and the symbol kinds |
+| RenameProvider.kt | rename |
+| CallHierarchyProvider.kt | call hierarchy |
+| DocumentHighlightProvider.kt | document highlight |
+| SmaliWorkspaceService.kt | watched files, workspace symbols |
+| CodeLensProvider.kt | reference and subtype counts |
+| TypeHierarchyProvider.kt | type hierarchy |
+| JvmTuning.kt | heap settings applied in-process |
+| InstructionShapes.kt | opcode → operand shape, derived from the grammar |
+| StringPool.kt | per-index interning |
+| ResourceLiterals.kt | resource hover, definition and hints |
+| WriteQueue.kt | the writer thread and the request helper |
+| DocumentSymbolProvider.kt | outline |
+| Literals.kt | the one literal a line carries |
+| Cli.kt | command line, usage, version |
+| DefinitionProvider.kt | definition |
+| InlayHints.kt | resource names and decimal values after literals |
+| UsageList.kt | packed usage sites |
+| LabelMap.kt | packed labels and label references |
+| SmaliParser.kt | parser entry |
+| FrameworkResources.kt | the bundled `android.R` names |
+| ImplementationProvider.kt | implementations |
+| Logging.kt | logback setup |
+| Main.kt | entry point |
+| FoldingRangeProvider.kt | folding ranges |
+| StringLiterals.kt | the string operand under the caret |
