@@ -7,6 +7,7 @@
 - Semantic tokens (`textDocument/semanticTokens` full, delta and range): every token classified from the open file's model and a line scan, so editors without a smali grammar get highlighting (#1)
 - Assembler checks for hand edits also catch a call passing the wrong number of registers, a `return` or `move-result` of the wrong kind, a wide pair past the frame, a second `.registers` or `.locals`, and `invoke-static` or `sget` on an instance member and the reverse when the workspace declares it
 - Quick fixes (`textDocument/codeAction`) for the diagnostics with one right answer: the wider opcode, the `/range` form, the frame count, the matching `return` or `move-result`, the call or field opcode the member needs, a label typo
+- Formatting (`textDocument/formatting` and `rangeFormatting`): baksmali's layout, one edit per changed line; strings, comments and blank lines stay as written
 
 ### Changed
 

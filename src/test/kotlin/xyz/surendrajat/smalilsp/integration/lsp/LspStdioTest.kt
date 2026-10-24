@@ -249,6 +249,26 @@ class LspStdioTest {
     }
 
     @Test
+    fun `formatting comes back as one edit per changed line over stdio`() {
+        writeWorkspace()
+        val text = ".class public Lcom/app/Fmt;\n.super Ljava/lang/Object;\n.method public run()V\n.registers 2\n  const/4 v0,0x1\n    return-void\n.end method\n"
+        val file = workspace.resolve("smali/com/app/Fmt.smali").toFile().apply { writeText(text) }
+        val uri = file.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            val caps = client.initializeAndIndex(initParams(client)).getAsJsonObject("capabilities")
+            assertTrue(caps["documentFormattingProvider"].asBoolean && caps["documentRangeFormattingProvider"].asBoolean)
+            client.open(file, text)
+            val options = mapOf("tabSize" to 4, "insertSpaces" to true)
+            val edits = client.result("textDocument/formatting", mapOf("textDocument" to client.textDocument(uri), "options" to options)).asJsonArray
+            assertEquals(listOf("    .registers 2", "    const/4 v0, 0x1"), edits.map { it.asJsonObject["newText"].asString })
+            assertEquals(listOf(3, 4), edits.map { it.asJsonObject.getAsJsonObject("range").getAsJsonObject("start")["line"].asInt })
+            val range = mapOf("start" to mapOf("line" to 4, "character" to 0), "end" to mapOf("line" to 5, "character" to 0))
+            val ranged = client.result("textDocument/rangeFormatting", mapOf("textDocument" to client.textDocument(uri), "range" to range, "options" to options)).asJsonArray
+            assertEquals(listOf("    const/4 v0, 0x1"), ranged.map { it.asJsonObject["newText"].asString }, "line 4 only: a selection ending at the start of line 5 leaves it out")
+        }
+    }
+
+    @Test
     fun `quick fixes come back as code actions over stdio`() {
         writeWorkspace()
         val text = ".class public Lcom/app/Fix;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    const/4 v0, 0x10\n    return-void\n.end method\n"

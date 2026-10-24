@@ -94,6 +94,7 @@ class RealApkInvariantsTest {
         dynamicTest("workspace symbol search finds classes by simple name") { symbolSearch(fx) },
         dynamicTest("diagnostics report no syntax errors and no undefined workspace classes") { diagnostics(fx) },
         dynamicTest("semantic tokens are well-formed") { semanticTokens(fx) },
+        dynamicTest("formatting leaves baksmali output as it is") { formatting(fx) },
         dynamicTest("re-indexing and remove+add are no-ops") { idempotentReindex(fx) },
     )
 
@@ -420,6 +421,29 @@ class RealApkInvariantsTest {
         // baksmali output defines every label it jumps to, exactly once, and assembles: the file-local checks must be silent on every file
         val localProblems = files.flatMap { file -> diag.localDiagnostics(file, File(java.net.URI(file.uri)).readLines()).map { "${file.classDefinition.name}: ${it.text}" } }
         assertEquals(emptyList<String>(), localProblems.take(10), "${fx.dir.name}: ${localProblems.size} label or assembler diagnostics on valid files")
+    }
+
+    // ---------- 13. formatting ----------
+
+    /** baksmali's output is the layout the formatter produces: every sampled file formats to itself. */
+    private fun formatting(fx: Fixture) {
+        val files = fx.files
+        val changed = mutableListOf<String>()
+        var checked = 0
+        for (i in sample(300, files.size, 13)) {
+            val file = files[i]
+            val text = File(java.net.URI(file.uri)).readText()
+            checked++
+            val formatted = xyz.surendrajat.smalilsp.providers.SmaliFormatter.format(text)
+            if (formatted != text) {
+                val before = text.lines()
+                val after = formatted.lines()
+                val line = before.indices.firstOrNull { it >= after.size || before[it] != after[it] } ?: -1
+                changed.add("${file.classDefinition.name}:${line + 1} '${before.getOrNull(line)}' -> '${after.getOrNull(line)}'")
+            }
+        }
+        kotlin.test.assertTrue(checked > 0)
+        kotlin.test.assertEquals(emptyList<String>(), changed.take(10), "${changed.size} of $checked sampled files would change")
     }
 
     // ---------- 12. semantic tokens ----------

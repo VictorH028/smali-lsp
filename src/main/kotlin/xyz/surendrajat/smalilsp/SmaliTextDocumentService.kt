@@ -22,6 +22,7 @@ import xyz.surendrajat.smalilsp.providers.DocumentSymbolProvider
 import xyz.surendrajat.smalilsp.providers.FoldingRangeProvider
 import xyz.surendrajat.smalilsp.providers.InlayHints
 import xyz.surendrajat.smalilsp.providers.SemanticTokensProvider
+import xyz.surendrajat.smalilsp.providers.SmaliFormatter
 import xyz.surendrajat.smalilsp.providers.ImplementationProvider
 import xyz.surendrajat.smalilsp.providers.HoverProvider
 import xyz.surendrajat.smalilsp.providers.ReferenceProvider
@@ -234,6 +235,21 @@ class SmaliTextDocumentService(
     override fun codeAction(params: CodeActionParams): CompletableFuture<MutableList<Either<Command, CodeAction>>> =
         writes.request("codeAction", { params.textDocument.uri }, { mutableListOf() }) {
             codeActionProvider.actions(params.textDocument.uri, params.range).map { Either.forRight<Command, CodeAction>(it) }.toMutableList()
+        }
+
+    override fun formatting(params: DocumentFormattingParams): CompletableFuture<MutableList<out TextEdit>> =
+        writes.request("formatting", { params.textDocument.uri }, { mutableListOf() }) {
+            val text = index.getDocumentContent(params.textDocument.uri) ?: return@request mutableListOf()
+            SmaliFormatter.edits(text).toMutableList()
+        }
+
+    /** The whole document is laid out and the lines of the range kept; a selection ending at a line's start does not include that line. */
+    override fun rangeFormatting(params: DocumentRangeFormattingParams): CompletableFuture<MutableList<out TextEdit>> =
+        writes.request("rangeFormatting", { params.textDocument.uri }, { mutableListOf() }) {
+            val text = index.getDocumentContent(params.textDocument.uri) ?: return@request mutableListOf()
+            val range = params.range
+            val last = if (range.end.character == 0 && range.end.line > range.start.line) range.end.line - 1 else range.end.line
+            SmaliFormatter.edits(text, range.start.line, last).toMutableList()
         }
 
     override fun inlayHint(params: InlayHintParams): CompletableFuture<MutableList<InlayHint>> =

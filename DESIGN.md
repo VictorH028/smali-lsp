@@ -391,6 +391,14 @@ whose declarations are unreachable.
   request, keeps those on the requested lines and builds each edit from the current text, so a
   stale diagnostic on the client's side cannot misplace an edit. A fix that would have to guess
   (a register for `return`, the registers a call is missing) is not offered.
+- **Formatting**: `SmaliFormatter` re-indents by a stack of blocks (`.method`, `.annotation`,
+  `.subannotation`, a switch or array payload, an annotation value's braces, a `.field` or
+  `.param` that turns out to carry annotations) and re-spaces each line's tokens, strings and
+  comments kept verbatim. It never joins or splits a line and leaves blank lines where they
+  are, because baksmali's own vary with the section. baksmali output formats to itself, which
+  the real-app invariants check on every sampled file, so the formatter is also the statement
+  of the layout. Edits are per changed line; range formatting lays out the whole document and
+  keeps the lines asked for.
 - **Semantic tokens**: `SemanticTokensProvider` classifies every token of an open file: class,
   member, type and label tokens from the AST's spans (the owner, name and descriptor types of
   each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,
@@ -541,6 +549,7 @@ only one index is built at a time.
 | WorkspaceSymbolProvider.kt | workspace symbol search |
 | DiagnosticProvider.kt | diagnostics |
 | CodeActionProvider.kt | quick fixes from the diagnostics' fix data |
+| SmaliFormatter.kt | formatting |
 | CompletionProvider.kt | completion |
 | ResourceTable.kt | `public.xml` and values per workspace root |
 | WorkspaceScanner.kt | parallel scan |

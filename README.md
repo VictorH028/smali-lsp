@@ -20,6 +20,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Workspace Symbols** — fuzzy search across the entire codebase
 - **Diagnostics** — syntax errors, undefined or duplicate labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit: registers, literals, call arity, `return` and `move-result` kinds, static against instance members
 - **Quick fixes** — a code action for every diagnostic with one right answer: the wider opcode, the `/range` form, the frame count, the matching `return` or `move-result`, the call or field opcode the member needs, a label typo
+- **Formatting** — baksmali's layout for the document or a range: four spaces per block, one space between tokens, `, ` between operands, four before a trailing comment; blank lines, strings and comments stay as written
 - **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** — 224 opcodes, including `invoke-custom`, `invoke-polymorphic` and method handles
@@ -33,6 +34,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer while open, the disk version after close |
 | `textDocument/publishDiagnostics` | syntax errors at once, undefined classes once indexing has finished |
 | `textDocument/codeAction` | quick fixes for the diagnostics on the requested lines |
+| `textDocument/formatting` · `rangeFormatting` | baksmali's layout, one edit per changed line |
 | `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow overrides and calls through subclasses |
 | `textDocument/foldingRange` | methods, annotations, switch tables, array data |
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search, best 500 |
