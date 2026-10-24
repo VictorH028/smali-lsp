@@ -1,22 +1,24 @@
 # Changelog
 
-## Unreleased
+## [2.1.0] - 2026-10-24
 
 ### Added
 
-- Semantic tokens (`textDocument/semanticTokens` full, delta and range): every token classified from the open file's model and a line scan, so editors without a smali grammar get highlighting (#1)
-- Assembler checks for hand edits also catch a call passing the wrong number of registers, a `return` or `move-result` of the wrong kind, a wide pair past the frame, a second `.registers` or `.locals`, and `invoke-static` or `sget` on an instance member and the reverse when the workspace declares it
-- Quick fixes (`textDocument/codeAction`) for the diagnostics with one right answer: the wider opcode, the `/range` form, the frame count, the matching `return` or `move-result`, the call or field opcode the member needs, a label typo
-- Formatting (`textDocument/formatting` and `rangeFormatting`): baksmali's layout, one edit per changed line; strings, comments and blank lines stay as written
+- Semantic tokens: full, delta and range, so editors without a smali grammar get highlighting (#1)
+- Assembler checks for call arity, `return` and `move-result` kinds, wide pairs past the frame, a second frame directive, and static against instance members when the workspace declares them
+- Quick fixes (`textDocument/codeAction`) for every diagnostic with one right answer
+- Formatting and range formatting in baksmali's layout, one edit per changed line
 
 ### Changed
 
-- Completion knows its context: after `->` only the members the opcode can take, with the register count fixing the arity; class names of the kind the operand needs; labels, registers, directives and snippet-shaped opcodes while typing; owners with non-ASCII names complete too; class completion scans once and keeps the best fifty
-- Hover leads with the declaration as smali, then one line with the Java-style signature, each parameter's register, the owner and the reference count; platform members link to the Android reference; opcode, type, label and string hovers are one line each
-- The index keeps declarations only for files that are not open and parses a file again when a request needs its body: heap after indexing 118 MB on ProtonMail and 447 MB on a 76 K-file app (from 198 MB and 711 MB), scan and request times unchanged
-- One full collection right after the scan: committed heap drops to the live set at once (200 MB on ProtonMail, 664 MB on the large app) instead of a minute later
-- Usage sites are four ints instead of five: a re-indexed file gets a fresh id and the old one is retired, so no site carries a generation (live heap 109 MB on ProtonMail, 415 MB on the large app)
-- The scan reads files as bytes (Latin-1 when pure ASCII, as baksmali writes them), walks the tree with its attributes, classifies ASCII through tables and interns tokens from their source ranges: half the garbage per scan, warm scans about 20 percent faster on the large app
+- Completion offers what the opcode can take: members by kind and register count, classes by the kind the operand needs, labels, registers, directives and snippet-shaped opcodes while typing; obfuscated owners with non-ASCII names complete too
+- Hover leads with the declaration as smali and one line with the signature, each parameter's register, the owner and the reference count; platform members link to the Android reference
+- Memory: closed files keep only their declarations and parse again on demand, usage sites are four ints, one full collection after the scan. Heap after indexing 198 → 109 MB on ProtonMail and 711 → 415 MB on a 76 K-file app, committed memory at that level at once instead of a minute later
+- Scan: files read as bytes, the tree walked with its attributes, ASCII lexed through tables, tokens interned from their source ranges: half the garbage per scan, warm scans about 20 percent faster on the large app; the parsed model is byte-identical on every fixture file
+
+### Fixed
+
+- A workspace root that is a symbolic link is scanned again
 
 ## [2.0.0] - 2026-10-19
 

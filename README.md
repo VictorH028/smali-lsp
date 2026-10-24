@@ -8,19 +8,19 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 
 - **Go to Definition** — classes, methods, fields, labels and resource ids
 - **Find References** — cross-file xrefs with inheritance-aware polymorphic matching; string literals too
-- **Hover** — the declaration as smali, then the Java-style signature with each parameter's register, the owner and the reference count; platform members link to the Android reference; registers (`p1` is which parameter), the method's frame, labels, string literals, resource ids with their values, opcode docs
-- **Semantic tokens** — every token classified (directives, opcodes, registers, types, members, labels, literals, comments): highlighting for editors without a smali grammar, precise colours for those with one; full, delta and range
+- **Hover** — the declaration as smali and a one-line signature with each parameter's register; registers, frames, labels, strings, resource ids, opcode docs; platform members link to the Android reference
+- **Semantic tokens** — every token classified, full, delta and range: highlighting for editors without a smali grammar
 - **Inlay hints** — resource names or values after `0x7f…` and `android.R` ids, the decimal value after other hex literals
 - **Call Hierarchy** — incoming/outgoing call graphs for any method
 - **Type Hierarchy** — supertypes/subtypes navigation for classes
 - **Code Lens** — reference counts on classes, methods and fields; subclass and implementation counts
-- **Completion** — what the opcode can take: static methods for `invoke-static`, instance ones otherwise, only those the register count fits; fields of the type the opcode moves; concrete classes, interfaces or throwables where the operand needs them; labels after `:`, registers with what they hold, directives with the open block's `.end` first, opcodes as snippets of their operand shape
+- **Completion** — the members the opcode and register count allow, classes of the kind the operand needs, labels, registers, directives, opcodes as snippets
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors, undefined or duplicate labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit: registers, literals, call arity, `return` and `move-result` kinds, static against instance members
-- **Quick fixes** — a code action for every diagnostic with one right answer: the wider opcode, the `/range` form, the frame count, the matching `return` or `move-result`, the call or field opcode the member needs, a label typo
-- **Formatting** — baksmali's layout for the document or a range: four spaces per block, one space between tokens, `, ` between operands, four before a trailing comment; blank lines, strings and comments stay as written
+- **Diagnostics** — syntax errors, labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit
+- **Quick fixes** — one code action per diagnostic with a single right answer
+- **Formatting** — baksmali's layout for the document or a range; blank lines, strings and comments stay as written
 - **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** — 224 opcodes, including `invoke-custom`, `invoke-polymorphic` and method handles
@@ -40,7 +40,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search, best 500 |
 | `textDocument/codeLens` + `codeLens/resolve` | counts resolved lazily |
 | `textDocument/inlayHint` | resource names and values, decimal values |
-| `textDocument/semanticTokens/full` `full/delta` `range` | from the open file's model and a line scan, never a re-parse; SDK classes and members carry `defaultLibrary` |
+| `textDocument/semanticTokens/full` `full/delta` `range` | from the open file's model, never a re-parse |
 | `textDocument/completion` | trigger characters `L`, `>`, `/`, `:`, `.`, `{` |
 | `textDocument/prepareRename` + `rename` | methods, fields, labels |
 | `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` `outgoingCalls` | |
@@ -178,7 +178,7 @@ Measured on three apktool projects on a 12-core Apple Silicon laptop, JDK 21:
 
 | | Mastodon (2,517 files) | ProtonMail (19,637 files) | 76 K-file app |
 | --- | --- | --- | --- |
-| Index the workspace (cold) | 0.8 s | 1.6 s | 6 s |
+| Index the workspace, cold / warm JVM | 1.0 / 0.3 s | 2.2 / 1.1 s | 6.1 / 3.3 s |
 | Heap after indexing | — | 109 MB | 415 MB |
 | Re-index one file on edit, p95 | — | 0.2 ms | 0.6 ms |
 | Workspace symbol search | — | 4–14 ms | 19–25 ms |
