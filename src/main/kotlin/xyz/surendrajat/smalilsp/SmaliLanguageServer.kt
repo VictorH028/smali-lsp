@@ -258,6 +258,7 @@ class SmaliLanguageServer : LanguageServer {
         capabilities.setDocumentHighlightProvider(true)
         capabilities.setFoldingRangeProvider(true)
         capabilities.setInlayHintProvider(true)
+        capabilities.setCodeActionProvider(CodeActionOptions(listOf(CodeActionKind.QuickFix)))
         // Semantic tokens: full, delta and range, for editors without a smali grammar
         capabilities.setSemanticTokensProvider(SemanticTokensWithRegistrationOptions(SemanticTokensProvider.legend, SemanticTokensServerFull(true), true))
 

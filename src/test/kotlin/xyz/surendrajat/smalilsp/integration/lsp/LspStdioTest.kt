@@ -249,6 +249,29 @@ class LspStdioTest {
     }
 
     @Test
+    fun `quick fixes come back as code actions over stdio`() {
+        writeWorkspace()
+        val text = ".class public Lcom/app/Fix;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    const/4 v0, 0x10\n    return-void\n.end method\n"
+        val file = workspace.resolve("smali/com/app/Fix.smali").toFile().apply { writeText(text) }
+        val uri = file.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            val init = client.initializeAndIndex(initParams(client))
+            assertEquals(listOf("quickfix"), init.getAsJsonObject("capabilities").getAsJsonObject("codeActionProvider").getAsJsonArray("codeActionKinds").map { it.asString })
+            client.open(file, text)
+            val line4 = mapOf("line" to 4, "character" to 0)
+            val actions = client.result("textDocument/codeAction", mapOf("textDocument" to client.textDocument(uri), "range" to mapOf("start" to line4, "end" to line4), "context" to mapOf("diagnostics" to emptyList<Any>()))).asJsonArray
+            assertEquals(listOf("Use const/16"), actions.map { it.asJsonObject["title"].asString }, "$actions")
+            val action = actions[0].asJsonObject
+            assertEquals("quickfix", action["kind"].asString)
+            assertEquals("literal-out-of-range", action.getAsJsonArray("diagnostics")[0].asJsonObject["code"].asString)
+            val edit = action.getAsJsonObject("edit").getAsJsonObject("changes").getAsJsonArray(uri)[0].asJsonObject
+            assertEquals("const/16", edit["newText"].asString)
+            assertEquals(listOf(4, 4, 4, 11), edit.getAsJsonObject("range").let { r -> listOf(r.getAsJsonObject("start")["line"].asInt, r.getAsJsonObject("start")["character"].asInt, r.getAsJsonObject("end")["line"].asInt, r.getAsJsonObject("end")["character"].asInt) }, "the opcode token")
+            assertEquals(0, client.result("textDocument/codeAction", mapOf("textDocument" to client.textDocument(uri), "range" to mapOf("start" to mapOf("line" to 5, "character" to 0), "end" to mapOf("line" to 5, "character" to 0)), "context" to mapOf("diagnostics" to emptyList<Any>()))).asJsonArray.size(), "nothing to fix on return-void")
+        }
+    }
+
+    @Test
     fun `semantic tokens come back full, as a delta and for a range over stdio`() {
         writeWorkspace()
         val text = ".class public Lcom/app/Tok;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    const/16 v0, 0x3e8\n    return-void\n.end method\n"

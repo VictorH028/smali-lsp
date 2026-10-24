@@ -22,7 +22,8 @@ import xyz.surendrajat.smalilsp.util.Types
  * `move-result` of the wrong kind for the type it carries, a `move-result` not right after a
  * call, and a second `.registers` or `.locals`. baksmali output never trips these, so they only
  * speak up about edits; the pass runs over every line of the edited file on each change, so it
- * allocates nothing per line until it has something to report.
+ * allocates nothing per line until it has something to report. A diagnostic with one right
+ * answer carries it as a [Fixes] entry in its data, which [CodeActionProvider] turns into an edit.
  */
 object AssemblerChecks {
 
@@ -132,7 +133,7 @@ object AssemblerChecks {
                     val directive = frameDirectiveStart(line)
                     if (directive >= 0 && ++frameDirectives == 2) {
                         val end = line.indexOf(' ', directive).let { if (it < 0) line.length else it }
-                        out.add(error(lineNumber, directive, end, "There can only be one .registers or .locals directive in a method", "frame-directive"))
+                        out.add(error(lineNumber, directive, end, "There can only be one .registers or .locals directive in a method", "frame-directive", Fixes.deleteLine))
                     }
                     continue
                 }
@@ -176,20 +177,24 @@ object AssemblerChecks {
 
         if (kind and MOVE_RESULT != 0) {
             if (produced == null) {
-                out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} must directly follow an invoke or filled-new-array", "move-result-placement"))
+                out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} must directly follow an invoke or filled-new-array", "move-result-placement", Fixes.deleteLine))
             } else if (produced == "[") {
-                if (!s.opcodeIs("move-result-object")) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after filled-new-array, which leaves an array; use move-result-object", "move-result-kind"))
+                if (!s.opcodeIs("move-result-object")) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after filled-new-array, which leaves an array; use move-result-object", "move-result-kind", Fixes.opcode("move-result-object")))
             } else if (produced != "?") {
                 val returned = returnTypeOf(produced)
                 val expected = moveResultFor(returned[0])
-                if (expected == null) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after a call that returns nothing", "move-result-kind"))
-                else if (!s.opcodeIs(expected)) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after a call that returns ${Types.readableName(returned)}; use $expected", "move-result-kind"))
+                if (expected == null) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after a call that returns nothing", "move-result-kind", Fixes.deleteLine))
+                else if (!s.opcodeIs(expected)) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after a call that returns ${Types.readableName(returned)}; use $expected", "move-result-kind", Fixes.opcode(expected)))
             }
         }
 
         if (kind and RETURN != 0) {
             val expected = returnFor(method.returnType)
-            if (!s.opcodeIs(expected)) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} in a method that returns ${Types.readableName(method.returnType)}; use $expected", "return-kind"))
+            if (!s.opcodeIs(expected)) {
+                // return-void needs no register; the other way round the fix cannot guess one
+                val fix = if (expected == "return-void") Fixes.opcode(expected, operands = false) else if (s.opcodeIs("return-void")) null else Fixes.opcode(expected)
+                out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} in a method that returns ${Types.readableName(method.returnType)}; use $expected", "return-kind", fix))
+            }
         }
 
         if (call != null && kind and UNCHECKED_INVOKE == 0) {
@@ -197,7 +202,7 @@ object AssemblerChecks {
             val expected = parameterSlots(call.descriptor) + if (receiver) 1 else 0
             val passed = passedRegisters(s, frame)
             if (passed == BACKWARDS) {
-                out.add(error(line, s.registerStart(0), s.registerEnd(1), "The range runs backwards: ${s.registerText(1)} is below ${s.registerText(0)}", "call-arity"))
+                out.add(error(line, s.registerStart(0), s.registerEnd(1), "The range runs backwards: ${s.registerText(1)} is below ${s.registerText(0)}", "call-arity", Fixes.swapRange))
             } else if (passed >= 0 && passed != expected) {
                 val open = s.line.indexOf('{', s.opcodeEnd)
                 val close = if (open < 0) -1 else s.line.indexOf('}', open)
@@ -211,14 +216,15 @@ object AssemblerChecks {
             for (i in 0 until s.registerCount) {
                 if (!frame.declares(s.isParameter(i), s.registerNumber(i))) {
                     val limit = if (s.isParameter(i)) "${frame.parameters} parameter register(s)" else frameText(frame)
-                    out.add(error(line, s.registerStart(i), s.registerEnd(i), "Register ${s.registerText(i)} is beyond the $limit this method declares", "register-out-of-range"))
+                    val fix = if (s.isParameter(i)) null else Fixes.frame(frame, s.registerNumber(i) + 1)
+                    out.add(error(line, s.registerStart(i), s.registerEnd(i), "Register ${s.registerText(i)} is beyond the $limit this method declares", "register-out-of-range", fix))
                 }
             }
             val bits = registerBits[format]
             if (bits != null && !s.isRange) {
                 if ((format == "35c" || format == "45cc") && s.registerCount > 5) {
                     val opcode = s.opcode
-                    out.add(error(line, s.opcodeStart, s.opcodeEnd, "$opcode takes at most five registers; use $opcode/range", "register-width"))
+                    out.add(error(line, s.opcodeStart, s.opcodeEnd, "$opcode takes at most five registers; use $opcode/range", "register-width", Fixes.rangeForm))
                 }
                 for (i in 0 until minOf(s.registerCount, bits.size)) {
                     if (!frame.declares(s.isParameter(i), s.registerNumber(i))) continue
@@ -227,7 +233,12 @@ object AssemblerChecks {
                     if (absolute > max) {
                         val opcode = s.opcode
                         val shown = if (s.isParameter(i)) "${s.registerText(i)} (v$absolute)" else s.registerText(i)
-                        out.add(error(line, s.registerStart(i), s.registerEnd(i), "$shown does not fit $opcode, whose operand addresses v0..v$max; use the ${wider(opcode, format)} form", "register-width"))
+                        val fix = when {
+                            format == "35c" || format == "45cc" -> Fixes.rangeForm
+                            opcode.startsWith("move") -> Fixes.opcode(wider(opcode, format))
+                            else -> null
+                        }
+                        out.add(error(line, s.registerStart(i), s.registerEnd(i), "$shown does not fit $opcode, whose operand addresses v0..v$max; use the ${wider(opcode, format)} form", "register-width", fix))
                     }
                 }
             }
@@ -237,7 +248,7 @@ object AssemblerChecks {
                     if (wide and (1 shl i) == 0 || !frame.declares(s.isParameter(i), s.registerNumber(i))) continue
                     val absolute = frame.absolute(s.isParameter(i), s.registerNumber(i))
                     if (absolute + 1 >= frame.total) {
-                        out.add(error(line, s.registerStart(i), s.registerEnd(i), "${s.registerText(i)} starts a wide pair, and its second half v${absolute + 1} is beyond the ${frameText(frame)} this method declares", "register-out-of-range"))
+                        out.add(error(line, s.registerStart(i), s.registerEnd(i), "${s.registerText(i)} starts a wide pair, and its second half v${absolute + 1} is beyond the ${frameText(frame)} this method declares", "register-out-of-range", Fixes.frame(frame, absolute + 2)))
                     }
                 }
             }
@@ -258,7 +269,7 @@ object AssemblerChecks {
                 }
                 else -> null
             } ?: return
-            out.add(error(line, literal.start, literal.end, "Literal ${literal.text} does not fit $opcode, which $problem; use ${wider(opcode, format)}", "literal-out-of-range"))
+            out.add(error(line, literal.start, literal.end, "Literal ${literal.text} does not fit $opcode, which $problem; use ${wider(opcode, format)}", "literal-out-of-range", widerLiteral(opcode, value)?.let { Fixes.opcode(it) }))
         }
     }
 
@@ -354,6 +365,15 @@ object AssemblerChecks {
         else -> "a wider form"
     }
 
-    private fun error(line: Int, start: Int, end: Int, message: String, code: String) =
-        Diagnostic(Range(Position(line, start), Position(line, end)), message, DiagnosticSeverity.Error, "smali-lsp", code)
+    /** The one instruction that holds the literal: `const/16` for `const/4`, `const-wide/32` when the value fits 32 bits else `const-wide`; none for `/lit16`, which needs a register. */
+    private fun widerLiteral(opcode: String, value: Long): String? = when {
+        opcode == "const/4" -> "const/16"
+        opcode == "const/16" || opcode == "const/high16" -> "const"
+        opcode == "const-wide/16" || opcode == "const-wide/high16" -> if (value in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) "const-wide/32" else "const-wide"
+        opcode.endsWith("/lit8") -> opcode.replace("/lit8", "/lit16")
+        else -> null
+    }
+
+    private fun error(line: Int, start: Int, end: Int, message: String, code: String, fix: Map<String, Any>? = null) =
+        Diagnostic(Range(Position(line, start), Position(line, end)), message, DiagnosticSeverity.Error, "smali-lsp", code).apply { if (fix != null) data = fix }
 }

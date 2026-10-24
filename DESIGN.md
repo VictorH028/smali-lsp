@@ -385,6 +385,12 @@ whose declarations are unreachable.
   written by `./gradlew generateAndroidPublic` from the `public.xml` of the framework apktool
   ships; public ids never change, so one table serves every app). The literal is read
   from the line on demand, like registers, so the AST is untouched.
+- **Quick fixes**: a diagnostic with one right answer carries it in its `data` (`Fixes`: the
+  opcode to use, that the line goes, the `/range` form, the frame count, the label meant), set
+  where the check already knows it. `CodeActionProvider` recomputes the file's diagnostics on
+  request, keeps those on the requested lines and builds each edit from the current text, so a
+  stale diagnostic on the client's side cannot misplace an edit. A fix that would have to guess
+  (a register for `return`, the registers a call is missing) is not offered.
 - **Semantic tokens**: `SemanticTokensProvider` classifies every token of an open file: class,
   member, type and label tokens from the AST's spans (the owner, name and descriptor types of
   each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,
@@ -534,6 +540,7 @@ only one index is built at a time.
 | InstructionText.kt | instruction scanner and register frame |
 | WorkspaceSymbolProvider.kt | workspace symbol search |
 | DiagnosticProvider.kt | diagnostics |
+| CodeActionProvider.kt | quick fixes from the diagnostics' fix data |
 | CompletionProvider.kt | completion |
 | ResourceTable.kt | `public.xml` and values per workspace root |
 | WorkspaceScanner.kt | parallel scan |

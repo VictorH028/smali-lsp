@@ -61,11 +61,12 @@ class DiagnosticProvider(
         for (method in file.methods) {
             for (ref in method.labelRefs) {
                 if (ref.name !in method.labels) {
-                    diagnostics.add(createDiagnostic(ref.span.toRange(), "Label ':${ref.name}' is not defined in this method", DiagnosticSeverity.Error, "undefined-label"))
+                    val fix = closestLabel(ref.name, method.labels.keys)?.let { Fixes.label(":$it") }
+                    diagnostics.add(createDiagnostic(ref.span.toRange(), "Label ':${ref.name}' is not defined in this method", DiagnosticSeverity.Error, "undefined-label", fix))
                 }
             }
             for (label in method.duplicateLabels) {
-                diagnostics.add(createDiagnostic(label.range, "Label ':${label.name}' is defined more than once in this method", DiagnosticSeverity.Error, "duplicate-label"))
+                diagnostics.add(createDiagnostic(label.range, "Label ':${label.name}' is defined more than once in this method", DiagnosticSeverity.Error, "duplicate-label", Fixes.removeLabel))
             }
         }
         return diagnostics
@@ -172,7 +173,7 @@ class DiagnosticProvider(
             else -> "invoke-virtual"
         } + if (call.opcode.endsWith("/range")) "/range" else ""
         val member = if (static) "an instance method" else "a static method"
-        return createDiagnostic(opcodeRange(call.startLine, call.startChar, call.opcode), "${call.opcode} calls ${call.methodName}${call.descriptor}, $member; use $use", DiagnosticSeverity.Error, "invoke-kind")
+        return createDiagnostic(opcodeRange(call.startLine, call.startChar, call.opcode), "${call.opcode} calls ${call.methodName}${call.descriptor}, $member; use $use", DiagnosticSeverity.Error, "invoke-kind", Fixes.opcode(use))
     }
 
     /** `sget`/`sput` on an instance field or `iget`/`iput` on a static one, decidable when a workspace class declares the field. */
@@ -182,11 +183,38 @@ class DiagnosticProvider(
         if (("static" in target.field.modifiers) == static) return null
         val use = (if (static) "i" else "s") + access.opcode.substring(1)
         val member = if (static) "an instance field" else "a static field"
-        return createDiagnostic(opcodeRange(access.startLine, access.startChar, access.opcode), "${access.opcode} on ${access.fieldName}, $member; use $use", DiagnosticSeverity.Error, "field-access-kind")
+        return createDiagnostic(opcodeRange(access.startLine, access.startChar, access.opcode), "${access.opcode} on ${access.fieldName}, $member; use $use", DiagnosticSeverity.Error, "field-access-kind", Fixes.opcode(use))
     }
 
     /** An instruction's range starts at its opcode. */
     private fun opcodeRange(line: Int, start: Int, opcode: String) = Range(Position(line, start), Position(line, start + opcode.length))
+
+    /** The label within two edits of [name], for a typo fix; null when none is that close or two are equally close. */
+    private fun closestLabel(name: String, labels: Collection<String>): String? {
+        var best: String? = null
+        var bestDistance = 3
+        var tie = false
+        for (label in labels) {
+            if (kotlin.math.abs(label.length - name.length) > 2) continue
+            val d = editDistance(name, label)
+            if (d < bestDistance) { best = label; bestDistance = d; tie = false } else if (d == bestDistance) tie = true
+        }
+        return if (tie) null else best
+    }
+
+    private fun editDistance(a: String, b: String): Int {
+        var previous = IntArray(b.length + 1) { it }
+        var current = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            current[0] = i
+            for (j in 1..b.length) {
+                val substitution = previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1
+                current[j] = minOf(substitution, previous[j] + 1, current[j - 1] + 1)
+            }
+            val swap = previous; previous = current; current = swap
+        }
+        return previous[b.length]
+    }
 
     /**
      * A class reference is reported only when it looks like a mistake: the class is not in the
@@ -205,12 +233,6 @@ class DiagnosticProvider(
         return pkg != ownPackage && !index.hasPackage(pkg)
     }
 
-    private fun createDiagnostic(
-        range: Range,
-        message: String,
-        severity: DiagnosticSeverity,
-        code: String
-    ): Diagnostic {
-        return Diagnostic(range, message, severity, "smali-lsp", code)
-    }
+    private fun createDiagnostic(range: Range, message: String, severity: DiagnosticSeverity, code: String, fix: Map<String, Any>? = null): Diagnostic =
+        Diagnostic(range, message, severity, "smali-lsp", code).apply { if (fix != null) data = fix }
 }

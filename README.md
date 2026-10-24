@@ -19,6 +19,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
 - **Diagnostics** — syntax errors, undefined or duplicate labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit: registers, literals, call arity, `return` and `move-result` kinds, static against instance members
+- **Quick fixes** — a code action for every diagnostic with one right answer: the wider opcode, the `/range` form, the frame count, the matching `return` or `move-result`, the call or field opcode the member needs, a label typo
 - **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
 - **Label Navigation** — goto/if-\*/switch targets, `.catch` blocks and switch tables within methods
 - **Every Dalvik instruction parses** — 224 opcodes, including `invoke-custom`, `invoke-polymorphic` and method handles
@@ -31,6 +32,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | `initialize` / `initialized` / `shutdown` / `exit` | workspace folders or `rootUri`; indexing after `initialized`, with progress |
 | `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer while open, the disk version after close |
 | `textDocument/publishDiagnostics` | syntax errors at once, undefined classes once indexing has finished |
+| `textDocument/codeAction` | quick fixes for the diagnostics on the requested lines |
 | `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow overrides and calls through subclasses |
 | `textDocument/foldingRange` | methods, annotations, switch tables, array data |
 | `textDocument/documentSymbol` · `workspace/symbol` | outline; fuzzy search, best 500 |

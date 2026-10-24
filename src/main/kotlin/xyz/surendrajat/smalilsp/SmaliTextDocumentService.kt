@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
 import xyz.surendrajat.smalilsp.providers.CallHierarchyProvider
+import xyz.surendrajat.smalilsp.providers.CodeActionProvider
 import xyz.surendrajat.smalilsp.providers.CodeLensProvider
 import xyz.surendrajat.smalilsp.providers.CompletionProvider
 import xyz.surendrajat.smalilsp.providers.DefinitionProvider
@@ -55,6 +56,7 @@ class SmaliTextDocumentService(
     private val logger = LoggerFactory.getLogger(SmaliTextDocumentService::class.java)
     private val parser = SmaliParser(index.strings)
     private val diagnosticProvider = DiagnosticProvider(parser, index)
+    private val codeActionProvider = CodeActionProvider(index, diagnosticProvider)
     private val documentSymbolProvider = DocumentSymbolProvider()
     private val implementationProvider = ImplementationProvider(index)
     private val documentHighlightProvider = DocumentHighlightProvider(index)
@@ -227,6 +229,11 @@ class SmaliTextDocumentService(
     override fun semanticTokensRange(params: SemanticTokensRangeParams): CompletableFuture<SemanticTokens> =
         writes.request("semanticTokensRange", { params.textDocument.uri }, { SemanticTokens(emptyList()) }) {
             semanticTokensProvider.range(params.textDocument.uri, params.range) ?: SemanticTokens(emptyList())
+        }
+
+    override fun codeAction(params: CodeActionParams): CompletableFuture<MutableList<Either<Command, CodeAction>>> =
+        writes.request("codeAction", { params.textDocument.uri }, { mutableListOf() }) {
+            codeActionProvider.actions(params.textDocument.uri, params.range).map { Either.forRight<Command, CodeAction>(it) }.toMutableList()
         }
 
     override fun inlayHint(params: InlayHintParams): CompletableFuture<MutableList<InlayHint>> =
