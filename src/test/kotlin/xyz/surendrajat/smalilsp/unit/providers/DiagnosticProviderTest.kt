@@ -45,6 +45,25 @@ class DiagnosticProviderTest {
     ) = Diagnostic(rangeOf(source, marker, needle), message, severity, "smali-lsp", "undefined-class")
 
     @Test
+    fun `method handles and call sites name a member without calling it, so their kind is not checked`() {
+        scan("file:///Handles.smali", ".class public Lcom/example/Handles;\n.super Ljava/lang/Object;\n\n.field public static X:I\n\n.method public static bar()V\n    .registers 1\n    return-void\n.end method\n\n.method public baz()V\n    .registers 1\n    return-void\n.end method")
+        val source = """
+            .class public Lcom/example/Test;
+            .super Ljava/lang/Object;
+
+            .method public foo()V
+                .registers 2
+                const-method-handle v0, invoke-static@Lcom/example/Handles;->bar()V
+                const-method-handle v0, invoke-instance@Lcom/example/Handles;->baz()V
+                const-method-handle v1, static-get@Lcom/example/Handles;->X:I
+                invoke-custom {v0}, call("run", ()V)@Lcom/example/Handles;->bar()V
+                return-void
+            .end method
+        """.trimIndent()
+        assertEquals(emptyList<String>(), diagnosticsOf(source).map { it.message.left })
+    }
+
+    @Test
     fun `a class outside every workspace package is not reported`() {
         // The app references classes it does not ship: platform ones outside the SDK list and optional libraries behind runtime checks
         val source = """

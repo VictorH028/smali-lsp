@@ -163,6 +163,8 @@ class DiagnosticProvider(
      * interface's, `invoke-virtual` otherwise, keeping the `/range` form.
      */
     private fun invokeKind(call: InvokeInstruction): Diagnostic? {
+        // a method handle or an invoke-custom site names a method without calling it this way
+        if (!call.opcode.startsWith("invoke-") || call.opcode.startsWith("invoke-custom") || call.opcode.startsWith("invoke-polymorphic")) return null
         val static = call.opcode.startsWith("invoke-static")
         val target = index.resolveMethod(call.className, call.methodName, call.descriptor) ?: return null
         if (("static" in target.method.modifiers) == static) return null
@@ -178,6 +180,7 @@ class DiagnosticProvider(
 
     /** `sget`/`sput` on an instance field or `iget`/`iput` on a static one, decidable when a workspace class declares the field. */
     private fun fieldAccessKind(access: FieldAccessInstruction): Diagnostic? {
+        if (access.opcode == "const-method-handle") return null   // a field handle, not an access
         val static = access.opcode[0] == 's'
         val target = index.resolveField(access.className, access.fieldName, access.fieldType) ?: return null
         if (("static" in target.field.modifiers) == static) return null
