@@ -426,7 +426,8 @@ other is answered with an error naming it.
   the register each parameter arrives in, the owner, the reference count through the member
   family, member and subtype counts for a class. A class or member the workspace does not
   define links to its page on developer.android.com when it is one the site documents (java,
-  javax, android, androidx, dalvik, org.json, org.w3c, org.xml), else says it is not in the
+  javax, android, androidx, dalvik but not its hidden annotations, org.json, org.w3c, org.xml),
+  else says it is not in the
   workspace. Opcode hovers show the syntax as smali, the description, and the operands, byte
   and format on one line; types, labels and strings are one line each. Registers, resource
   ids and the `.registers` frame keep their own forms.

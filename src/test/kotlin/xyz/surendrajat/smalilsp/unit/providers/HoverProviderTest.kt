@@ -68,6 +68,16 @@ class HoverProviderTest {
         index.openSource(uri, source)
     }
 
+    @Test
+    fun `hidden dalvik annotations have no reference page, documented dalvik classes do`() {
+        val annotated = ".class public Lcom/app/Annotated;\n.super Ljava/lang/Object;\n\n.annotation system Ldalvik/annotation/MemberClasses;\n    value = {\n        Lcom/app/Annotated\$Inner;\n    }\n.end annotation\n\n.method public run()V\n    .registers 2\n    new-instance v0, Ldalvik/system/DexClassLoader;\n    return-void\n.end method"
+        index.openSource("file:///Annotated.smali", annotated)
+        val hidden = assertNotNull(provider.provideHover("file:///Annotated.smali", annotated.positionOf(".annotation system", "Ldalvik/annotation/MemberClasses;", 3)))
+        assertTrue(hidden.contents.right.value.endsWith("*Platform type*"), hidden.contents.right.value)
+        val documented = assertNotNull(provider.provideHover("file:///Annotated.smali", annotated.positionOf("new-instance", "Ldalvik/system/DexClassLoader;", 3)))
+        assertTrue("https://developer.android.com/reference/dalvik/system/DexClassLoader" in documented.contents.right.value, documented.contents.right.value)
+    }
+
     private fun hoverAt(position: Position): String? = provider.provideHover(uri, position)?.contents?.right?.value
     private fun hoverAt(marker: String, needle: String, offset: Int = 0, after: String? = null) =
         hoverAt(source.positionOf(marker, needle, offset, after))

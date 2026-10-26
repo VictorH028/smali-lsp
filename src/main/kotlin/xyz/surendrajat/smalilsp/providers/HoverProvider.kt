@@ -180,6 +180,8 @@ class HoverProvider(
     /** `developer.android.com/reference/java/lang/String` for the platform and AndroidX classes it documents; null for arrays, primitives and everything else. */
     private fun referenceUrl(className: String): String? {
         if (!className.startsWith("L") || DOCUMENTED.none { className.startsWith(it) }) return null
+        // the runtime's own annotations (Signature, MemberClasses, ...) are hidden API without a page; the optimization ones are documented
+        if (className.startsWith("Ldalvik/annotation/") && !className.startsWith("Ldalvik/annotation/optimization/")) return null
         return "https://developer.android.com/reference/" + className.substring(1, className.length - 1).replace('$', '.')
     }
 
