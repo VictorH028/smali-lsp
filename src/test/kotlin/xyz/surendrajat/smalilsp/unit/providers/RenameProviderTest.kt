@@ -4,10 +4,12 @@ import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j.WorkspaceEdit
+import org.eclipse.lsp4j.jsonrpc.ResponseErrorException
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.providers.RenameProvider
 import xyz.surendrajat.smalilsp.shared.openSource
@@ -265,23 +267,23 @@ class RenameProviderTest {
         fun open() { index.openSource(uri, source) }
 
         @Test
-        fun `blank name or unknown file returns null`() {
-            assertNull(provider.rename(uri, onMethod, "  "), "Blank name should return null")
+        fun `a blank name is an error and an unknown file nothing to rename`() {
+            assertEquals("A name is required", assertThrows<ResponseErrorException> { provider.rename(uri, onMethod, "  ") }.responseError.message)
             assertNull(provider.rename("file:///nonexistent.smali", Position(0, 0), "foo"))
             assertNull(provider.prepareRename("file:///nonexistent.smali", Position(0, 0)))
         }
 
         @Test
-        fun `invalid names are rejected per target kind`() {
-            for (bad in listOf("bad name", "bad/name", "bad(name", "123start")) assertNull(provider.rename(uri, onMethod, bad), bad)
-            for (bad in listOf("bad name", "bad;name")) assertNull(provider.rename(uri, onField, bad), bad)
-            for (bad in listOf("bad-name", "bad name")) assertNull(provider.rename(uri, onLabel, bad), bad)
+        fun `a name the assembler would not read is an error naming it`() {
+            for (bad in listOf("bad name", "bad/name", "bad(name", "<init>", "ends-")) assertEquals("'$bad' is not a smali member name", assertThrows<ResponseErrorException> { provider.rename(uri, onMethod, bad) }.responseError.message)
+            for (bad in listOf("bad name", "bad;name")) assertThrows<ResponseErrorException>(bad) { provider.rename(uri, onField, bad) }
+            for (bad in listOf("bad name", "-leading", "bad:name")) assertEquals("'$bad' is not a smali label name", assertThrows<ResponseErrorException> { provider.rename(uri, onLabel, bad) }.responseError.message)
         }
 
         @Test
-        fun `valid smali identifiers succeed`() {
-            for (good in listOf("newName", "_private", "\$synthetic", "name-with-hyphens")) assertNotNull(provider.rename(uri, onMethod, good), good)
-            assertNotNull(provider.rename(uri, onLabel, "loop_0"))
+        fun `what the lexer reads as a name is accepted, a leading digit and non-ASCII included`() {
+            for (good in listOf("newName", "_private", "\$synthetic", "name-with-hyphens", "123start", "-lambda", "名前")) assertNotNull(provider.rename(uri, onMethod, good), good)
+            for (good in listOf("loop_0", "a-b", "0")) assertNotNull(provider.rename(uri, onLabel, good), good)
         }
     }
 
@@ -290,23 +292,15 @@ class RenameProviderTest {
     inner class NameValidationTests {
 
         @Test
-        fun `isValidSmaliIdentifier accepts valid names`() {
-            for (name in listOf("foo", "_bar", "\$baz", "a1", "my-method", "access\$000")) assertTrue(RenameProvider.isValidSmaliIdentifier(name), name)
+        fun `member names are what the parser reads as one`() {
+            for (name in listOf("foo", "_bar", "\$baz", "a1", "my-method", "access\$000", "1start", "ünïcode", "-\$\$Lambda\$0", "public", "move-result")) assertTrue(RenameProvider.isValidMemberName(name), name)
+            for (name in listOf("", "has space", "has/slash", "has(paren", "has;semi", "a->b", "ends-", "<clinit>", "\"quoted\"", "a#b")) assertTrue(!RenameProvider.isValidMemberName(name), name)
         }
 
         @Test
-        fun `isValidSmaliIdentifier rejects invalid names`() {
-            for (name in listOf("", "1start", "has space", "has/slash", "has(paren", "has;semi")) assertTrue(!RenameProvider.isValidSmaliIdentifier(name), name)
-        }
-
-        @Test
-        fun `isValidLabelName accepts valid names`() {
-            for (name in listOf("try_start_0", "catch_0", "_label", "a123")) assertTrue(RenameProvider.isValidLabelName(name), name)
-        }
-
-        @Test
-        fun `isValidLabelName rejects invalid names`() {
-            for (name in listOf("", "1start", "has-hyphen", "has space", "has\$dollar")) assertTrue(!RenameProvider.isValidLabelName(name), name)
+        fun `label names are what the parser reads after a colon`() {
+            for (name in listOf("try_start_0", "catch_0", "_label", "a123", "1start", "has-hyphen", "has\$dollar")) assertTrue(RenameProvider.isValidLabelName(name), name)
+            for (name in listOf("", "has space", "-leading", "a:b", "a..b")) assertTrue(!RenameProvider.isValidLabelName(name), name)
         }
     }
 }

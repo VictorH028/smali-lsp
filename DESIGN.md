@@ -334,7 +334,9 @@ Definitions and the declaration entries of references point at the name token, s
 lands on the name instead of selecting the whole declaration. Usage locations are name tokens
 too, so rename edits are the usage locations themselves. Labels are method-local: a `:cond_0` in another method is never touched.
 `<init>`/`<clinit>` are not renamed; neither are members of classes outside the workspace,
-whose declarations are unreachable.
+whose declarations are unreachable. A new name is checked by parsing it as the assembler would
+(letters, digits, `$`, `_`, `-` and anything beyond ASCII, a leading digit included); any
+other is answered with an error naming it.
 
 ### 5.2 Hierarchies, lenses, symbols
 
