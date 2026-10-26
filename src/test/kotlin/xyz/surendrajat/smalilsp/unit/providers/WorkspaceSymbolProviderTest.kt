@@ -477,6 +477,17 @@ class WorkspaceSymbolProviderTest {
     }
 
     @Test
+    fun `symbol locations are the name tokens, where definitions land`() {
+        val index = WorkspaceIndex()
+        index.openSource("file:///Named.smali", ".class public Lcom/app/Named;\n.super Ljava/lang/Object;\n\n.field private count:I\n\n.method public doWork(I)V\n    .registers 2\n    return-void\n.end method")
+        val provider = WorkspaceSymbolProvider(index)
+        fun location(query: String) = provider.search(query).single().location.range
+        assertEquals(range(0, 14, 0, 29), location("Named"))
+        assertEquals(range(3, 15, 3, 20), location("count"))
+        assertEquals(range(5, 15, 5, 21), location("doWork"))
+    }
+
+    @Test
     fun `an exact method name ranks before a class that merely starts with it`() {
         val index = WorkspaceIndex()
         index.openSource("file:///Utils.smali", ".class public Lcom/app/Utils;\n.super Ljava/lang/Object;\n\n.method public getClassLoader()Ljava/lang/ClassLoader;\n    .registers 1\n    const/4 v0, 0x0\n    return-object v0\n.end method")

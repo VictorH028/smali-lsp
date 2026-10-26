@@ -12,7 +12,9 @@ import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Workspace symbol search over classes, methods and fields: case-insensitive, fuzzy, and the
- * best 500 kept while scanning so a large workspace never sorts a full result list.
+ * best 500 kept while scanning so a large workspace never sorts a full result list. A symbol's
+ * location is its name token, as definitions are, so an editor lands on the name instead of
+ * selecting the whole declaration.
  */
 class WorkspaceSymbolProvider(
     private val index: WorkspaceIndex
@@ -62,15 +64,15 @@ class WorkspaceSymbolProvider(
         val classMatch = matchSymbol(Types.simpleName(className), normalizedQuery)
             ?: if (pathContains(className, normalizedQuery)) 50 else null
         if (classMatch != null) {
-            matches.offer(ScoredSymbol(file, SymbolKind.Class, null, file.classDefinition.range, classMatch))
+            matches.offer(ScoredSymbol(file, SymbolKind.Class, null, file.classDefinition.nameSpan.toRange(), classMatch))
         }
         for (method in file.methods) {
             val score = matchSymbol(method.name, normalizedQuery) ?: continue
-            matches.offer(ScoredSymbol(file, SymbolKind.Method, method.name, method.range, score))
+            matches.offer(ScoredSymbol(file, SymbolKind.Method, method.name, method.nameSpan.toRange(), score))
         }
         for (field in file.fields) {
             val score = matchSymbol(field.name, normalizedQuery) ?: continue
-            matches.offer(ScoredSymbol(file, SymbolKind.Field, field.name, field.range, score))
+            matches.offer(ScoredSymbol(file, SymbolKind.Field, field.name, field.nameSpan.toRange(), score))
         }
     }
 
@@ -87,7 +89,7 @@ class WorkspaceSymbolProvider(
                     SymbolInformation(
                         "${file.classDefinition.name}.${method.name}",
                         SymbolKind.Method,
-                        Location(file.uri, method.range),
+                        Location(file.uri, method.nameSpan.toRange()),
                         file.classDefinition.name
                     )
                 )
@@ -99,7 +101,7 @@ class WorkspaceSymbolProvider(
                     SymbolInformation(
                         "${file.classDefinition.name}.${field.name}",
                         SymbolKind.Field,
-                        Location(file.uri, field.range),
+                        Location(file.uri, field.nameSpan.toRange()),
                         file.classDefinition.name
                     )
                 )
@@ -147,7 +149,7 @@ class WorkspaceSymbolProvider(
         return SymbolInformation(
             file.classDefinition.name,
             SymbolKind.Class,
-            Location(file.uri, file.classDefinition.range)
+            Location(file.uri, file.classDefinition.nameSpan.toRange())
         )
     }
 

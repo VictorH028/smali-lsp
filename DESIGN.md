@@ -356,7 +356,8 @@ whose declarations are unreachable.
   extend or implement it (a map lookup, so it comes resolved).
 - **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
   type as detail, name token as `selectionRange`.
-- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
+- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept, each
+  at its name token. The
   scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
   query over the 76 K-file app's 660 K names.
 - **Completion**: what the caret's context can take, so the list is short and right. After
