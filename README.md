@@ -90,6 +90,14 @@ java -jar build/libs/smali-lsp-<version>.jar lsp
 
 Configure your editor's LSP client to launch this command for `.smali` files. The server indexes the workspace on startup and watches it for changes. Warnings go to stderr; `--verbose` and `--log-file <path>` give more.
 
+Two JVM flags cut the cold start by half or more: the C1-only JIT and a class-data-sharing archive the JVM writes on its first run (measurements in DESIGN.md):
+
+```bash
+java -XX:TieredStopAtLevel=1 -XX:+IgnoreUnrecognizedVMOptions -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=<cache>/smali-lsp-<version>.jsa -Xlog:disable -Xlog:all=warning:stderr -jar smali-lsp-<version>.jar lsp
+```
+
+The archive name must carry the jar version (a replaced jar leaves an archive the JVM never rebuilds), `-Xlog:disable` keeps the JVM's own warnings off stdout, and the archive flags need JDK 19 (`-XX:+IgnoreUnrecognizedVMOptions` lets 17 start without them).
+
 <details>
 <summary>VS Code (via APKLab)</summary>
 
@@ -214,7 +222,7 @@ See [DESIGN.md](DESIGN.md) for the measured costs and the reasoning.
 
 `./gradlew check` runs the three categories as three tasks, one after another: `test` (unit), `regressionTest` and `integrationTest`.
 
-The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise.
+The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise; `-PintegrationHeap=4g -Dsmali.invariants.maxFiles=100000` takes in a larger project.
 
 ## License
 

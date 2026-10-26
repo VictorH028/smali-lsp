@@ -5,8 +5,8 @@ reasons behind the main design choices. Numbers in this document come from three
 projects: Mastodon v2.13.4 (2,517 files), ProtonMail 7.11.5 (19,637 files) and a 76,532-file
 production app, measured on a 12-core Apple Silicon laptop with JDK 21.
 
-**Codebase**: 30 Kotlin source files (~7,400 lines), no grammar: the front end is a
-hand-written parser; 97 test files (~21,000 lines).
+**Codebase**: 48 Kotlin source files, no grammar: the front end is a hand-written parser;
+84 test files.
 
 ---
 
@@ -31,13 +31,30 @@ main() → parseArgs → configureLogging → startLsp() | McpMode().run()
   a file, started afresh each run. The SLF4J binding is the server's own (`Logging.kt`, a
   logger is a name and a level check): logback was 150 ms of a 200 ms start and 1.7 MB of the
   jar. LSP4J logs through `java.util.logging`, which `logging.properties` points at stderr.
+- **Launch flags**: a cold start is bound by the JIT and by class loading, not by I/O.
+  Measured over stdio with the jar on JDK 21, process start to the end of indexing, the
+  initialize answer in parentheses:
+
+  | | default JVM | `-XX:TieredStopAtLevel=1` | plus a CDS archive |
+  |---|---|---|---|
+  | Mastodon | 0.97 s (238 ms) | 0.40 s (216 ms) | 0.29 s (134 ms) |
+  | ProtonMail | 1.54 s (239 ms) | 0.99 s (216 ms) | 0.88 s (134 ms) |
+  | 76 K-file app | 4.97 s (242 ms) | 4.63 s (224 ms) | 4.33 s (139 ms) |
+
+  The flags are the client's to pass (the README has the command): a running JVM can neither
+  change its JIT level nor map an archive, and a relaunch through a child JVM would keep a
+  second process for the session. C1-only code is 5 to 10 % slower on the heaviest requests.
+  The archive (`-XX:+AutoCreateSharedArchive`, JDK 19) is written at the first exit; the JVM
+  prints its archive warnings on stdout, which carries the protocol, so `-Xlog:disable` is
+  part of the command; and a replaced jar leaves an archive the JVM ignores and never
+  rebuilds, so the archive name carries the jar version.
 
 ### 1.2 LSP handshake
 
 | Step | What happens |
 |------|--------------|
 | `initialize` | Capabilities are answered at once. Workspace folders are taken from `workspaceFolders`, else `rootUri`, else `rootPath`. |
-| `initialized` | A `**/*.smali` file watcher is registered when the client supports dynamic registration. Indexing starts in the background, with `window/workDoneProgress` only for clients that advertise it; a client that rejects the progress token still gets indexed. |
+| `initialized` | Watchers for `**/*.smali` and `**/res/values/public.xml` are registered when the client supports dynamic registration. Indexing starts in the background, with `window/workDoneProgress` only for clients that advertise it; a client that rejects the progress token still gets indexed. |
 | `shutdown` / `exit` | `exit` returns 0 after a `shutdown` request and 1 otherwise, as the protocol asks; a client that closes the connection without `exit` gets the same statuses, so a dead editor leaves no server behind. MCP mode exits when its input ends (the SDK's transport stops reading at EOF but never closes the session). |
 
 Requests arriving during indexing are answered from whatever is indexed so far. Semantic
@@ -72,7 +89,8 @@ characters.
 The parser has no unbounded recursion: array dimensions are a loop, and annotations nested
 deeper than 64 levels are a syntax error, so no input can overflow the stack; 57,000 randomly
 damaged fixture files (inserted tokens, deletions, truncations, 5,000-bracket runs, 300-deep
-nests) parse without an exception on a 256 KB stack (`test-tmp/probes/Fuzz.java`).
+nests) parse without an exception on a 256 KB stack (a fuzzing probe kept outside the
+repository).
 
 **Errors and recovery.** A syntax error is reported on the offending token, with the token's
 length, and parsing resumes at the next line (at the offending token itself when it begins a
@@ -145,7 +163,7 @@ references, parameters, directive blocks and the `.implements` tokens are `Label
 `TypeRefList`, `ParameterList`, `BlockList` and `RangeList`, arrays behind the `List`
 interface that build their element on access; and string literals up to 64 characters are
 pooled. Every value read through the getters is unchanged, which a per-file hash of the whole
-AST over the three fixtures (`Fingerprint3`) checks after each step. The instruction objects
+AST over the three fixtures (a probe kept outside the repository) checks after each step. The instruction objects
 are now half of what is left; their line ints stay exact because the lexer skips newlines,
 so a hand-edited instruction may span lines.
 
@@ -559,7 +577,7 @@ only one index is built at a time.
 - Before a release, a scripted stdio session against a real app exercises every request at
   about a thousand positions (declarations, references, operands, labels, directives,
   opcodes), compares the answers with the previous build, and checks each definition,
-  reference line and rename edit against the source text; the same for the twelve MCP tools.
+  reference line and rename edit against the source text; the same for the fourteen MCP tools.
 - Parser and builder changes are checked with a per-file fingerprint of every AST in the corpus
   against the previous build; a builder change must leave every pre-existing field identical.
 
