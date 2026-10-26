@@ -212,13 +212,7 @@ See [DESIGN.md](DESIGN.md) for the measured costs and the reasoning.
 
 ## Running Tests
 
-Run the categories separately; each test fork holds a parsed app in memory:
-
-```bash
-./gradlew test --tests "*.unit.*"
-./gradlew test --tests "*.regression.*"
-./gradlew test --tests "*.integration.*"
-```
+`./gradlew check` runs the three categories as three tasks, one after another: `test` (unit), `regressionTest` and `integrationTest`.
 
 The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise.
 

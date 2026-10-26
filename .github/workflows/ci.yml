@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
@@ -26,6 +27,29 @@ jobs:
       - name: Build
         run: ./gradlew shadowJar
 
+      # The tests run from classes with the full classpath; this is the only place the jar itself runs
+      - name: Smoke-test the jar
+        run: |
+          jar=$(ls build/libs/smali-lsp-*.jar)
+          java -jar "$jar" --version
+          python3 - "$jar" <<'PY'
+          import json, subprocess, sys
+          jar = sys.argv[1]
+          def framed(*msgs):
+              return b"".join(f"Content-Length: {len(b)}\r\n\r\n".encode() + b for b in (json.dumps(m).encode() for m in msgs))
+          lsp = subprocess.run(["java", "-jar", jar, "lsp"], input=framed(
+              {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"processId": None, "rootUri": None, "capabilities": {}}},
+              {"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None},
+              {"jsonrpc": "2.0", "method": "exit", "params": None}), capture_output=True, timeout=60)
+          assert lsp.returncode == 0 and b'"Smali Language Server"' in lsp.stdout, (lsp.returncode, lsp.stdout[:300], lsp.stderr[-300:])
+          mcp = subprocess.run(["java", "-jar", jar, "mcp"], input=b"".join(json.dumps(m).encode() + b"\n" for m in (
+              {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "ci", "version": "0"}}},
+              {"jsonrpc": "2.0", "method": "notifications/initialized"},
+              {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})), capture_output=True, timeout=60)
+          assert mcp.returncode == 0 and b'"smali_index"' in mcp.stdout, (mcp.returncode, mcp.stdout[:300], mcp.stderr[-300:])
+          print("an LSP and an MCP session over the jar: ok")
+          PY
+
       - name: Upload JAR
         uses: actions/upload-artifact@v7
         with:
@@ -35,6 +59,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     # 25 is the release JDK; 17 proves the advertised Java 17 floor stays real
     strategy:
@@ -54,25 +79,21 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Unit tests
-        run: ./gradlew test --tests "*.unit.*"
-
-      - name: Integration tests
-        run: ./gradlew test --tests "*.integration.*"
-
-      - name: Regression tests
-        run: ./gradlew test --tests "*.regression.*"
+      # The three categories are three tasks (unit, regression, integration); --continue runs the rest when one fails
+      - name: Tests
+        run: ./gradlew check --continue
 
       - name: Test Report
         uses: dorny/test-reporter@v3
         if: always()
         with:
           name: Test Results (JDK ${{ matrix.java }})
-          path: build/test-results/test/*.xml
+          path: build/test-results/*/*.xml
           reporter: java-junit
 
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [build, test]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

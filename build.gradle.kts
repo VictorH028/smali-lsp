@@ -69,22 +69,47 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(targetJavaVersion)
 }
 
-tasks.test {
+// The three test categories are three tasks, so each runs with the heap its tests need and
+// `check` runs them one after another instead of mixing their forks: `test` is the unit
+// category, `regressionTest` the regression one, `integrationTest` the stdio sessions and the
+// apktool projects under test-data (skipped when absent).
+fun Test.category(name: String, heap: String) {
     useJUnitPlatform()
-
-    // Show test output
+    filter { includeTestsMatching("xyz.surendrajat.smalilsp.$name.*") }
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    maxHeapSize = heap
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = true
     }
+}
 
-    // Each test worker needs enough heap for large APK tests (indexing 4K+ files)
-    maxHeapSize = "1g"
-
-    // Limit parallelism: each worker holds a parsed APK in memory.
-    // Too many forks OOM; too few wastes time. 4 is a safe default.
+tasks.test {
+    category("unit", "512m")
     maxParallelForks = minOf(4, Runtime.getRuntime().availableProcessors())
+}
 
+val regressionTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the regression tests"
+    category("regression", "1g")
+    shouldRunAfter(tasks.test)
+}
+
+val integrationTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the integration tests: stdio sessions and the apktool projects under test-data"
+    // Each fork holds a parsed app: 1 GB fits the public fixtures; -PintegrationHeap=4g with
+    // -Dsmali.invariants.maxFiles=100000 (read by RealApkInvariantsTest) takes in a larger one
+    category("integration", providers.gradleProperty("integrationHeap").getOrElse("1g"))
+    maxParallelForks = minOf(4, Runtime.getRuntime().availableProcessors())
+    providers.systemProperty("smali.invariants.maxFiles").orNull?.let { systemProperty("smali.invariants.maxFiles", it) }
+    shouldRunAfter(tasks.test, regressionTest)
+}
+
+tasks.check {
+    dependsOn(regressionTest, integrationTest)
 }
 
 // Generate version metadata resource from project version + git commit

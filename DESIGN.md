@@ -536,7 +536,7 @@ only one index is built at a time.
 - Two files defining the same class (duplicate dex splits) keep both files indexed, but the
   class name maps to the last one indexed.
 - The 76 K-file app needs more than the 1 GB test fork, so the fixture-invariant test skips it
-  by default (`-Dsmali.invariants.maxFiles`).
+  by default; `-PintegrationHeap=4g -Dsmali.invariants.maxFiles=100000` takes it in.
 - Find-references on `Ljava/lang/Object;` answers with every owner, operand and descriptor
   use: 264 K locations on the 76 K-file app, serialized in well under a second but more than
   an editor can show. The LSP answer has no cap (a cancelled request stops early); the MCP
@@ -546,8 +546,10 @@ only one index is built at a time.
 
 ## 9. Verification
 
-- `*.unit.*` (532 tests), `*.regression.*` (8), `*.integration.*` (76 with the fixtures
-  present; one skip). Run the categories separately: each fork holds a parsed app.
+- Three test tasks, each with the heap its tests need, run one after another by `check`:
+  `test` (the unit category, 541 tests), `regressionTest` (8) and `integrationTest` (82 with
+  the fixtures present; one skip). CI runs them on JDK 17 and 25 and smoke-tests the jar with
+  an LSP and an MCP session.
 - `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
   `.method` or `.field`.
 - `RealApkInvariantsTest`: properties that hold for any apktool project (every invoke in the
