@@ -481,12 +481,12 @@ would return a tool result marked as an error.
 |------|---------|
 | `smali_index` | scan a directory |
 | `smali_find_definition` | a class by full or simple name; the declaration at a position; a member by `class_name` + `member_name` |
-| `smali_search_symbols` | fuzzy symbol search |
+| `smali_search_symbols` | fuzzy symbol search, at most `max_results` (default and cap 500) |
 | `smali_get_stats` | counts |
 | `smali_find_references` | by position (`uri`, `line`, `character`) or by name (`class_name`, optional `member_name` with `descriptor` or `field_type`); at most `max_results` (default 500, cap 5,000) with the full `total` |
 | `smali_hover` | same two forms |
 | `smali_diagnostics` | diagnostics for given content |
-| `smali_document_symbols` | a file's outline |
+| `smali_document_symbols` | a file's outline, by `uri` or `class_name` |
 | `smali_search_strings` | `const-string` literals, at most `max_results` (default 100, cap 5,000) |
 | `smali_call_graph` | callers and callees of a method |
 | `smali_xref_summary` | subclasses, implementors, callers, accessors, referencing classes |

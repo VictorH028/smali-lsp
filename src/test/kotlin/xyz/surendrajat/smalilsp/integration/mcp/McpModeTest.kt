@@ -521,6 +521,46 @@ class McpModeTest {
     }
 
     @Test
+    fun `test document_symbols by class name`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 84, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 85, "smali_document_symbols", mapOf("class_name" to "Lcom/example/test/MainActivity;"))
+            assertJsonRpcSuccess(response, 85)
+            assertFalse(isToolError(response), getToolResultText(response))
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertTrue(result.get("uri").asString.endsWith("MainActivity.smali"), result.get("uri").asString)
+            assertTrue(result.getAsJsonArray("symbols").any { it.asJsonObject.get("name").asString == "Lcom/example/test/MainActivity;" })
+
+            val missing = callTool(stdin, stdout, 86, "smali_document_symbols", mapOf("class_name" to "Lcom/example/Nope;"))
+            assertTrue(isToolError(missing) && getToolResultText(missing).contains("Lcom/example/Nope;"), getToolResultText(missing))
+            val neither = callTool(stdin, stdout, 87, "smali_document_symbols")
+            assertTrue(isToolError(neither), getToolResultText(neither))
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test search_symbols honours max_results`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 88, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 89, "smali_search_symbols", mapOf("pattern" to "a", "max_results" to 1))
+            assertJsonRpcSuccess(response, 89)
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertEquals(1, result.get("count").asInt)
+            assertEquals(1, result.getAsJsonArray("results").size())
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
     fun `test search_symbols matches package path`() {
         val process = startMcpProcess()
         try {

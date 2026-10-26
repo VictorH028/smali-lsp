@@ -304,11 +304,12 @@ class McpMode {
 
         server.tool(
             "smali_search_symbols",
-            "Search for classes, methods, or fields by name pattern. Returns the best 500 matches.",
-            Arg("pattern", "Search pattern (case-insensitive substring match)")
+            "Search for classes, methods, or fields by name pattern. Returns the best matches, at most max_results.",
+            Arg("pattern", "Search pattern (case-insensitive substring match)"),
+            Arg("max_results", "Most matches to return (default and cap 500)", type = "number", required = false)
         ) { args, s ->
             val pattern = args.require("pattern")
-            val results = s!!.symbols.search(pattern).map { symbol ->
+            val results = s!!.symbols.search(pattern).take(args.maxResults(default = 500, cap = 500)).map { symbol ->
                 mapOf(
                     "type" to when (symbol.kind) {
                         SymbolKind.Class -> "class"
@@ -392,10 +393,13 @@ class McpMode {
 
         server.tool(
             "smali_document_symbols",
-            "Get document outline/symbols for a smali file. Returns class, methods, fields.",
-            uriArg
+            "Get document outline/symbols for a smali file, by uri or by class_name. Returns class, methods, fields.",
+            Arg("uri", "File URI (e.g., 'file:///path/to/file.smali')", required = false),
+            Arg("class_name", "Fully qualified class name (e.g., 'Lcom/example/Foo;'), instead of uri", required = false)
         ) { args, s ->
-            val uri = args.require("uri")
+            val uri = args.string("uri")
+                ?: args.string("class_name")?.let { s!!.index.getUri(it) ?: throw ToolError("Class not found: $it") }
+                ?: throw ToolError("Pass 'uri' or 'class_name'")
             val file = s!!.index.findDeclarations(uri) ?: throw ToolError("File not found in index: $uri")
             val className = file.classDefinition.name
             val symbols = mutableListOf<Map<String, Any?>>()

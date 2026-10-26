@@ -62,12 +62,12 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | ------------------------ | -------------------------------------------------------------------------------- |
 | `smali_index`            | Index a directory of smali files                                                 |
 | `smali_find_definition`  | Go to definition, by position or by class and member name                        |
-| `smali_search_symbols`   | Fuzzy search across classes, methods, fields                                     |
+| `smali_search_symbols`   | Fuzzy search across classes, methods, fields, at most `max_results`              |
 | `smali_get_stats`        | Index statistics (class/method/field/string counts)                              |
 | `smali_find_references`  | Find all references to a symbol, by position or by name (bounded)               |
 | `smali_hover`            | Get hover info (signatures, types, class details)                                |
 | `smali_diagnostics`      | Compute diagnostics for a file                                                   |
-| `smali_document_symbols` | Get document outline (classes, methods, fields)                                  |
+| `smali_document_symbols` | Get document outline (classes, methods, fields), by `uri` or `class_name`        |
 | `smali_search_strings`   | Search const-string literals by substring                                        |
 | `smali_call_graph`       | Incoming/outgoing call graph for a method                                        |
 | `smali_xref_summary`     | Full cross-reference report (subclasses, implementors, callers, field accessors) |
