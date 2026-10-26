@@ -108,7 +108,8 @@ class RealApkInvariantsTest {
 
         val declaredClasses = fx.smaliFiles.mapNotNull { f -> classDirective.find(f.readText())?.groupValues?.get(1) }.toSet()
         assertEquals(declaredClasses.size, fx.index.getStats().classes, "${fx.dir.name}: distinct .class names vs indexed classes")
-        for (f in fx.smaliFiles) assertNotNull(fx.index.findFileByUri(fx.uriOf(f)), "${fx.dir.name}: not indexed by URI: ${f.relativeTo(fx.dir)}")
+        // the stored entry: findFileByUri would parse every file again for its body
+        for (f in fx.smaliFiles) assertNotNull(fx.index.findDeclarations(fx.uriOf(f)), "${fx.dir.name}: not indexed by URI: ${f.relativeTo(fx.dir)}")
     }
 
     // ---------- 2. counts ----------

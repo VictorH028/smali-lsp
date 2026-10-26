@@ -23,7 +23,7 @@ import kotlin.concurrent.thread
  * Spawns the main entrypoint with `mcp` subcommand and tests the full MCP lifecycle:
  * - Initialization handshake (initialize -> initialized)
  * - Tool discovery (tools/list)
- * - Tool execution (tools/call) for all 8 tools
+ * - Tool execution (tools/call) for every tool
  * - Error handling (unknown tool, missing args, no index)
  * - Protocol compliance (JSON-RPC 2.0 format)
  */
@@ -555,6 +555,72 @@ class McpModeTest {
             val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
             assertEquals(1, result.get("count").asInt)
             assertEquals(1, result.getAsJsonArray("results").size())
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test call_graph lists callers and callees and rejects a bad direction`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 60, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 61, "smali_call_graph", mapOf("class_name" to "Lcom/example/test/MainActivity;", "method_name" to "main"))
+            assertJsonRpcSuccess(response, 61)
+            assertFalse(isToolError(response), getToolResultText(response))
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertEquals(0, result.get("incoming_count").asInt)
+            val outgoing = result.getAsJsonArray("outgoing_calls").map { it.asJsonObject }
+            assertEquals(listOf("println(Ljava/lang/String;)V"), outgoing.map { it.get("to_method").asString })
+            assertFalse(outgoing.single().get("in_workspace").asBoolean)
+            assertNull(outgoing.single().get("uri"), "a callee outside the workspace has no file")
+
+            val bad = callTool(stdin, stdout, 62, "smali_call_graph", mapOf("class_name" to "Lcom/example/test/MainActivity;", "method_name" to "main", "direction" to "sideways"))
+            assertTrue(isToolError(bad) && getToolResultText(bad).contains("sideways"), getToolResultText(bad))
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test type_hierarchy answers supertypes and subtypes and names an unknown class`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 63, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 64, "smali_type_hierarchy", mapOf("class_name" to "Lcom/example/test/MainActivity;"))
+            assertJsonRpcSuccess(response, 64)
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertEquals(0, result.getAsJsonArray("supertypes").size(), "Object is not listed: $result")
+            assertEquals(0, result.getAsJsonArray("subtypes").size())
+
+            val subtypesOnly = JsonParser.parseString(getToolResultText(callTool(stdin, stdout, 65, "smali_type_hierarchy", mapOf("class_name" to "Lcom/example/test/MainActivity;", "direction" to "subtypes")))).asJsonObject
+            assertFalse(subtypesOnly.has("supertypes"))
+            val unknown = JsonParser.parseString(getToolResultText(callTool(stdin, stdout, 66, "smali_type_hierarchy", mapOf("class_name" to "Lcom/example/Nope;")))).asJsonObject
+            assertEquals("Class not found in index", unknown.get("error").asString)
+        } finally {
+            process.destroyForcibly()
+        }
+    }
+
+    @Test
+    fun `test search_strings finds a literal with its file and line`() {
+        val process = startMcpProcess()
+        try {
+            val (stdin, stdout) = initializeSession(process)
+            callTool(stdin, stdout, 67, "smali_index", mapOf("directory" to testProjectDir.absolutePath))
+
+            val response = callTool(stdin, stdout, 68, "smali_search_strings", mapOf("query" to "hello world"))
+            assertJsonRpcSuccess(response, 68)
+            val result = JsonParser.parseString(getToolResultText(response)).asJsonObject
+            assertEquals(1, result.get("count").asInt, result.toString())
+            val hit = result.getAsJsonArray("results").single().asJsonObject
+            assertEquals("Hello World", hit.get("value").asString)
+            assertEquals("MainActivity.smali", hit.get("file").asString)
+            assertEquals(smaliFile.readLines().indexOfFirst { "Hello World" in it } + 1, hit.get("line").asInt)
         } finally {
             process.destroyForcibly()
         }
