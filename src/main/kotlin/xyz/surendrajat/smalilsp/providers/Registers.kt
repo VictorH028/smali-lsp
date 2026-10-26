@@ -103,7 +103,7 @@ object Registers {
     }
 
     /** `v3` or `v3`–`v4`: the registers [from]..[to] of kind [kind] as code. */
-    fun span(kind: String, from: Int, to: Int): String = if (from == to) "`$kind$from`" else "`$kind$from`\u2013`$kind$to`"
+    private fun span(kind: String, from: Int, to: Int): String = if (from == to) "`$kind$from`" else "`$kind$from`\u2013`$kind$to`"
 
     /** `(parameter index, type, second half of a wide parameter)` for a parameter register, index -1 for `this`; null for a local. */
     fun parameterOf(method: MethodDefinition, frame: RegisterFrame, register: RegisterToken): Triple<Int, String, Boolean>? {

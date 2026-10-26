@@ -62,9 +62,6 @@ object Types {
         return null
     }
 
-    /** [className] with array brackets stripped; `[Lcom/Foo;` → `Lcom/Foo;`, `Lcom/Foo;` unchanged. */
-    fun elementClass(className: String): String = className.trimStart('[')
-
     /** True for a primitive or an array of primitives. */
     fun isPrimitive(descriptor: String): Boolean {
         val base = descriptor.trimStart('[')

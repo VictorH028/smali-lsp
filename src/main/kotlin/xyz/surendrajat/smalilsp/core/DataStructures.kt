@@ -10,10 +10,6 @@ data class Span(val line: Int, val start: Int, val end: Int) {
 
     fun toRange(): Range = Range(Position(line, start), Position(line, end))
 
-    /** The caret is on one of the token's characters. */
-    fun covers(position: Position): Boolean =
-        position.line == line && position.character >= start && position.character < end
-
     /** The caret is on the token or right after its last character. */
     fun touches(position: Position): Boolean =
         position.line == line && position.character >= start && position.character <= end

@@ -111,20 +111,9 @@ class CodeActionProvider(private val index: WorkspaceIndex, private val diagnost
     private fun frame(uri: String, lines: List<String>, lineNumber: Int, to: Int): Pair<String, List<TextEdit>>? {
         val method = index.findFileByUri(uri)?.methodAt(lineNumber) ?: return null
         for (l in method.startLine + 1..minOf(method.endLine, lines.size - 1)) {
-            val text = lines[l]
-            var i = 0
-            while (i < text.length && (text[i] == ' ' || text[i] == '\t')) i++
-            val directive = when {
-                text.startsWith(".registers", i) -> ".registers"
-                text.startsWith(".locals", i) -> ".locals"
-                else -> continue
-            }
-            var start = i + directive.length
-            while (start < text.length && (text[start] == ' ' || text[start] == '\t')) start++
-            var end = start
-            while (end < text.length && text[end].isDigit()) end++
-            if (end == start) return null
-            return "Set $directive $to" to listOf(TextEdit(Range(Position(l, start), Position(l, end)), to.toString()))
+            val directive = RegisterFrame.frameDirective(lines[l]) ?: continue
+            if (directive.countEnd == directive.countStart) return null
+            return "Set ${directive.name} $to" to listOf(TextEdit(Range(Position(l, directive.countStart), Position(l, directive.countEnd)), to.toString()))
         }
         return null
     }

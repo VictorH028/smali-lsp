@@ -159,6 +159,7 @@ class HoverProviderTest {
         }
         assertTrue(assertNotNull(hoverAt("move v0", "v1"), "a register").contains("**Parameter** `v1`"), "a register hovers as what it holds")
         assertTrue(hoverAt(".registers", ".registers", 2)!!.startsWith("**Frame:** 4 registers"), "the frame, not an opcode")
+        assertTrue(assertNotNull(hoverAt("const/4", "const/4", 7), "right after the opcode").contains("const/4"), "the caret right after the opcode still documents it")
     }
 
     @Test

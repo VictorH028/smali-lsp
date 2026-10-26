@@ -4,6 +4,7 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import xyz.surendrajat.smalilsp.core.FieldDefinition
 import xyz.surendrajat.smalilsp.core.InstructionScanner
+import xyz.surendrajat.smalilsp.core.InstructionText
 import xyz.surendrajat.smalilsp.core.MethodDefinition
 import xyz.surendrajat.smalilsp.core.RegisterFrame
 import xyz.surendrajat.smalilsp.core.RegisterToken
@@ -438,12 +439,7 @@ class CompletionProvider(
             if (text.isEmpty() || text.startsWith("#") || text.startsWith(".line")) { previous--; continue }
             return when {
                 text.startsWith("filled-new-array") -> "move-result-object"
-                text.startsWith("invoke-") -> when (text.substringAfterLast(')', "").firstOrNull()) {
-                    null, 'V' -> null
-                    'J', 'D' -> "move-result-wide"
-                    'L', '[' -> "move-result-object"
-                    else -> "move-result"
-                }
+                text.startsWith("invoke-") -> InstructionText.moveResultFor(text.substringAfterLast(')', ""))
                 else -> null
             }
         }

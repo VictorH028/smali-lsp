@@ -130,10 +130,9 @@ object AssemblerChecks {
                 val line = lines[lineNumber]
                 if (!scanner.scan(line)) {
                     if (!carriesNoCode(line)) previous = false
-                    val directive = frameDirectiveStart(line)
-                    if (directive >= 0 && ++frameDirectives == 2) {
-                        val end = line.indexOf(' ', directive).let { if (it < 0) line.length else it }
-                        out.add(error(lineNumber, directive, end, "There can only be one .registers or .locals directive in a method", "frame-directive", Fixes.deleteLine))
+                    val directive = RegisterFrame.frameDirective(line)
+                    if (directive != null && ++frameDirectives == 2) {
+                        out.add(error(lineNumber, directive.start, directive.start + directive.name.length, "There can only be one .registers or .locals directive in a method", "frame-directive", Fixes.deleteLine))
                     }
                     continue
                 }
@@ -165,13 +164,6 @@ object AssemblerChecks {
         return line.startsWith(".line", i) || line.startsWith(".local", i) || line.startsWith(".end local", i) || line.startsWith(".restart local", i)
     }
 
-    /** The column of a `.registers` or `.locals` directive on [line], or -1. */
-    private fun frameDirectiveStart(line: String): Int {
-        var i = 0
-        while (i < line.length && (line[i] == ' ' || line[i] == '\t')) i++
-        return if (line.startsWith(".registers", i) || line.startsWith(".locals", i)) i else -1
-    }
-
     private fun check(s: InstructionScanner, slot: Int, kind: Int, line: Int, method: MethodDefinition, frame: RegisterFrame?, call: InvokeInstruction?, produced: String?, out: MutableList<Diagnostic>) {
         val format = formatValues[slot] ?: return
 
@@ -182,14 +174,14 @@ object AssemblerChecks {
                 if (!s.opcodeIs("move-result-object")) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after filled-new-array, which leaves an array; use move-result-object", "move-result-kind", Fixes.opcode("move-result-object")))
             } else if (produced != "?") {
                 val returned = returnTypeOf(produced)
-                val expected = moveResultFor(returned[0])
+                val expected = InstructionText.moveResultFor(returned)
                 if (expected == null) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after a call that returns nothing", "move-result-kind", Fixes.deleteLine))
                 else if (!s.opcodeIs(expected)) out.add(error(line, s.opcodeStart, s.opcodeEnd, "${s.opcode} after a call that returns ${Types.readableName(returned)}; use $expected", "move-result-kind", Fixes.opcode(expected)))
             }
         }
 
         if (kind and RETURN != 0) {
-            val expected = returnFor(method.returnType)
+            val expected = InstructionText.returnFor(method.returnType)
             if (!s.opcodeIs(expected)) {
                 // return-void needs no register; the other way round the fix cannot guess one
                 val fix = if (expected == "return-void") Fixes.opcode(expected, operands = false) else if (s.opcodeIs("return-void")) null else Fixes.opcode(expected)
@@ -199,7 +191,7 @@ object AssemblerChecks {
 
         if (call != null && kind and UNCHECKED_INVOKE == 0) {
             val receiver = kind and STATIC_INVOKE == 0
-            val expected = parameterSlots(call.descriptor) + if (receiver) 1 else 0
+            val expected = RegisterFrame.parameterSlots(call.descriptor) + if (receiver) 1 else 0
             val passed = passedRegisters(s, frame)
             if (passed == BACKWARDS) {
                 out.add(error(line, s.registerStart(0), s.registerEnd(1), "The range runs backwards: ${s.registerText(1)} is below ${s.registerText(0)}", "call-arity", Fixes.swapRange))
@@ -291,31 +283,9 @@ object AssemblerChecks {
         return if (last < first) BACKWARDS else last - first + 1
     }
 
-    /** The register slots the parameters of [descriptor] take: two for `J` and `D`, one for anything else, arrays included. */
-    private fun parameterSlots(descriptor: String): Int {
-        var i = 1
-        var slots = 0
-        while (i < descriptor.length && descriptor[i] != ')') {
-            var c = descriptor[i]
-            var array = false
-            while (c == '[') {
-                array = true
-                if (++i >= descriptor.length) return slots
-                c = descriptor[i]
-            }
-            if (c == 'L') {
-                val semi = descriptor.indexOf(';', i)
-                if (semi < 0) return slots
-                i = semi + 1
-            } else i++
-            slots += if (!array && (c == 'J' || c == 'D')) 2 else 1
-        }
-        return slots
-    }
-
     /** `this and 3 for the parameters, J and D taking two each`. */
     private fun slotsText(descriptor: String, receiver: Boolean): String {
-        val slots = parameterSlots(descriptor)
+        val slots = RegisterFrame.parameterSlots(descriptor)
         val close = descriptor.indexOf(')').let { if (it < 0) descriptor.length else it }
         val wide = Types.parseTypeStrings(descriptor.substring(1, close)).any { it == "J" || it == "D" }
         return buildString {
@@ -332,20 +302,6 @@ object AssemblerChecks {
     private fun returnTypeOf(descriptor: String): String {
         val close = descriptor.indexOf(')')
         return if (close < 0 || close + 1 >= descriptor.length) "V" else descriptor.substring(close + 1)
-    }
-
-    private fun moveResultFor(type: Char): String? = when (type) {
-        'V' -> null
-        'J', 'D' -> "move-result-wide"
-        'L', '[' -> "move-result-object"
-        else -> "move-result"
-    }
-
-    private fun returnFor(type: String): String = when (type.firstOrNull()) {
-        'V', null -> "return-void"
-        'J', 'D' -> "return-wide"
-        'L', '[' -> "return-object"
-        else -> "return"
     }
 
     private fun InstructionScanner.opcodeIs(name: String): Boolean = opcodeEnd - opcodeStart == name.length && line.startsWith(name, opcodeStart)
