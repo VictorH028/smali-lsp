@@ -1,6 +1,7 @@
 package xyz.surendrajat.smalilsp.unit.providers
 
 import org.eclipse.lsp4j.Position
+import org.eclipse.lsp4j.Range
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
@@ -112,6 +113,16 @@ class CallHierarchyProviderTest {
         assertEquals(1, incoming.size)
         assertTrue(incoming[0].from.name.contains("callTarget"))
         assertEquals("Lcom/example/Caller;", incoming[0].from.detail)
+    }
+
+    @Test
+    fun `a callee outside the workspace points at its first call, not at a URI nothing can open`() {
+        indexContent("file:///test/Hub.smali", ".class public Lcom/example/Hub;\n.super Ljava/lang/Object;\n.method public run()V\n    .registers 2\n    invoke-virtual {p0}, Ljava/lang/Object;->hashCode()I\n    invoke-virtual {p0}, Ljava/lang/Object;->hashCode()I\n    return-void\n.end method")
+        val external = provider.outgoingCalls(provider.prepare("file:///test/Hub.smali", Position(3, 5)).single()).single()
+        assertEquals("Ljava/lang/Object;", external.to.detail)
+        assertEquals("file:///test/Hub.smali", external.to.uri)
+        assertEquals(Range(Position(4, 45), Position(4, 53)), external.to.selectionRange, "the name token of the first call")
+        assertEquals(2, external.fromRanges.size)
     }
 
     @Test

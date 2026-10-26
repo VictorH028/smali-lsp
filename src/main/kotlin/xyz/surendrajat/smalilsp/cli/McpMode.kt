@@ -474,7 +474,8 @@ class McpMode {
             if (direction != "incoming") {
                 val outgoing = s.callHierarchy.outgoingCalls(item)
                 result["outgoing_calls"] = outgoing.map { call ->
-                    mapOf("to_class" to (call.to.detail ?: "unknown"), "to_method" to call.to.name, "uri" to call.to.uri, "call_sites" to call.fromRanges.size)
+                    // a callee outside the workspace has no file: its LSP item points at the call, so the uri comes from the index
+                    mapOf("to_class" to (call.to.detail ?: "unknown"), "to_method" to call.to.name, "uri" to call.to.detail?.let { s.index.getUri(it) }, "in_workspace" to (call.to.detail?.let { s.index.hasClass(it) } == true), "call_sites" to call.fromRanges.size)
                 }
                 result["outgoing_count"] = outgoing.size
                 result["_note_outgoing"] = "outgoing_count = unique called methods"

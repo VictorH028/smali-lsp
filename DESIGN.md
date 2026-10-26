@@ -343,9 +343,11 @@ other is answered with an error naming it.
 - **Call hierarchy**: prepared from the called method when the caret is on a call, else the
   enclosing method; incoming calls are the member family's call sites grouped by containing
   method (found by binary search over the file's methods); outgoing calls from the method's
-  invoke instructions, resolved through the class hierarchy.
+  invoke instructions, resolved through the class hierarchy. A callee outside the workspace
+  has no declaration, so its item points at the first call.
 - **Type hierarchy**: prepared from any class reference under the caret; supertypes from the
-  class definition; subtypes from the subclass and implementor sets.
+  class definition; subtypes from the subclass and implementor sets. A supertype outside the
+  workspace is placed at the `.super` or `.implements` token that names it.
 - **Implementation**: the concrete declarations of a method's family other than the one under
   the caret; for a class, every subclass and implementor.
 - **Document highlight**: the references of the symbol restricted to its file; `iput`/`sput`

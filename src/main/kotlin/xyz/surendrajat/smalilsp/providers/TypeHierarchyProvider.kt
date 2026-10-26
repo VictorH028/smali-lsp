@@ -36,7 +36,7 @@ class TypeHierarchyProvider(
             if (superFile != null) {
                 results.add(createItem(superFile))
             } else if (superName != "Ljava/lang/Object;") {
-                results.add(createExternalItem(superName))
+                results.add(createExternalItem(superName, file, file.classDefinition.superClassRange))
             }
         }
 
@@ -46,7 +46,7 @@ class TypeHierarchyProvider(
             if (ifaceFile != null) {
                 results.add(createItem(ifaceFile))
             } else {
-                results.add(createExternalItem(ifaceName))
+                results.add(createExternalItem(ifaceName, file, file.classDefinition.interfaceRanges[ifaceName]))
             }
         }
 
@@ -89,17 +89,9 @@ class TypeHierarchyProvider(
         return item
     }
 
-    private fun createExternalItem(className: String): TypeHierarchyItem {
-        val uri = index.getUri(className) ?: "external:$className"
-        val zeroRange = Range(Position(0, 0), Position(0, 0))
-        val item = TypeHierarchyItem(
-            Types.simpleName(className),
-            SymbolKind.Class,
-            uri,
-            zeroRange,
-            zeroRange,
-            className
-        )
-        return item
+    /** A class outside the workspace has no file to open: the item points at the `.super` or `.implements` token that names it. */
+    private fun createExternalItem(className: String, from: SmaliFile, token: Range?): TypeHierarchyItem {
+        val range = token ?: from.classDefinition.nameSpan.toRange()
+        return TypeHierarchyItem(Types.simpleName(className), SymbolKind.Class, from.uri, range, range, className)
     }
 }
