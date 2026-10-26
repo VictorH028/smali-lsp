@@ -357,7 +357,8 @@ other is answered with an error naming it.
   `.class` line has one for the class's references and, when any, one for how many classes
   extend or implement it (a map lookup, so it comes resolved).
 - **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
-  type as detail, name token as `selectionRange`.
+  type as detail, name token as `selectionRange`; the class symbol's range runs to its last
+  member, so an editor can tell which symbol the cursor is in.
 - **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept, each
   at its name token. The
   scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per

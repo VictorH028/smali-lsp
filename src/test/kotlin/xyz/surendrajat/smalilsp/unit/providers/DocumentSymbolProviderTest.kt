@@ -141,7 +141,7 @@ class DocumentSymbolProviderTest {
         """.trimIndent()
         val symbol = outline(source)
 
-        assertEquals(source.rangeOf(".class"), symbol.range)
+        assertEquals(Range(Position(0, 0), Position(8, ".end method".length)), symbol.range, "the class encloses its members")
         assertEquals(source.rangeOf(".class", "Ltest/Ranges;"), symbol.selectionRange)
         val field = symbol.child("value")
         assertEquals(source.rangeOf(".field"), field.range)
