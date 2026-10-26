@@ -366,7 +366,8 @@ whose declarations are unreachable.
   and constructors for `invoke-direct`, instance methods otherwise, and when the braces are
   complete only the methods whose register count they hold (`this` and wide parameters counted
   as the frame counts them); fields by the static-ness and type the field opcode moves. Before
-  it, class names of the kind the operand needs: concrete for `new-instance`, an interface for
+  it, class names of the kind the operand needs, only where a class name can start (not the
+  `L` inside `onLayout` or a string): concrete for `new-instance`, an interface for
   `.implements` and an `invoke-interface` owner, non-interface for `.super`, a workspace
   throwable for `.catch`. After `:`, the method's labels; on `v` or `p` (or right after `{`),
   the frame's registers with `this`, the parameter type or the local slot; after `.`, the

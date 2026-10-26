@@ -339,6 +339,19 @@ class CompletionProviderTest {
     }
 
     @Test
+    fun `a capital L inside a word or a string is not the start of a class name`() {
+        indexContent("file:///test/Later.smali", ".class public Lapp/Later;\n.super Ljava/lang/Object;")
+        for (line in listOf(".method public onLa", "    const-string v0, \"XML", "    const-string v0, \"La", "    move-object v0, pL")) {
+            val items = provider.provideCompletions("file:///test.smali", Position(3, line.length), line).items
+            assertTrue(items.none { it.kind == org.eclipse.lsp4j.CompletionItemKind.Class }, "$line offered ${items.map { it.label }}")
+        }
+        for (line in listOf("    new-instance v0, La", ".method public run(ILa", ".method public run(Ljava/lang/String;La", ".field public data:[La", "    check-cast v0, La")) {
+            val items = provider.provideCompletions("file:///test.smali", Position(3, line.length), line).items
+            assertEquals(listOf("Lapp/Later;"), items.map { it.textEdit.left.newText }, line)
+        }
+    }
+
+    @Test
     fun `an unfinished L-type in a declaration completes class names`() {
         indexContent("file:///test/MyClass.smali", ".class public Lcom/example/MyClass;\n.super Ljava/lang/Object;")
         for (line in listOf(".field public data:Lcom/ex", ".method public run(Lcom/ex")) {

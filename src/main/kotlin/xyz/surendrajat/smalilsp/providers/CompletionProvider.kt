@@ -450,10 +450,16 @@ class CompletionProvider(
         return null
     }
 
-    /** The `L...` being typed, without its `;` yet, including the `L`; null when the caret is not in one. */
+    /**
+     * The `L...` being typed, without its `;` yet, including the `L`; null when the caret is not in
+     * one: the `L` must start a token, or follow a primitive or `;` in a descriptor, and not sit
+     * inside a string, so `onLa`, `isLoaded` and `"XML` are not class names.
+     */
     private fun partialClassName(text: String): String? {
         val lastL = text.lastIndexOf('L')
         if (lastL < 0) return null
+        if (lastL > 0 && text[lastL - 1] !in " \t,({[:;" && text[lastL - 1] !in "ZBSCIJFD") return null
+        if (text.substring(0, lastL).count { it == '"' } % 2 == 1) return null
         val afterL = text.substring(lastL + 1)
         if (afterL.contains(';')) return null
         if (afterL.isEmpty() || afterL.all { it.isLetterOrDigit() || it == '/' || it == '$' || it == '_' }) return text.substring(lastL)
