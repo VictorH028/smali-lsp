@@ -21,14 +21,16 @@ main() → parseArgs → configureLogging → startLsp() | McpMode().run()
 `java -jar smali-lsp.jar <lsp|mcp> [--verbose] [--log-file <path>]`
 
 `Main.kt` holds `main()`; `Cli.kt` the options, the usage text and the version resource;
-`Logging.kt` the logback setup; `SmaliLanguageServer.kt` the server.
+`Logging.kt` the SLF4J binding; `SmaliLanguageServer.kt` the server.
 
 - **lsp**: `SmaliLanguageServer` wired to stdin/stdout through LSP4J's `Launcher`; the JVM
   blocks in `startListening()`.
 - **mcp**: `McpMode` serves the MCP protocol over stdio with the MCP Kotlin SDK.
 - **Logging**: stdout carries the protocol, so everything the server says goes to stderr.
   WARN and above by default, INFO with `--verbose`, and `--log-file` additionally writes to
-  a file. LSP4J logs through `java.util.logging`, which `logging.properties` points at stderr.
+  a file, started afresh each run. The SLF4J binding is the server's own (`Logging.kt`, a
+  logger is a name and a level check): logback was 150 ms of a 200 ms start and 1.7 MB of the
+  jar. LSP4J logs through `java.util.logging`, which `logging.properties` points at stderr.
 
 ### 1.2 LSP handshake
 
@@ -601,7 +603,7 @@ only one index is built at a time.
 | SmaliParser.kt | parser entry |
 | FrameworkResources.kt | the bundled `android.R` names |
 | ImplementationProvider.kt | implementations |
-| Logging.kt | logback setup |
+| Logging.kt | the SLF4J binding: stderr, the log file, levels |
 | Main.kt | entry point |
 | FoldingRangeProvider.kt | folding ranges |
 | StringLiterals.kt | the string operand under the caret |

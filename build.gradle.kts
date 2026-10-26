@@ -26,9 +26,8 @@ dependencies {
     // MCP (Model Context Protocol) server
     implementation(libs.mcp.kotlin.sdk.server)
 
-    // Logging
+    // Logging: the binding is the server's own (Logging.kt)
     implementation(libs.slf4j.api)
-    implementation(libs.logback.classic)
 
     // Testing
     testImplementation(libs.junit.jupiter)
@@ -146,8 +145,6 @@ tasks.shadowJar {
 
     // Build metadata the dependencies ship and nothing reads at runtime
     exclude("META-INF/maven/**", "META-INF/proguard/**", "META-INF/com.android.tools/**", "META-INF/*.version", "META-INF/**/verification.properties")
-    // logback's servlet hook: there is no servlet container here
-    exclude("ch/qos/logback/classic/servlet/**", "META-INF/services/jakarta.servlet.ServletContainerInitializer")
 }
 
 // Live testing in APKLab: copies the fat jar to ~/.apklab/smali-lsp-dev.jar (or -PapklabDir=<dir>).
