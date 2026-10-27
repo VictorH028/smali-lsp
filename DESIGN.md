@@ -399,7 +399,8 @@ other is answered with an error naming it.
   inserting its operand shape as tab stops when the client takes snippets. Class names are
   ranked by match kind, length and name; the list is scanned once keeping the best fifty, with
   the kind check only for a name that would make the fifty, so the worst case (an `L` alone on
-  the 76 K-file app) stays at a few milliseconds.
+  the 76 K-file app) stays at a few milliseconds. An item's edit replaces the whole token the
+  caret is in, so completing inside an existing name does not leave the old descriptor behind.
 - **Diagnostics**: syntax errors on the offending token and the file-local checks are
   published at once: a jump to an undefined label, a label defined twice, and the assembler
   checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per

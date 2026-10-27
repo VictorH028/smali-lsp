@@ -352,6 +352,32 @@ class CompletionProviderTest {
     }
 
     @Test
+    fun `completing inside an existing token replaces the whole token, not only what precedes the caret`() {
+        indexContent("file:///test/Owner.smali", ".class public Lcom/example/Owner;\n.super Ljava/lang/Object;\n\n.field public name:Ljava/lang/String;\n\n.method public run(I)V\n    .registers 2\n    return-void\n.end method")
+        fun range(line: String, caret: Int, start: Int, end: Int, kindOf: String) {
+            val item = provider.provideCompletions("file:///test.smali", Position(3, caret), line).items.single { it.label == kindOf }
+            assertEquals(org.eclipse.lsp4j.Range(Position(3, start), Position(3, end)), item.textEdit.left.range, line)
+        }
+        val field = "    iget-object v0, p0, Lcom/example/Owner;->name:Ljava/lang/String;"
+        range(field, field.indexOf("->") + 3, field.indexOf("->") + 2, field.length, "name:Ljava/lang/String;")
+        val call = "    invoke-virtual {p0, v0}, Lcom/example/Owner;->run(I)V    # comment"
+        range(call, call.indexOf("->") + 3, call.indexOf("->") + 2, call.indexOf("    #"), "run(I)V")
+        val owner = "    new-instance v0, Lcom/example/Owner;"
+        range(owner, owner.indexOf("Lcom") + 6, owner.indexOf("Lcom"), owner.length, "com/example/Owner")
+        val opcode = "    invoke-virtual {p0}, Lcom/example/Owner;->run(I)V"
+        range(opcode, 7, 4, opcode.indexOf(' ', 4), "invoke-virtual")
+        val uri = "file:///test/Labels.smali"
+        val source = ".class public Lcom/example/Labels;\n.super Ljava/lang/Object;\n\n.method public run()V\n    .registers 3\n    goto :cond_0\n    move v0, v1\n    :cond_0\n    return-void\n.end method"
+        index.openSource(uri, source)
+        val gotoLine = "    goto :cond_0"
+        val label = provider.provideCompletions(uri, Position(5, gotoLine.indexOf(":co") + 3), gotoLine).items.single()
+        assertEquals(org.eclipse.lsp4j.Range(Position(5, gotoLine.indexOf(":co")), Position(5, gotoLine.length)), label.textEdit.left.range)
+        val move = "    move v0, v1"
+        val register = provider.provideCompletions(uri, Position(6, move.indexOf("v1") + 1), move).items.single { it.label == "v1" }
+        assertEquals(org.eclipse.lsp4j.Range(Position(6, move.indexOf("v1")), Position(6, move.length)), register.textEdit.left.range)
+    }
+
+    @Test
     fun `an unfinished L-type in a declaration completes class names`() {
         indexContent("file:///test/MyClass.smali", ".class public Lcom/example/MyClass;\n.super Ljava/lang/Object;")
         for (line in listOf(".field public data:Lcom/ex", ".method public run(Lcom/ex")) {

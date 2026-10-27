@@ -54,44 +54,61 @@ class CompletionProvider(
         val trimmed = before.trimStart()
         val word = currentWord(before)
         return when {
-            word.startsWith(":") -> completeLabels(uri, position, word)
+            word.startsWith(":") -> completeLabels(uri, position, word, lineText)
             trimmed.contains("->") -> completeMembers(uri, position, lineText, trimmed)
-            trimmed.startsWith(".super ") -> completeClassNames(trimmed.removePrefix(".super ").trim(), position, ClassKind.CLASS)
-            trimmed.startsWith(".implements ") -> completeClassNames(trimmed.removePrefix(".implements ").trim(), position, ClassKind.INTERFACE)
-            trimmed.startsWith(".end ") -> completeBlockEnd(uri, position, trimmed.removePrefix(".end "))
-            trimmed.startsWith(".") && ' ' !in trimmed -> completeDirectives(uri, position, trimmed)
+            trimmed.startsWith(".super ") -> completeClassNames(trimmed.removePrefix(".super ").trim(), position, ClassKind.CLASS, lineText)
+            trimmed.startsWith(".implements ") -> completeClassNames(trimmed.removePrefix(".implements ").trim(), position, ClassKind.INTERFACE, lineText)
+            trimmed.startsWith(".end ") -> completeBlockEnd(uri, position, trimmed.removePrefix(".end "), lineText)
+            trimmed.startsWith(".") && ' ' !in trimmed -> completeDirectives(uri, position, trimmed, lineText)
             trimmed.startsWith("#") -> CompletionList(false, emptyList())
-            else -> partialClassName(trimmed)?.let { completeClassNames(it, position, classKindFor(trimmed)) }
+            else -> partialClassName(trimmed)?.let { completeClassNames(it, position, classKindFor(trimmed), lineText) }
                 ?: when {
-                    ' ' !in trimmed -> completeFirstWord(uri, position, trimmed)
-                    REGISTER.matches(word) || (word.isEmpty() && before.endsWith("{")) -> completeRegisters(uri, position, word)
+                    ' ' !in trimmed -> completeFirstWord(uri, position, trimmed, lineText)
+                    REGISTER.matches(word) || (word.isEmpty() && before.endsWith("{")) -> completeRegisters(uri, position, word, lineText)
                     else -> CompletionList(false, emptyList())
                 }
         }
     }
 
+    /**
+     * The end of the token the caret is in: the caret's column, or further right while [continues]
+     * holds. An item's edit replaces the whole token, so completing inside an existing name does
+     * not leave the rest of the old token behind (`->a` in `->a:Ljava/lang/String;` once gave
+     * `a:Ljava/lang/String;:Ljava/lang/String;`).
+     */
+    private fun endOfToken(lineText: String, from: Int, continues: (Char) -> Boolean): Int {
+        var end = from
+        while (end < lineText.length && continues(lineText[end])) end++
+        return end
+    }
+
+    private fun isNameChar(c: Char) = c.isLetterOrDigit() || c == '_' || c == '$' || c == '-'
+
     /** The first word of a line: opcodes inside a method, directives at class level, opcodes when the file is not known. */
-    private fun completeFirstWord(uri: String, position: Position, partial: String): CompletionList {
+    private fun completeFirstWord(uri: String, position: Position, partial: String, lineText: String): CompletionList {
         val file = index.findFileByUri(uri)
-        return if (file != null && file.methodAt(position.line) == null) directiveItems(CLASS_DIRECTIVES, partial, position, null) else completeOpcodes(uri, position, partial)
+        return if (file != null && file.methodAt(position.line) == null) directiveItems(CLASS_DIRECTIVES, partial, position, null, lineText) else completeOpcodes(uri, position, partial, lineText)
     }
 
     /** Directives for where the caret is; the innermost open block's `.end` comes first and preselected. */
-    private fun completeDirectives(uri: String, position: Position, partial: String): CompletionList {
+    private fun completeDirectives(uri: String, position: Position, partial: String, lineText: String): CompletionList {
         val file = index.findFileByUri(uri)
         val inMethod = file?.methodAt(position.line) != null
         val candidates = if (file == null) METHOD_DIRECTIVES + CLASS_DIRECTIVES.filter { it !in METHOD_DIRECTIVES } else if (inMethod) METHOD_DIRECTIVES else CLASS_DIRECTIVES
         val open = if (".end".startsWith(partial.take(4))) openBlock(uri, position.line)?.let { ".end $it" } else null
-        return directiveItems(candidates, partial, position, open)
+        return directiveItems(candidates, partial, position, open, lineText)
     }
 
-    private fun directiveItems(candidates: List<String>, partial: String, position: Position, first: String?): CompletionList {
-        val replaceRange = Range(Position(position.line, position.character - partial.length), position)
+    private fun directiveItems(candidates: List<String>, partial: String, position: Position, first: String?, lineText: String): CompletionList {
+        val start = Position(position.line, position.character - partial.length)
+        val wordEnd = endOfToken(lineText, position.character) { !it.isWhitespace() }
+        // a two-word directive (`.end method`) replaces the second word the line already has as well
+        val secondWord = Regex("""^[ \t]+[a-z-]+""").find(lineText.substring(minOf(wordEnd, lineText.length)))?.value?.length ?: 0
         val ordered = (listOfNotNull(first) + candidates.filter { it != first }).filter { it.startsWith(partial, ignoreCase = true) }
         val items = ordered.mapIndexed { i, directive ->
             CompletionItem(directive).apply {
                 kind = CompletionItemKind.Keyword
-                textEdit = Either.forLeft(TextEdit(replaceRange, directive))
+                textEdit = Either.forLeft(TextEdit(Range(start, Position(position.line, if (' ' in directive) wordEnd + secondWord else wordEnd)), directive))
                 sortText = "%03d".format(i)
                 if (directive == first) preselect = true
             }
@@ -100,9 +117,9 @@ class CompletionProvider(
     }
 
     /** After `.end `: the block kinds, the innermost open one first. */
-    private fun completeBlockEnd(uri: String, position: Position, partial: String): CompletionList {
+    private fun completeBlockEnd(uri: String, position: Position, partial: String, lineText: String): CompletionList {
         val open = openBlock(uri, position.line)
-        return directiveItems(BLOCK_ENDS, partial, position, open)
+        return directiveItems(BLOCK_ENDS, partial, position, open, lineText)
     }
 
     /**
@@ -141,12 +158,12 @@ class CompletionProvider(
     }
 
     /** The registers of the method's frame, each with what it holds: `this`, a parameter's type, a local's slot. */
-    private fun completeRegisters(uri: String, position: Position, word: String): CompletionList {
+    private fun completeRegisters(uri: String, position: Position, word: String, lineText: String): CompletionList {
         val file = index.findFileByUri(uri) ?: return CompletionList(false, emptyList())
         val method = file.methodAt(position.line) ?: return CompletionList(false, emptyList())
         val lines = index.getLines(uri) ?: return CompletionList(false, emptyList())
         val frame = RegisterFrame.of(method, lines) ?: return CompletionList(false, emptyList())
-        val replaceRange = Range(Position(position.line, position.character - word.length), position)
+        val replaceRange = Range(Position(position.line, position.character - word.length), Position(position.line, endOfToken(lineText, position.character) { it in '0'..'9' }))
         val items = ArrayList<CompletionItem>()
         fun add(name: String, detail: String) {
             if (!name.startsWith(word, ignoreCase = true)) return
@@ -194,7 +211,8 @@ class CompletionProvider(
         if (!index.hasClass(className)) return CompletionList(false, emptyList())
         val wanted = wanted(trimmed.substringBefore(' '), beforeArrow, uri, position.line, lineText)
         val items = mutableListOf<CompletionItem>()
-        val replaceRange = Range(Position(position.line, position.character - prefix.length), position)
+        // the whole reference, descriptor or type included, up to a blank, a comma or a comment
+        val replaceRange = Range(Position(position.line, position.character - prefix.length), Position(position.line, endOfToken(lineText, position.character) { it != ' ' && it != '\t' && it != ',' && it != '#' && it != '}' }))
 
         // The class's own members, then the inherited ones up the hierarchy; an override hides what it overrides
         val seen = HashSet<String>()
@@ -290,10 +308,10 @@ class CompletionProvider(
     }
 
     /** The method's labels, for a `:` after a jump, in a `.catch` or in a switch payload. */
-    private fun completeLabels(uri: String, position: Position, word: String): CompletionList {
+    private fun completeLabels(uri: String, position: Position, word: String, lineText: String): CompletionList {
         val method = index.findFileByUri(uri)?.methodAt(position.line) ?: return CompletionList(false, emptyList())
         val typed = word.substring(1)
-        val replaceRange = Range(Position(position.line, position.character - word.length), position)
+        val replaceRange = Range(Position(position.line, position.character - word.length), Position(position.line, endOfToken(lineText, position.character, ::isNameChar)))
         val items = method.labels.keys.sorted().filter { it.startsWith(typed, ignoreCase = true) }.mapIndexed { i, name ->
             CompletionItem(":$name").apply {
                 kind = CompletionItemKind.Reference
@@ -311,9 +329,11 @@ class CompletionProvider(
      * keystroke. The list is scanned once, keeping the best fifty; [kind] is checked only for a
      * name that would make the fifty, so the cost stays with the scan.
      */
-    private fun completeClassNames(partial: String, position: Position, kind: ClassKind): CompletionList {
+    private fun completeClassNames(partial: String, position: Position, kind: ClassKind, lineText: String): CompletionList {
         val hasLPrefix = partial.startsWith("L")
-        val replaceRange = Range(Position(position.line, position.character - partial.length), position)
+        var end = endOfToken(lineText, position.character) { isNameChar(it) || it == '/' }
+        if (end < lineText.length && lineText[end] == ';') end++   // the old name's terminator goes with it
+        val replaceRange = Range(Position(position.line, position.character - partial.length), Position(position.line, end))
         val best = ArrayList<Pair<Int, String>>(MAX_CLASS_ITEMS + 1)   // (rank, class name), kept sorted
         val order = compareBy<Pair<Int, String>>({ it.first }, { it.second.length }, { it.second })
         val throwables = HashMap<String, Boolean>()
@@ -376,8 +396,8 @@ class CompletionProvider(
     }
 
     /** Opcodes matching the first word of a line, every one on an empty line; right after a call, the `move-result` its return type needs comes first. */
-    private fun completeOpcodes(uri: String, position: Position, partial: String): CompletionList {
-        val replaceRange = Range(Position(position.line, position.character - partial.length), position)
+    private fun completeOpcodes(uri: String, position: Position, partial: String, lineText: String): CompletionList {
+        val replaceRange = Range(Position(position.line, position.character - partial.length), Position(position.line, endOfToken(lineText, position.character) { !it.isWhitespace() }))
         val expected = moveResultAfterCall(uri, position.line)
         val names = DalvikOpcodeDatabase.allInstructionNames().filter { it.startsWith(partial, ignoreCase = true) }
         val ordered = if (expected != null && expected in names) listOf(expected) + names.filter { it != expected } else names
