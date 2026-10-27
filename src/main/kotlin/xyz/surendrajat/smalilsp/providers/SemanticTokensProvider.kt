@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Semantic tokens: what each token of a file is. Class, member, type and label tokens come from
  * the AST's spans; directives, modifiers, opcodes, registers, literals, strings and comments
- * from a scan of the lines. An editor without a smali grammar colours from these alone; one
+ * from a scan of the lines, the debug directives as comments. An editor without a smali grammar colours from these alone; one
  * with a grammar gets the precise classes on top. Computed from the open file's stored AST,
  * never a re-parse; the last full result per file is kept so an edit answers with a delta.
  */
@@ -145,7 +145,8 @@ class SemanticTokensProvider(private val index: WorkspaceIndex) {
             val c = line[i]
             when {
                 c == '#' -> {}
-                c == '.' -> directive(line, lineNumber, i, codeEnd, out)
+                // debug information reads like a comment and is coloured as one, so it stops competing with the code
+                c == '.' -> if (isDebugDirective(line, i)) out.add(Token(lineNumber, i, line.length - i, COMMENT, 0, 1)) else directive(line, lineNumber, i, codeEnd, out)
                 c == ':' -> words(line, lineNumber, i, codeEnd, out)
                 c == '-' || c in '0'..'9' -> words(line, lineNumber, i, codeEnd, out)
                 else -> {
@@ -183,6 +184,15 @@ class SemanticTokensProvider(private val index: WorkspaceIndex) {
             }
         }
         return line.length
+    }
+
+    /** `.line`, `.local`, `.end local`, `.restart local`, `.param`, `.end param`, `.prologue`, `.epilogue` and `.source` carry debug information, not code; `.locals` is the frame. */
+    private fun isDebugDirective(line: String, start: Int): Boolean {
+        for (directive in DEBUG_DIRECTIVES) {
+            val end = start + directive.length
+            if (line.startsWith(directive, start) && (end == line.length || line[end] == ' ' || line[end] == '\t' || line[end] == '\r')) return true
+        }
+        return false
     }
 
     private fun directive(line: String, lineNumber: Int, start: Int, codeEnd: Int, out: MutableList<Token>) {
@@ -272,6 +282,7 @@ class SemanticTokensProvider(private val index: WorkspaceIndex) {
         const val DECLARATION = 1; const val STATIC = 2; const val DEFAULT_LIBRARY = 4
         /** Results above this many ints (a 180 K-line file is about 1.6 M) are not kept for deltas. */
         private const val MAX_REMEMBERED = 2_000_000
+        private val DEBUG_DIRECTIVES = listOf(".line", ".local", ".end local", ".restart local", ".param", ".end param", ".prologue", ".epilogue", ".source")
         private val MODIFIERS = setOf("public", "private", "protected", "final", "annotation", "synthetic", "static", "abstract", "enum", "interface", "constructor", "bridge",
             "declared-synchronized", "synchronized", "strictfp", "varargs", "native", "transient", "volatile", "runtime", "system", "build")
 

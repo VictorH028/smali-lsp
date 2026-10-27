@@ -468,7 +468,8 @@ class RealApkInvariantsTest {
                 lastLine = t.line; lastEnd = t.col + t.length
                 val ok = when (t.type) {
                     xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.STRING -> text.startsWith("\"") || text.startsWith("'")
-                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.COMMENT -> text.startsWith("#")
+                    // a comment, or a debug directive, which is coloured as one
+                    xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.COMMENT -> text.startsWith("#") || debugDirectives.any { text.startsWith(it) }
                     xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.LABEL -> text.startsWith(":")
                     xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.VARIABLE -> text.matches(Regex("v\\d+"))
                     xyz.surendrajat.smalilsp.providers.SemanticTokensProvider.PARAMETER -> text.matches(Regex("p\\d+"))
@@ -483,6 +484,8 @@ class RealApkInvariantsTest {
         assertTrue(tokens > 1000, "${fx.dir.name}: only $tokens tokens over the sample?")
         assertEquals(emptyList<String>(), bad.take(10), "${fx.dir.name}: ${bad.size} malformed tokens")
     }
+
+    private val debugDirectives = listOf(".line ", ".local ", ".end local ", ".restart local ", ".param ", ".end param", ".prologue", ".epilogue", ".source ")
 
     // ---------- 13. idempotent re-index ----------
 

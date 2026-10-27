@@ -462,7 +462,9 @@ other is answered with an error naming it.
   member, type and label tokens from the AST's spans (the owner, name and descriptor types of
   each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,
   opcodes, registers, literals, strings, comments) from a scan of the lines; where the two
-  overlap the AST wins. Never a re-parse. The last full result per open file is kept, with the
+  overlap the AST wins; the debug directives (`.line`, `.local`, `.param`, `.source`, ...) are
+  one comment token per line, so a theme dims them like the comments they amount to and the
+  code stands out. Never a re-parse. The last full result per open file is kept, with the
   text it came from, so `full/delta` answers with one edit (common prefix and suffix) and an
   unchanged buffer with none; `range` scans only its lines and walks only the methods that
   reach them, which is what an editor asks for first on a 180 K-line file (0.2 ms there, 68 ms
