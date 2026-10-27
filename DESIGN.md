@@ -574,7 +574,7 @@ only one index is built at a time.
 ## 9. Verification
 
 - Three test tasks, each with the heap its tests need, run one after another by `check`:
-  `test` (the unit category, 541 tests), `regressionTest` (8) and `integrationTest` (82 with
+  `test` (the unit category, 545 tests), `regressionTest` (8) and `integrationTest` (82 with
   the fixtures present; one skip). CI runs them on JDK 17 and 25 and smoke-tests the jar with
   an LSP and an MCP session.
 - `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
