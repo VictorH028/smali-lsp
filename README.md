@@ -18,7 +18,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors, labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit
+- **Diagnostics** — syntax errors, labels, undefined classes in the app's own packages, members no class on the owner's hierarchy declares, and what the assembler or verifier would reject after a hand edit
 - **Quick fixes** — one code action per diagnostic with a single right answer
 - **Formatting** — baksmali's layout for the document or a range; blank lines, strings and comments stay as written
 - **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
@@ -32,7 +32,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | --- | --- |
 | `initialize` / `initialized` / `shutdown` / `exit` | workspace folders or `rootUri`; indexing after `initialized`, with progress |
 | `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer while open, the disk version after close |
-| `textDocument/publishDiagnostics` | syntax errors at once, undefined classes once indexing has finished |
+| `textDocument/publishDiagnostics` | syntax errors at once, undefined classes and members once indexing has finished |
 | `textDocument/codeAction` | quick fixes for the diagnostics on the requested lines |
 | `textDocument/formatting` · `rangeFormatting` | baksmali's layout, one edit per changed line |
 | `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow overrides and calls through subclasses |

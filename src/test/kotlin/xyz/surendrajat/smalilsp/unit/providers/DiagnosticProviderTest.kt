@@ -64,6 +64,64 @@ class DiagnosticProviderTest {
     }
 
     @Test
+    fun `a member no class on the owner's workspace hierarchy declares is a warning with the closest member as its fix`() {
+        scan("file:///Base.smali", ".class public Lcom/example/Base;\n.super Ljava/lang/Object;\n\n.field protected count:I\n\n.method public reset()V\n    .registers 1\n    return-void\n.end method")
+        scan("file:///Derived.smali", ".class public Lcom/example/Derived;\n.super Lcom/example/Base;\n\n.method public tick(I)V\n    .registers 2\n    return-void\n.end method")
+        val source = """
+            .class public Lcom/example/Test;
+            .super Ljava/lang/Object;
+
+            .method public foo(Lcom/example/Derived;)V
+                .registers 3
+                invoke-virtual {p1}, Lcom/example/Derived;->reset()V
+                invoke-virtual {p1}, Lcom/example/Derived;->hashCode()I
+                invoke-virtual {p1, v0}, Lcom/example/Derived;->tick(J)V
+                invoke-virtual {p1}, Lcom/example/Derived;->rest()V
+                iget v0, p1, Lcom/example/Derived;->count:I
+                iget v0, p1, Lcom/example/Derived;->count:J
+                iget v0, p1, Lcom/example/Derived;->cont:I
+                return-void
+            .end method
+        """.trimIndent()
+        val diagnostics = diagnosticsOf(source).filter { it.code.left == "undefined-member" }
+        assertEquals(listOf(
+            "Method tick(J)V is not declared by Lcom/example/Derived; or a supertype in the workspace; the closest is tick(I)V",
+            "Method rest()V is not declared by Lcom/example/Derived; or a supertype in the workspace; the closest is reset()V",
+            "Field count:J is not declared by Lcom/example/Derived; or a supertype in the workspace; the closest is count:I",
+            "Field cont:I is not declared by Lcom/example/Derived; or a supertype in the workspace; the closest is count:I",
+        ), diagnostics.map { it.message.left })
+        assertEquals(rangeOf(source, "tick(J)V", "tick(J)V"), diagnostics[0].range)
+        assertEquals(mapOf("fix" to "member", "to" to "tick(I)V"), diagnostics[0].data)
+        assertTrue(diagnostics.all { it.severity == DiagnosticSeverity.Warning })
+    }
+
+    @Test
+    fun `a member is not questioned when a supertype or the owner is outside the workspace, nor in the file's own new code`() {
+        scan("file:///Screen.smali", ".class public Lcom/example/Screen;\n.super Landroid/app/Activity;")
+        scan("file:///Listener.smali", ".class public interface abstract Lcom/example/Listener;\n.super Ljava/lang/Object;\n.implements Ljava/lang/Runnable;")
+        val source = """
+            .class public Lcom/example/Test;
+            .super Ljava/lang/Object;
+
+            .method public foo(Lcom/example/Screen;Lcom/example/Listener;)V
+                .registers 4
+                invoke-virtual {p1}, Lcom/example/Screen;->findViewById(I)Landroid/view/View;
+                invoke-interface {p2}, Lcom/example/Listener;->run()V
+                invoke-virtual {p1}, Ljava/lang/Object;->whatever()V
+                invoke-virtual {p0}, Lcom/example/Test;->added()V
+                sget v0, Lcom/example/Screen;->FLAG:I
+                return-void
+            .end method
+
+            .method public added()V
+                .registers 1
+                return-void
+            .end method
+        """.trimIndent()
+        assertEquals(emptyList<String>(), diagnosticsOf(source).filter { it.code.left == "undefined-member" }.map { it.message.left })
+    }
+
+    @Test
     fun `a class outside every workspace package is not reported`() {
         // The app references classes it does not ship: platform ones outside the SDK list and optional libraries behind runtime checks
         val source = """
@@ -226,7 +284,7 @@ class DiagnosticProviderTest {
 
     @Test
     fun `an indexed workspace class is not flagged and neither is an array of it`() {
-        scan("file:///com/example/Foo.smali", ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;")
+        scan("file:///com/example/Foo.smali", ".class public Lcom/example/Foo;\n.super Ljava/lang/Object;\n\n.method public bar()V\n    .registers 1\n    return-void\n.end method")
         val source = """
             .class public Lcom/example/Test;
             .super Ljava/lang/Object;

@@ -15,7 +15,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 /**
  * The answers a diagnostic can carry in its `data`, for the diagnostics with exactly one right
  * fix: which opcode to use, that the line goes, that a call wants its `/range` form, what the
- * frame directive should say, which label was meant. [CodeActionProvider] turns them into edits
+ * frame directive should say, which label or member was meant. [CodeActionProvider] turns them into edits
  * against the current text.
  */
 object Fixes {
@@ -26,6 +26,7 @@ object Fixes {
     val rangeForm: Map<String, Any> = mapOf("fix" to "range-form")
     val swapRange: Map<String, Any> = mapOf("fix" to "swap-range")
     fun label(to: String): Map<String, Any> = mapOf("fix" to "label", "to" to to)
+    fun member(to: String): Map<String, Any> = mapOf("fix" to "member", "to" to to)
 
     /** The frame directive's new count for [total] registers in all: `.locals` counts the parameters out. */
     fun frame(frame: RegisterFrame, total: Int): Map<String, Any> =
@@ -84,6 +85,10 @@ class CodeActionProvider(private val index: WorkspaceIndex, private val diagnost
             "label" -> {
                 val to = fix["to"] as? String ?: return null
                 "Rename to $to" to listOf(TextEdit(diagnostic.range, to))
+            }
+            "member" -> {
+                val to = fix["to"] as? String ?: return null
+                "Use $to" to listOf(TextEdit(diagnostic.range, to))
             }
             else -> null
         }

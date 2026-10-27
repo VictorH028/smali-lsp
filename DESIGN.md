@@ -411,7 +411,13 @@ other is answered with an error naming it.
   are reported only when the class's package is one the workspace defines classes in (the
   file's own package included), and a call or field access whose kind contradicts the
   declaration the workspace holds (`invoke-static` on an instance method, `sget` on an instance
-  field, and the reverse) is an error naming the right opcode. A
+  field, and the reverse) is an error naming the right opcode. A method or field that neither
+  the owner nor any supertype in the workspace declares is a warning naming the closest declared
+  member, which its quick fix inserts; told only when every supertype up to `Object` is in the
+  workspace, since one outside may declare it, and a constructor is the owner's alone; a
+  platform-named class in the workspace is a stub, so its hierarchy counts as outside. The two
+  open-source fixtures produce none; the 76 K-file app has six call sites whose target exists
+  nowhere in the APK (library version skew), which the warning reports as it should. A
   decompiled app also references classes it does not ship, such as `org.xmlpull` from the
   platform or an optional library like Conscrypt behind a runtime check, and those are not
   errors; a hand-edited name inside the app's own packages is. The three fixtures went from
