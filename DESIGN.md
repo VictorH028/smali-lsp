@@ -41,13 +41,13 @@ main() → parseArgs → configureLogging → startLsp() | McpMode().run()
   | ProtonMail | 1.54 s (239 ms) | 0.99 s (216 ms) | 0.88 s (134 ms) |
   | 76 K-file app | 4.97 s (242 ms) | 4.63 s (224 ms) | 4.33 s (139 ms) |
 
-  The flags are the client's to pass (the README has the command): a running JVM can neither
-  change its JIT level nor map an archive, and a relaunch through a child JVM would keep a
-  second process for the session. C1-only code is 5 to 10 % slower on the heaviest requests.
-  The archive (`-XX:+AutoCreateSharedArchive`, JDK 19) is written at the first exit; the JVM
-  prints its archive warnings on stdout, which carries the protocol, so `-Xlog:disable` is
-  part of the command; and a replaced jar leaves an archive the JVM ignores and never
-  rebuilds, so the archive name carries the jar version.
+  The flag is the client's to pass (the README has the command): a running JVM cannot change
+  its JIT level, and a relaunch through a child JVM would keep a second process for the
+  session. C1-only code is 5 to 10 % slower on the heaviest requests. The archive
+  (`-XX:+AutoCreateSharedArchive`, JDK 19) is not recommended: its further 80 to 110 ms cost
+  three caveats (the JVM prints archive warnings on stdout unless `-Xlog:disable` is passed, a
+  replaced jar leaves an archive the JVM ignores and never rebuilds, and 15 MB per jar version
+  in a cache directory nothing cleans up).
 
 ### 1.2 LSP handshake
 

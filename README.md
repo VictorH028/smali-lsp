@@ -90,13 +90,11 @@ java -jar build/libs/smali-lsp-<version>.jar lsp
 
 Configure your editor's LSP client to launch this command for `.smali` files. The server indexes the workspace on startup and watches it for changes. Warnings go to stderr; `--verbose` and `--log-file <path>` give more.
 
-Two JVM flags cut the cold start by half or more: the C1-only JIT and a class-data-sharing archive the JVM writes on its first run (measurements in DESIGN.md):
+One JVM flag halves the cold start (the C1-only JIT; Mastodon is indexed 0.4 s after launch instead of 1.0 s, measurements in DESIGN.md):
 
 ```bash
-java -XX:TieredStopAtLevel=1 -XX:+IgnoreUnrecognizedVMOptions -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=<cache>/smali-lsp-<version>.jsa -Xlog:disable -Xlog:all=warning:stderr -jar smali-lsp-<version>.jar lsp
+java -XX:TieredStopAtLevel=1 -jar smali-lsp-<version>.jar lsp
 ```
-
-The archive name must carry the jar version (a replaced jar leaves an archive the JVM never rebuilds), `-Xlog:disable` keeps the JVM's own warnings off stdout, and the archive flags need JDK 19 (`-XX:+IgnoreUnrecognizedVMOptions` lets 17 start without them).
 
 <details>
 <summary>VS Code (via APKLab)</summary>
