@@ -51,6 +51,7 @@ class SemanticTokensTest {
         .method public static run(Ljava/lang/String;I)V
             .registers 4
             .param p0, "text"    # Ljava/lang/String;
+            .local v1, "name":Ljava/lang/String;
             const-string v0, "hi # not a comment"
             const/16 v1, 0x3e8   # a thousand
             if-eqz p1, :cond_0
@@ -101,6 +102,7 @@ class SemanticTokensTest {
         assertToken(".method public static run", "Ljava/lang/String;", TYPE, DEFAULT_LIBRARY); assertToken(".method public static run", "I", TYPE, 0, 0); assertToken(".method public static run", "V", TYPE)
         assertToken(".registers 4", ".registers", KEYWORD); assertToken(".registers 4", "4", NUMBER)
         assertToken(".param p0", "p0", PARAMETER); assertToken(".param p0", "\"text\"", STRING); assertToken(".param p0", "# Ljava/lang/String;", COMMENT)
+        assertToken(".local v1", ".local", KEYWORD); assertToken(".local v1", "v1", VARIABLE); assertToken(".local v1", "\"name\"", STRING); assertToken(".local v1", "Ljava/lang/String;", TYPE, DEFAULT_LIBRARY)
         assertToken("const-string v0", "const-string", KEYWORD); assertToken("const-string v0", "v0", VARIABLE); assertToken("const-string v0", "\"hi # not a comment\"", STRING)
         assertToken("const/16 v1", "0x3e8", NUMBER); assertToken("const/16 v1", "# a thousand", COMMENT)
         assertToken("if-eqz p1", "p1", PARAMETER); assertToken("if-eqz p1", ":cond_0", LABEL)

@@ -214,7 +214,7 @@ class SemanticTokensProvider(private val index: WorkspaceIndex) {
         var i = from
         while (i < to) {
             val c = line[i]
-            if (c == '"' || c == '\'') { i = skipQuoted(line, i, to); continue }
+            if (c == '"' || c == '\'') { i = skipQuoted(line, i, to); if (i < to && line[i] == ':') i++; continue }   // `"name":Ltype;` of a .local: the type is not a label
             if (c == ' ' || c == '\t' || c == ',' || c == '{' || c == '}' || c == '(' || c == ')' || c == '=') { i++; continue }
             if (c == '-' && i + 1 < to && line[i + 1] == '>') { i += 2; continue }
             if (c == '.' && i + 1 < to && line[i + 1] == '.') { i += 2; continue }
