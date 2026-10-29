@@ -15,7 +15,7 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 /**
  * The answers a diagnostic can carry in its `data`, for the diagnostics with exactly one right
  * fix: which opcode to use, that the line goes, that a call wants its `/range` form, what the
- * frame directive should say, which label was meant. [CodeActionProvider] turns them into edits
+ * frame directive should say, which label or member was meant. [CodeActionProvider] turns them into edits
  * against the current text.
  */
 object Fixes {
@@ -26,6 +26,7 @@ object Fixes {
     val rangeForm: Map<String, Any> = mapOf("fix" to "range-form")
     val swapRange: Map<String, Any> = mapOf("fix" to "swap-range")
     fun label(to: String): Map<String, Any> = mapOf("fix" to "label", "to" to to)
+    fun member(to: String): Map<String, Any> = mapOf("fix" to "member", "to" to to)
 
     /** The frame directive's new count for [total] registers in all: `.locals` counts the parameters out. */
     fun frame(frame: RegisterFrame, total: Int): Map<String, Any> =
@@ -85,6 +86,10 @@ class CodeActionProvider(private val index: WorkspaceIndex, private val diagnost
                 val to = fix["to"] as? String ?: return null
                 "Rename to $to" to listOf(TextEdit(diagnostic.range, to))
             }
+            "member" -> {
+                val to = fix["to"] as? String ?: return null
+                "Use $to" to listOf(TextEdit(diagnostic.range, to))
+            }
             else -> null
         }
     }
@@ -111,20 +116,9 @@ class CodeActionProvider(private val index: WorkspaceIndex, private val diagnost
     private fun frame(uri: String, lines: List<String>, lineNumber: Int, to: Int): Pair<String, List<TextEdit>>? {
         val method = index.findFileByUri(uri)?.methodAt(lineNumber) ?: return null
         for (l in method.startLine + 1..minOf(method.endLine, lines.size - 1)) {
-            val text = lines[l]
-            var i = 0
-            while (i < text.length && (text[i] == ' ' || text[i] == '\t')) i++
-            val directive = when {
-                text.startsWith(".registers", i) -> ".registers"
-                text.startsWith(".locals", i) -> ".locals"
-                else -> continue
-            }
-            var start = i + directive.length
-            while (start < text.length && (text[start] == ' ' || text[start] == '\t')) start++
-            var end = start
-            while (end < text.length && text[end].isDigit()) end++
-            if (end == start) return null
-            return "Set $directive $to" to listOf(TextEdit(Range(Position(l, start), Position(l, end)), to.toString()))
+            val directive = RegisterFrame.frameDirective(lines[l]) ?: continue
+            if (directive.countEnd == directive.countStart) return null
+            return "Set ${directive.name} $to" to listOf(TextEdit(Range(Position(l, directive.countStart), Position(l, directive.countEnd)), to.toString()))
         }
         return null
     }

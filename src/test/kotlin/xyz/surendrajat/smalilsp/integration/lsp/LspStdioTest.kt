@@ -87,6 +87,61 @@ class LspStdioTest {
         notify("textDocument/didOpen", mapOf("textDocument" to mapOf("uri" to file.toPath().toUri().toString(), "languageId" to "smali", "version" to 1, "text" to text)))
 
     @Test
+    fun `completion, lenses, rename, hierarchies, implementation, highlight and folding answer over stdio`() {
+        val (callee, caller) = writeWorkspace()
+        val calleeUri = callee.toPath().toUri().toString()
+        val callerUri = caller.toPath().toUri().toString()
+        LspStdioClient().use { client ->
+            client.initializeAndIndex(initParams(client))
+            client.open(caller, callerSmali)
+            val callLine = callerSmali.lines().indexOfFirst { "invoke-static" in it }
+            val callText = callerSmali.lines()[callLine]
+            val greetAt = client.at(callerUri, callLine, callText.indexOf("greet") + 2)
+
+            // completion after the arrow offers the member that is called
+            val completion = client.result("textDocument/completion", client.at(callerUri, callLine, callText.indexOf("->") + 2)).asJsonObject
+            assertTrue(completion.getAsJsonArray("items").any { it.asJsonObject["label"].asString == "greet(Ljava/lang/String;)V" }, completion.toString())
+
+            // a lens per declaration, resolved to its reference count
+            val lenses = client.result("textDocument/codeLens", mapOf("textDocument" to client.textDocument(calleeUri))).asJsonArray
+            val greetLens = lenses.map { it.asJsonObject }.single { it.getAsJsonObject("data")["memberName"].asString == "greet" }
+            assertEquals("1 reference", client.result("codeLens/resolve", greetLens).asJsonObject.getAsJsonObject("command")["title"].asString)
+
+            // rename: the placeholder, the edit in both files, and a name the assembler would not read as an error
+            assertEquals("greet", client.result("textDocument/prepareRename", greetAt).asJsonObject["placeholder"].asString)
+            val renamed = client.result("textDocument/rename", greetAt + mapOf("newName" to "hello")).asJsonObject.getAsJsonObject("changes")
+            assertEquals(setOf(calleeUri, callerUri), renamed.keySet())
+            val refused = client.request("textDocument/rename", greetAt + mapOf("newName" to "no good"))
+            assertEquals("'no good' is not a smali member name", refused.getAsJsonObject("error")["message"].asString)
+
+            // call hierarchy from the call: the callee, its one caller, and that caller's one callee
+            val item = client.result("textDocument/prepareCallHierarchy", greetAt).asJsonArray.single().asJsonObject
+            assertEquals("greet(Ljava/lang/String;)V", item["name"].asString)
+            val incoming = client.result("callHierarchy/incomingCalls", mapOf("item" to item)).asJsonArray
+            assertEquals(listOf("run()V"), incoming.map { it.asJsonObject.getAsJsonObject("from")["name"].asString })
+            val outgoing = client.result("callHierarchy/outgoingCalls", mapOf("item" to incoming.single().asJsonObject.getAsJsonObject("from"))).asJsonArray
+            assertEquals(listOf("greet(Ljava/lang/String;)V"), outgoing.map { it.asJsonObject.getAsJsonObject("to")["name"].asString })
+
+            // type hierarchy of the caller: Object is not listed as a supertype and nothing extends the class
+            val typeItem = client.result("textDocument/prepareTypeHierarchy", client.at(callerUri, 0, 16)).asJsonArray.single().asJsonObject
+            assertEquals("Caller", typeItem["name"].asString)
+            assertEquals(0, client.result("typeHierarchy/supertypes", mapOf("item" to typeItem)).asJsonArray.size())
+            assertEquals(0, client.result("typeHierarchy/subtypes", mapOf("item" to typeItem)).asJsonArray.size())
+
+            // the implementation of the called method is its declaration; a register is highlighted at its uses; the method folds
+            assertEquals(listOf(calleeUri), client.result("textDocument/implementation", greetAt).asJsonArray.map { it.asJsonObject["uri"].asString })
+            val highlights = client.result("textDocument/documentHighlight", client.at(callerUri, callLine, callText.indexOf("v0") + 1)).asJsonArray
+            assertEquals(2, highlights.size(), highlights.toString())
+            val folds = client.result("textDocument/foldingRange", mapOf("textDocument" to client.textDocument(callerUri))).asJsonArray
+            assertEquals(listOf(3 to 8), folds.map { it.asJsonObject["startLine"].asInt to it.asJsonObject["endLine"].asInt })
+
+            client.result("shutdown")
+            client.notify("exit")
+            assertEquals(0, client.waitForExit())
+        }
+    }
+
+    @Test
     fun `full workflow over stdio`() {
         val (callee, caller) = writeWorkspace()
         val calleeUri = callee.toPath().toUri().toString()

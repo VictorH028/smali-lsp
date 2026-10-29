@@ -5,8 +5,8 @@ reasons behind the main design choices. Numbers in this document come from three
 projects: Mastodon v2.13.4 (2,517 files), ProtonMail 7.11.5 (19,637 files) and a 76,532-file
 production app, measured on a 12-core Apple Silicon laptop with JDK 21.
 
-**Codebase**: 30 Kotlin source files (~7,400 lines), no grammar: the front end is a
-hand-written parser; 97 test files (~21,000 lines).
+**Codebase**: 48 Kotlin source files, no grammar: the front end is a hand-written parser;
+84 test files.
 
 ---
 
@@ -21,21 +21,40 @@ main() → parseArgs → configureLogging → startLsp() | McpMode().run()
 `java -jar smali-lsp.jar <lsp|mcp> [--verbose] [--log-file <path>]`
 
 `Main.kt` holds `main()`; `Cli.kt` the options, the usage text and the version resource;
-`Logging.kt` the logback setup; `SmaliLanguageServer.kt` the server.
+`Logging.kt` the SLF4J binding; `SmaliLanguageServer.kt` the server.
 
 - **lsp**: `SmaliLanguageServer` wired to stdin/stdout through LSP4J's `Launcher`; the JVM
   blocks in `startListening()`.
 - **mcp**: `McpMode` serves the MCP protocol over stdio with the MCP Kotlin SDK.
 - **Logging**: stdout carries the protocol, so everything the server says goes to stderr.
   WARN and above by default, INFO with `--verbose`, and `--log-file` additionally writes to
-  a file. LSP4J logs through `java.util.logging`, which `logging.properties` points at stderr.
+  a file, started afresh each run. The SLF4J binding is the server's own (`Logging.kt`, a
+  logger is a name and a level check): logback was 150 ms of a 200 ms start and 1.7 MB of the
+  jar. LSP4J logs through `java.util.logging`, which `logging.properties` points at stderr.
+- **Launch flags**: a cold start is bound by the JIT and by class loading, not by I/O.
+  Measured over stdio with the jar on JDK 21, process start to the end of indexing, the
+  initialize answer in parentheses:
+
+  | | default JVM | `-XX:TieredStopAtLevel=1` | plus a CDS archive |
+  |---|---|---|---|
+  | Mastodon | 0.97 s (238 ms) | 0.40 s (216 ms) | 0.29 s (134 ms) |
+  | ProtonMail | 1.54 s (239 ms) | 0.99 s (216 ms) | 0.88 s (134 ms) |
+  | 76 K-file app | 4.97 s (242 ms) | 4.63 s (224 ms) | 4.33 s (139 ms) |
+
+  The flag is the client's to pass (the README has the command): a running JVM cannot change
+  its JIT level, and a relaunch through a child JVM would keep a second process for the
+  session. C1-only code is 5 to 10 % slower on the heaviest requests. The archive
+  (`-XX:+AutoCreateSharedArchive`, JDK 19) is not recommended: its further 80 to 110 ms cost
+  three caveats (the JVM prints archive warnings on stdout unless `-Xlog:disable` is passed, a
+  replaced jar leaves an archive the JVM ignores and never rebuilds, and 15 MB per jar version
+  in a cache directory nothing cleans up).
 
 ### 1.2 LSP handshake
 
 | Step | What happens |
 |------|--------------|
 | `initialize` | Capabilities are answered at once. Workspace folders are taken from `workspaceFolders`, else `rootUri`, else `rootPath`. |
-| `initialized` | A `**/*.smali` file watcher is registered when the client supports dynamic registration. Indexing starts in the background, with `window/workDoneProgress` only for clients that advertise it; a client that rejects the progress token still gets indexed. |
+| `initialized` | Watchers for `**/*.smali` and `**/res/values/public.xml` are registered when the client supports dynamic registration. Indexing starts in the background, with `window/workDoneProgress` only for clients that advertise it; a client that rejects the progress token still gets indexed. |
 | `shutdown` / `exit` | `exit` returns 0 after a `shutdown` request and 1 otherwise, as the protocol asks; a client that closes the connection without `exit` gets the same statuses, so a dead editor leaves no server behind. MCP mode exits when its input ends (the SDK's transport stops reading at EOF but never closes the session). |
 
 Requests arriving during indexing are answered from whatever is indexed so far. Semantic
@@ -70,7 +89,8 @@ characters.
 The parser has no unbounded recursion: array dimensions are a loop, and annotations nested
 deeper than 64 levels are a syntax error, so no input can overflow the stack; 57,000 randomly
 damaged fixture files (inserted tokens, deletions, truncations, 5,000-bracket runs, 300-deep
-nests) parse without an exception on a 256 KB stack (`test-tmp/probes/Fuzz.java`).
+nests) parse without an exception on a 256 KB stack (a fuzzing probe kept outside the
+repository).
 
 **Errors and recovery.** A syntax error is reported on the offending token, with the token's
 length, and parsing resumes at the next line (at the offending token itself when it begins a
@@ -143,7 +163,7 @@ references, parameters, directive blocks and the `.implements` tokens are `Label
 `TypeRefList`, `ParameterList`, `BlockList` and `RangeList`, arrays behind the `List`
 interface that build their element on access; and string literals up to 64 characters are
 pooled. Every value read through the getters is unchanged, which a per-file hash of the whole
-AST over the three fixtures (`Fingerprint3`) checks after each step. The instruction objects
+AST over the three fixtures (a probe kept outside the repository) checks after each step. The instruction objects
 are now half of what is left; their line ints stay exact because the lexer skips newlines,
 so a hand-edited instruction may span lines.
 
@@ -332,16 +352,20 @@ Definitions and the declaration entries of references point at the name token, s
 lands on the name instead of selecting the whole declaration. Usage locations are name tokens
 too, so rename edits are the usage locations themselves. Labels are method-local: a `:cond_0` in another method is never touched.
 `<init>`/`<clinit>` are not renamed; neither are members of classes outside the workspace,
-whose declarations are unreachable.
+whose declarations are unreachable. A new name is checked by parsing it as the assembler would
+(letters, digits, `$`, `_`, `-` and anything beyond ASCII, a leading digit included); any
+other is answered with an error naming it.
 
 ### 5.2 Hierarchies, lenses, symbols
 
 - **Call hierarchy**: prepared from the called method when the caret is on a call, else the
   enclosing method; incoming calls are the member family's call sites grouped by containing
   method (found by binary search over the file's methods); outgoing calls from the method's
-  invoke instructions, resolved through the class hierarchy.
+  invoke instructions, resolved through the class hierarchy. A callee outside the workspace
+  has no declaration, so its item points at the first call.
 - **Type hierarchy**: prepared from any class reference under the caret; supertypes from the
-  class definition; subtypes from the subclass and implementor sets.
+  class definition; subtypes from the subclass and implementor sets. A supertype outside the
+  workspace is placed at the `.super` or `.implements` token that names it.
 - **Implementation**: the concrete declarations of a method's family other than the one under
   the caret; for a class, every subclass and implementor.
 - **Document highlight**: the references of the symbol restricted to its file; `iput`/`sput`
@@ -353,8 +377,10 @@ whose declarations are unreachable.
   `.class` line has one for the class's references and, when any, one for how many classes
   extend or implement it (a map lookup, so it comes resolved).
 - **Document symbols**: readable class name, constructors as `Constructor`, descriptor and
-  type as detail, name token as `selectionRange`.
-- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept. The
+  type as detail, name token as `selectionRange`; the class symbol's range runs to its last
+  member, so an editor can tell which symbol the cursor is in.
+- **Workspace symbols**: fuzzy match over classes, methods and fields, best 500 kept, each
+  at its name token. The
   scan runs in parallel chunks with per-chunk top sets merged at the end: 15 to 26 ms per
   query over the 76 K-file app's 660 K names.
 - **Completion**: what the caret's context can take, so the list is short and right. After
@@ -363,7 +389,8 @@ whose declarations are unreachable.
   and constructors for `invoke-direct`, instance methods otherwise, and when the braces are
   complete only the methods whose register count they hold (`this` and wide parameters counted
   as the frame counts them); fields by the static-ness and type the field opcode moves. Before
-  it, class names of the kind the operand needs: concrete for `new-instance`, an interface for
+  it, class names of the kind the operand needs, only where a class name can start (not the
+  `L` inside `onLayout` or a string): concrete for `new-instance`, an interface for
   `.implements` and an `invoke-interface` owner, non-interface for `.super`, a workspace
   throwable for `.catch`. After `:`, the method's labels; on `v` or `p` (or right after `{`),
   the frame's registers with `this`, the parameter type or the local slot; after `.`, the
@@ -372,7 +399,8 @@ whose declarations are unreachable.
   inserting its operand shape as tab stops when the client takes snippets. Class names are
   ranked by match kind, length and name; the list is scanned once keeping the best fifty, with
   the kind check only for a name that would make the fifty, so the worst case (an `L` alone on
-  the 76 K-file app) stays at a few milliseconds.
+  the 76 K-file app) stays at a few milliseconds. An item's edit replaces the whole token the
+  caret is in, so completing inside an existing name does not leave the old descriptor behind.
 - **Diagnostics**: syntax errors on the offending token and the file-local checks are
   published at once: a jump to an undefined label, a label defined twice, and the assembler
   checks (`AssemblerChecks`, driven by the opcode database's format table: register widths per
@@ -384,7 +412,13 @@ whose declarations are unreachable.
   are reported only when the class's package is one the workspace defines classes in (the
   file's own package included), and a call or field access whose kind contradicts the
   declaration the workspace holds (`invoke-static` on an instance method, `sget` on an instance
-  field, and the reverse) is an error naming the right opcode. A
+  field, and the reverse) is an error naming the right opcode. A method or field that neither
+  the owner nor any supertype in the workspace declares is a warning naming the closest declared
+  member, which its quick fix inserts; told only when every supertype up to `Object` is in the
+  workspace, since one outside may declare it, and a constructor is the owner's alone; a
+  platform-named class in the workspace is a stub, so its hierarchy counts as outside. The two
+  open-source fixtures produce none; the 76 K-file app has six call sites whose target exists
+  nowhere in the APK (library version skew), which the warning reports as it should. A
   decompiled app also references classes it does not ship, such as `org.xmlpull` from the
   platform or an optional library like Conscrypt behind a runtime check, and those are not
   errors; a hand-edited name inside the app's own packages is. The three fixtures went from
@@ -419,7 +453,8 @@ whose declarations are unreachable.
   the register each parameter arrives in, the owner, the reference count through the member
   family, member and subtype counts for a class. A class or member the workspace does not
   define links to its page on developer.android.com when it is one the site documents (java,
-  javax, android, androidx, dalvik, org.json, org.w3c, org.xml), else says it is not in the
+  javax, android, androidx, dalvik but not its hidden annotations, org.json, org.w3c, org.xml),
+  else says it is not in the
   workspace. Opcode hovers show the syntax as smali, the description, and the operands, byte
   and format on one line; types, labels and strings are one line each. Registers, resource
   ids and the `.registers` frame keep their own forms.
@@ -427,7 +462,9 @@ whose declarations are unreachable.
   member, type and label tokens from the AST's spans (the owner, name and descriptor types of
   each invoke and field access, declarations, `typeRefs`), the rest (directives, modifiers,
   opcodes, registers, literals, strings, comments) from a scan of the lines; where the two
-  overlap the AST wins. Never a re-parse. The last full result per open file is kept, with the
+  overlap the AST wins; the debug directives (`.line`, `.local`, `.param`, `.source`, ...) are
+  one comment token per line, so a theme dims them like the comments they amount to and the
+  code stands out. Never a re-parse. The last full result per open file is kept, with the
   text it came from, so `full/delta` answers with one edit (common prefix and suffix) and an
   unchanged buffer with none; `range` scans only its lines and walks only the methods that
   reach them, which is what an editor asks for first on a 180 K-line file (0.2 ms there, 68 ms
@@ -471,12 +508,12 @@ would return a tool result marked as an error.
 |------|---------|
 | `smali_index` | scan a directory |
 | `smali_find_definition` | a class by full or simple name; the declaration at a position; a member by `class_name` + `member_name` |
-| `smali_search_symbols` | fuzzy symbol search |
+| `smali_search_symbols` | fuzzy symbol search, at most `max_results` (default and cap 500) |
 | `smali_get_stats` | counts |
 | `smali_find_references` | by position (`uri`, `line`, `character`) or by name (`class_name`, optional `member_name` with `descriptor` or `field_type`); at most `max_results` (default 500, cap 5,000) with the full `total` |
 | `smali_hover` | same two forms |
 | `smali_diagnostics` | diagnostics for given content |
-| `smali_document_symbols` | a file's outline |
+| `smali_document_symbols` | a file's outline, by `uri` or `class_name` |
 | `smali_search_strings` | `const-string` literals, at most `max_results` (default 100, cap 5,000) |
 | `smali_call_graph` | callers and callees of a method |
 | `smali_xref_summary` | subclasses, implementors, callers, accessors, referencing classes |
@@ -526,7 +563,7 @@ only one index is built at a time.
 - Two files defining the same class (duplicate dex splits) keep both files indexed, but the
   class name maps to the last one indexed.
 - The 76 K-file app needs more than the 1 GB test fork, so the fixture-invariant test skips it
-  by default (`-Dsmali.invariants.maxFiles`).
+  by default; `-PintegrationHeap=4g -Dsmali.invariants.maxFiles=100000` takes it in.
 - Find-references on `Ljava/lang/Object;` answers with every owner, operand and descriptor
   use: 264 K locations on the 76 K-file app, serialized in well under a second but more than
   an editor can show. The LSP answer has no cap (a cancelled request stops early); the MCP
@@ -536,8 +573,10 @@ only one index is built at a time.
 
 ## 9. Verification
 
-- `*.unit.*` (532 tests), `*.regression.*` (8), `*.integration.*` (76 with the fixtures
-  present; one skip). Run the categories separately: each fork holds a parsed app.
+- Three test tasks, each with the heap its tests need, run one after another by `check`:
+  `test` (the unit category, 545 tests), `regressionTest` (8) and `integrationTest` (82 with
+  the fixtures present; one skip). CI runs them on JDK 17 and 25 and smoke-tests the jar with
+  an LSP and an MCP session.
 - `ParserCorpusTest`: every fixture file parses without syntax errors and without losing a
   `.method` or `.field`.
 - `RealApkInvariantsTest`: properties that hold for any apktool project (every invoke in the
@@ -547,7 +586,7 @@ only one index is built at a time.
 - Before a release, a scripted stdio session against a real app exercises every request at
   about a thousand positions (declarations, references, operands, labels, directives,
   opcodes), compares the answers with the previous build, and checks each definition,
-  reference line and rename edit against the source text; the same for the twelve MCP tools.
+  reference line and rename edit against the source text; the same for the fourteen MCP tools.
 - Parser and builder changes are checked with a per-file fingerprint of every AST in the corpus
   against the previous build; a builder change must leave every pre-existing field identical.
 
@@ -601,7 +640,7 @@ only one index is built at a time.
 | SmaliParser.kt | parser entry |
 | FrameworkResources.kt | the bundled `android.R` names |
 | ImplementationProvider.kt | implementations |
-| Logging.kt | logback setup |
+| Logging.kt | the SLF4J binding: stderr, the log file, levels |
 | Main.kt | entry point |
 | FoldingRangeProvider.kt | folding ranges |
 | StringLiterals.kt | the string operand under the caret |

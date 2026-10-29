@@ -7,6 +7,16 @@ import xyz.surendrajat.smalilsp.util.Types
 /** Document outline: the class with its methods and fields, name tokens as selection ranges. */
 class DocumentSymbolProvider {
     
+    /** From `.class` to the end of the last member: a parent's range must contain its children, or an editor cannot tell which symbol the cursor is in. */
+    private fun enclosingRange(file: SmaliFile): Range {
+        var endLine = file.classDefinition.endLine
+        var endChar = file.classDefinition.endChar
+        fun extend(line: Int, char: Int) { if (line > endLine || (line == endLine && char > endChar)) { endLine = line; endChar = char } }
+        for (method in file.methods) extend(method.endLine, method.endChar)
+        for (field in file.fields) extend(field.endLine, field.endChar)
+        return Range(Position(file.classDefinition.startLine, file.classDefinition.startChar), Position(endLine, endChar))
+    }
+
     /**
      * Provide document symbols for a parsed smali file.
      */
@@ -16,7 +26,7 @@ class DocumentSymbolProvider {
         // Class symbol
         classSymbol.name = Types.readableName(file.classDefinition.name)
         classSymbol.kind = SymbolKind.Class
-        classSymbol.range = file.classDefinition.range
+        classSymbol.range = enclosingRange(file)
         classSymbol.selectionRange = file.classDefinition.nameSpan.toRange()
         
         // Add detail (modifiers, superclass)

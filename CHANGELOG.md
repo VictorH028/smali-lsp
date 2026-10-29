@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.2.0] - 2026-10-27
+
+### Added
+
+- A call or field access naming a member that no class on the owner's workspace hierarchy declares is a warning, with the closest declared member as a quick fix
+- Debug directives (`.line`, `.local`, `.param`, `.source`, ...) are comment tokens, so a theme dims them like comments
+- MCP: `smali_document_symbols` takes a `class_name`, `smali_search_symbols` a `max_results`
+
+### Changed
+
+- Startup: logback replaced by the server's own SLF4J binding (the initialize answer 318 → 237 ms, the jar 9.2 → 8.3 MB); `-XX:TieredStopAtLevel=1` on the command line halves the cold start, see the README
+- Navigation answers: workspace symbols at their name tokens, the class symbol encloses its members, hierarchy items for classes outside the workspace point at the call or the `.super` token instead of a URI nothing can open
+- Rename answers a rejected name with the reason and accepts every name the parser does, a leading digit and non-ASCII included
+- Three test tasks (`test`, `regressionTest`, `integrationTest`) behind `check`; CI reports every category and smoke-tests the jar
+
+### Fixed
+
+- Completion: the edit replaces the whole token the caret is in (completing inside `->a:Ljava/lang/String;` kept the old descriptor), and a capital `L` inside a word or a string no longer opens the class list
+- Hover no longer links the runtime's hidden `dalvik.annotation` types; method handles and `invoke-custom` sites are not checked as calls; a `.local` type is coloured as a type
+
 ## [2.1.0] - 2026-10-24
 
 ### Added

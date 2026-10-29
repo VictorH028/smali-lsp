@@ -1,6 +1,7 @@
 package xyz.surendrajat.smalilsp.unit.data
 
 import xyz.surendrajat.smalilsp.data.DalvikOpcodeDatabase
+import xyz.surendrajat.smalilsp.parser.InstructionShapes
 import kotlin.test.*
 
 class DalvikOpcodeDatabaseTest {
@@ -47,6 +48,12 @@ class DalvikOpcodeDatabaseTest {
         assertTrue(names.contains("nop"))
         assertTrue(names.contains("invoke-virtual"))
         assertTrue(names.contains("const-method-type"))
+    }
+
+    @Test
+    fun `the documentation and the parser's operand table name the same 224 opcodes`() {
+        assertEquals(InstructionShapes.opcodes, DalvikOpcodeDatabase.allInstructionNames().toSet())
+        assertEquals(224, InstructionShapes.opcodes.size)
     }
 
     @Test

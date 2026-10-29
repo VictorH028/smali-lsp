@@ -140,6 +140,16 @@ class TypeHierarchyProviderTest {
     }
 
     @Test
+    fun `a supertype outside the workspace points at the token naming it, not at a URI nothing can open`() {
+        indexContent("file:///test/Task.smali", ".class public Lcom/example/Task;\n.super Landroid/app/Activity;\n.implements Ljava/lang/Runnable;")
+        val supertypes = provider.supertypes(provider.prepare("file:///test/Task.smali", Position(0, 10)).single())
+        assertEquals(listOf("Activity", "Runnable"), supertypes.map { it.name })
+        assertEquals(listOf("file:///test/Task.smali", "file:///test/Task.smali"), supertypes.map { it.uri })
+        assertEquals(Range(Position(1, 7), Position(1, 29)), supertypes[0].selectionRange, "the .super token")
+        assertEquals(Range(Position(2, 12), Position(2, 32)), supertypes[1].selectionRange, "the .implements token")
+    }
+
+    @Test
     fun `supertypes returns both parent and interfaces`() {
         val baseContent = """
             .class public Lcom/example/Base;

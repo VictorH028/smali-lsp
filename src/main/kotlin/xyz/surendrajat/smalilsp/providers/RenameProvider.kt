@@ -6,10 +6,14 @@ import org.eclipse.lsp4j.PrepareRenameResult
 import org.eclipse.lsp4j.Range
 import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j.WorkspaceEdit
+import org.eclipse.lsp4j.jsonrpc.ResponseErrorException
 import org.eclipse.lsp4j.jsonrpc.messages.Either
+import org.eclipse.lsp4j.jsonrpc.messages.ResponseError
+import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode
 import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
+import xyz.surendrajat.smalilsp.parser.SmaliParser
 
 /**
  * Rename of methods (every declaration in the family — overrides included — and every call
@@ -17,7 +21,9 @@ import xyz.surendrajat.smalilsp.index.WorkspaceIndex
  * including `.catch` blocks and switch tables). Classes are not renamed: that would mean
  * renaming the file and rewriting the package path everywhere. `<init>`/`<clinit>` are fixed
  * names. Members of classes that are not in the workspace are not renamed either, since their
- * declaration is unreachable and call sites would stop matching it.
+ * declaration is unreachable and call sites would stop matching it. A new name is checked by
+ * parsing it as the assembler would, and one it would not read is answered with an error naming
+ * it, so the editor can say why nothing happened.
  *
  * Every edit is a token span from the AST, so no file text is read.
  */
@@ -34,19 +40,17 @@ class RenameProvider(
         return Either.forRight(PrepareRenameResult(target.range, target.currentName))
     }
 
+    /** The edit, or null when nothing at the caret can be renamed; a name the assembler would not read is a [ResponseErrorException]. */
     fun rename(uri: String, position: Position, newName: String): WorkspaceEdit? {
         val file = index.findFileByUri(uri) ?: return null
         val target = resolveRenameTarget(file, uri, position) ?: return null
 
-        if (newName.isBlank()) return null
+        if (newName.isBlank()) throw invalid("A name is required")
         val valid = when (target) {
-            is RenameTarget.Method, is RenameTarget.Field -> isValidSmaliIdentifier(newName)
+            is RenameTarget.Method, is RenameTarget.Field -> isValidMemberName(newName)
             is RenameTarget.Label -> isValidLabelName(newName)
         }
-        if (!valid) {
-            logger.warn("Invalid new name: '$newName'")
-            return null
-        }
+        if (!valid) throw invalid("'$newName' is not a smali ${if (target is RenameTarget.Label) "label" else "member"} name")
 
         val edits = mutableMapOf<String, MutableList<TextEdit>>()
         when (target) {
@@ -117,14 +121,24 @@ class RenameProvider(
         getOrPut(uri) { mutableListOf() }.add(edit)
     }
 
+    private fun invalid(message: String) = ResponseErrorException(ResponseError(ResponseErrorCode.InvalidParams, message, null))
+
     companion object {
-        // Smali identifiers: letters, digits, underscores, dollar signs, hyphens; not starting with a digit
-        private val SMALI_IDENTIFIER_REGEX = Regex("^[a-zA-Z_\$][a-zA-Z0-9_\$-]*$")
+        /**
+         * Whether the parser reads [name] as a member name, which is what matters: letters, digits,
+         * `$`, `_`, `-` and anything beyond ASCII, a leading digit included, as the assembler and
+         * obfuscators have it. `<init>` and `<clinit>` are not names to rename to.
+         */
+        fun isValidMemberName(name: String): Boolean {
+            if (name.startsWith("<")) return false
+            val parsed = SmaliParser().parseWithErrors("file:///rename.smali", ".class Lx;\n.method public $name()V\n.end method\n")
+            return parsed.syntaxErrors.isEmpty() && parsed.smaliFile?.methods?.singleOrNull()?.name == name
+        }
 
-        // Labels: alphanumeric and underscores (the colon is written at the use site)
-        private val LABEL_NAME_REGEX = Regex("^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-        fun isValidSmaliIdentifier(name: String): Boolean = SMALI_IDENTIFIER_REGEX.matches(name)
-        fun isValidLabelName(name: String): Boolean = LABEL_NAME_REGEX.matches(name)
+        /** Whether the parser reads `:name` as a label definition. */
+        fun isValidLabelName(name: String): Boolean {
+            val parsed = SmaliParser().parseWithErrors("file:///rename.smali", ".class Lx;\n.method public a()V\n:$name\n.end method\n")
+            return parsed.syntaxErrors.isEmpty() && parsed.smaliFile?.methods?.singleOrNull()?.labels?.containsKey(name) == true
+        }
     }
 }

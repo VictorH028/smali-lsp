@@ -9,6 +9,7 @@ import xyz.surendrajat.smalilsp.core.FieldAccessInstruction
 import xyz.surendrajat.smalilsp.core.InvokeInstruction
 import xyz.surendrajat.smalilsp.core.JumpInstruction
 import xyz.surendrajat.smalilsp.core.SmaliFile
+import xyz.surendrajat.smalilsp.core.Span
 import xyz.surendrajat.smalilsp.core.TypeInstruction
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
 import xyz.surendrajat.smalilsp.parser.SmaliParser
@@ -17,7 +18,8 @@ import org.slf4j.LoggerFactory
 
 /**
  * Diagnostics: syntax errors from the parser, label and assembler checks, and, once the index can
- * tell, undefined classes and calls or field accesses whose kind contradicts the member's declaration.
+ * tell, undefined classes, members no class on the owner's workspace hierarchy declares, and calls
+ * or field accesses whose kind contradicts the member's declaration.
  */
 class DiagnosticProvider(
     private val parser: SmaliParser,
@@ -61,7 +63,7 @@ class DiagnosticProvider(
         for (method in file.methods) {
             for (ref in method.labelRefs) {
                 if (ref.name !in method.labels) {
-                    val fix = closestLabel(ref.name, method.labels.keys)?.let { Fixes.label(":$it") }
+                    val fix = closestName(ref.name, method.labels.keys)?.let { Fixes.label(":$it") }
                     diagnostics.add(createDiagnostic(ref.span.toRange(), "Label ':${ref.name}' is not defined in this method", DiagnosticSeverity.Error, "undefined-label", fix))
                 }
             }
@@ -127,8 +129,8 @@ class DiagnosticProvider(
                 val className: String
                 val range: Range
                 when (instruction) {
-                    is InvokeInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range; invokeKind(instruction)?.let(diagnostics::add) }
-                    is FieldAccessInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range; fieldAccessKind(instruction)?.let(diagnostics::add) }
+                    is InvokeInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range; checkCall(instruction, file)?.let(diagnostics::add) }
+                    is FieldAccessInstruction -> { className = instruction.className; range = instruction.ownerSpan?.toRange() ?: instruction.range; checkFieldAccess(instruction, file)?.let(diagnostics::add) }
                     is TypeInstruction -> { className = instruction.className; range = instruction.typeSpan?.toRange() ?: instruction.range }
                     is JumpInstruction, is ConstStringInstruction -> continue   // labels are checked above; string literals need nothing
                 }
@@ -157,14 +159,17 @@ class DiagnosticProvider(
     }
         
     /**
-     * `invoke-static` on an instance method, or an instance call on a static one, decidable when
-     * a workspace class declares the method. The fix named is the call the member needs:
-     * `invoke-direct` for a private method or a constructor, `invoke-interface` for an
-     * interface's, `invoke-virtual` otherwise, keeping the `/range` form.
+     * A call: `invoke-static` on an instance method, or an instance call on a static one, decidable
+     * when a workspace class declares the method (the fix named is the call the member needs:
+     * `invoke-direct` for a private method or a constructor, `invoke-interface` for an interface's,
+     * `invoke-virtual` otherwise, keeping the `/range` form); else the method it names, when no
+     * class on the owner's workspace hierarchy declares it.
      */
-    private fun invokeKind(call: InvokeInstruction): Diagnostic? {
+    private fun checkCall(call: InvokeInstruction, file: SmaliFile): Diagnostic? {
+        // a method handle or an invoke-custom site names a method without calling it this way
+        if (!call.opcode.startsWith("invoke-") || call.opcode.startsWith("invoke-custom") || call.opcode.startsWith("invoke-polymorphic")) return null
+        val target = index.resolveMethod(call.className, call.methodName, call.descriptor) ?: return undefinedMethod(call, file)
         val static = call.opcode.startsWith("invoke-static")
-        val target = index.resolveMethod(call.className, call.methodName, call.descriptor) ?: return null
         if (("static" in target.method.modifiers) == static) return null
         val use = when {
             !static -> "invoke-static"
@@ -176,10 +181,11 @@ class DiagnosticProvider(
         return createDiagnostic(opcodeRange(call.startLine, call.startChar, call.opcode), "${call.opcode} calls ${call.methodName}${call.descriptor}, $member; use $use", DiagnosticSeverity.Error, "invoke-kind", Fixes.opcode(use))
     }
 
-    /** `sget`/`sput` on an instance field or `iget`/`iput` on a static one, decidable when a workspace class declares the field. */
-    private fun fieldAccessKind(access: FieldAccessInstruction): Diagnostic? {
+    /** A field access: `sget`/`sput` on an instance field or `iget`/`iput` on a static one, decidable when a workspace class declares the field; else the field it names, when none on the owner's workspace hierarchy does. */
+    private fun checkFieldAccess(access: FieldAccessInstruction, file: SmaliFile): Diagnostic? {
+        if (access.opcode == "const-method-handle") return null   // a field handle, not an access
+        val target = index.resolveField(access.className, access.fieldName, access.fieldType) ?: return undefinedField(access, file)
         val static = access.opcode[0] == 's'
-        val target = index.resolveField(access.className, access.fieldName, access.fieldType) ?: return null
         if (("static" in target.field.modifiers) == static) return null
         val use = (if (static) "i" else "s") + access.opcode.substring(1)
         val member = if (static) "an instance field" else "a static field"
@@ -189,15 +195,80 @@ class DiagnosticProvider(
     /** An instruction's range starts at its opcode. */
     private fun opcodeRange(line: Int, start: Int, opcode: String) = Range(Position(line, start), Position(line, start + opcode.length))
 
-    /** The label within two edits of [name], for a typo fix; null when none is that close or two are equally close. */
-    private fun closestLabel(name: String, labels: Collection<String>): String? {
+    /**
+     * A call to a method that neither the owner nor any supertype declares, a hand-edit typo the
+     * assembler accepts and the runtime rejects. Told only when the owner is a workspace class and
+     * every supertype up to `Object` is too, since one outside may declare it; a constructor is the
+     * owner's alone. The closest declared method, by descriptor or by name, is the quick fix.
+     */
+    private fun undefinedMethod(call: InvokeInstruction, file: SmaliFile): Diagnostic? {
+        val wanted = call.methodName + call.descriptor
+        val walked = lookup(call.className, file, ownerOnly = call.methodName.startsWith("<"), inObject = wanted in OBJECT_METHODS) { f -> f.methods.any { it.name == call.methodName && it.descriptor == call.descriptor } }
+            ?: return null
+        val suggestion = closest(call.methodName, call.descriptor, walked.flatMap { f -> f.methods.map { it.name to it.descriptor } })?.let { it.first + it.second }
+        return undefinedMember("Method", wanted, call.className, call.nameSpan, call.range, suggestion)
+    }
+
+    /** The field counterpart of [undefinedMethod]. */
+    private fun undefinedField(access: FieldAccessInstruction, file: SmaliFile): Diagnostic? {
+        val wanted = access.fieldName + ":" + access.fieldType
+        val walked = lookup(access.className, file, ownerOnly = false, inObject = false) { f -> f.fields.any { it.name == access.fieldName && it.type == access.fieldType } }
+            ?: return null
+        val suggestion = closest(access.fieldName, access.fieldType, walked.flatMap { f -> f.fields.map { it.name to it.type } })?.let { it.first + ":" + it.second }
+        return undefinedMember("Field", wanted, access.className, access.nameSpan, access.range, suggestion)
+    }
+
+    private fun undefinedMember(kind: String, wanted: String, owner: String, nameSpan: Span?, instruction: Range, suggestion: String?): Diagnostic {
+        val range = nameSpan?.let { Range(Position(it.line, it.start), Position(it.line, it.start + wanted.length)) } ?: instruction
+        val message = "$kind $wanted is not declared by $owner or a supertype in the workspace" + (suggestion?.let { "; the closest is $it" } ?: "")
+        return createDiagnostic(range, message, DiagnosticSeverity.Warning, "undefined-member", if (suggestion != null && nameSpan != null) Fixes.member(suggestion) else null)
+    }
+
+    /**
+     * The workspace classes on [owner]'s hierarchy when none of them [declares] the member and the
+     * hierarchy stays in the workspace up to `Object` ([inObject] says whether `Object` declares
+     * it); null when the member is declared, when [owner] is an array or outside the workspace, or
+     * when a supertype is, since it may declare the member. The file being checked stands in for
+     * its own class, which the index may hold in an older form.
+     */
+    private fun lookup(owner: String, file: SmaliFile, ownerOnly: Boolean, inObject: Boolean, declares: (SmaliFile) -> Boolean): List<SmaliFile>? {
+        if (owner != file.classDefinition.name && !index.hasClass(owner)) return null
+        val walked = ArrayList<SmaliFile>()
+        val seen = HashSet<String>()
+        val pending = ArrayDeque<String>().apply { add(owner) }
+        while (pending.isNotEmpty()) {
+            val name = pending.removeFirst()
+            if (!seen.add(name)) continue
+            if (name == "Ljava/lang/Object;") { if (inObject) return null; continue }
+            // a platform-named class in the workspace is a stub or a desugared copy: the runtime's own declares more
+            if (Types.isSdkClass(name)) return null
+            val f = (if (name == file.classDefinition.name) file else index.findClass(name)) ?: return null
+            if (declares(f)) return null
+            walked.add(f)
+            if (ownerOnly) break
+            f.classDefinition.superClass?.let(pending::add)
+            pending.addAll(f.classDefinition.interfaces)
+        }
+        return walked
+    }
+
+    /** The declared member closest to the one named: the same name with another descriptor, else a name within two edits with the same descriptor; null when none or when two are as close. */
+    private fun closest(name: String, descriptor: String, declared: List<Pair<String, String>>): Pair<String, String>? {
+        val sameName = declared.filter { it.first == name }.distinct()
+        if (sameName.isNotEmpty()) return sameName.singleOrNull()
+        val sameDescriptor = declared.filter { it.second == descriptor }.distinct()
+        return closestName(name, sameDescriptor.map { it.first })?.let { found -> sameDescriptor.first { it.first == found } }
+    }
+
+    /** The name within two edits of [name], for a typo fix; null when none is that close or two are equally close. */
+    private fun closestName(name: String, names: Collection<String>): String? {
         var best: String? = null
         var bestDistance = 3
         var tie = false
-        for (label in labels) {
-            if (kotlin.math.abs(label.length - name.length) > 2) continue
-            val d = editDistance(name, label)
-            if (d < bestDistance) { best = label; bestDistance = d; tie = false } else if (d == bestDistance) tie = true
+        for (candidate in names) {
+            if (kotlin.math.abs(candidate.length - name.length) > 2) continue
+            val d = editDistance(name, candidate)
+            if (d < bestDistance) { best = candidate; bestDistance = d; tie = false } else if (d == bestDistance) tie = true
         }
         return if (tie) null else best
     }
@@ -235,4 +306,9 @@ class DiagnosticProvider(
 
     private fun createDiagnostic(range: Range, message: String, severity: DiagnosticSeverity, code: String, fix: Map<String, Any>? = null): Diagnostic =
         Diagnostic(range, message, severity, "smali-lsp", code).apply { if (fix != null) data = fix }
+
+    private companion object {
+        /** What `java.lang.Object` declares, the one class every hierarchy ends in without being in the workspace. */
+        val OBJECT_METHODS = setOf("<init>()V", "equals(Ljava/lang/Object;)Z", "hashCode()I", "toString()Ljava/lang/String;", "getClass()Ljava/lang/Class;", "clone()Ljava/lang/Object;", "finalize()V", "notify()V", "notifyAll()V", "wait()V", "wait(J)V", "wait(JI)V")
+    }
 }

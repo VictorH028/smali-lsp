@@ -5,7 +5,6 @@ import org.eclipse.lsp4j.Position
 import org.slf4j.LoggerFactory
 import xyz.surendrajat.smalilsp.core.*
 import xyz.surendrajat.smalilsp.index.WorkspaceIndex
-import xyz.surendrajat.smalilsp.util.Types
 
 /**
  * Go to definition. The symbol under the caret comes from the AST ([SmaliFile.symbolAt]);
@@ -47,7 +46,7 @@ class DefinitionProvider(
      * and is the code that runs. Classes that are not indexed have no source to navigate to.
      */
     private fun classDefinition(className: String): List<Location> {
-        val file = workspaceIndex.findClass(Types.elementClass(className)) ?: return emptyList()
+        val file = workspaceIndex.findClass(className) ?: return emptyList()
         return listOf(Location(file.uri, file.classDefinition.nameSpan.toRange()))
     }
 

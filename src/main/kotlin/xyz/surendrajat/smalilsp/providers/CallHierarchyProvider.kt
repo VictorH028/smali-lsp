@@ -76,7 +76,7 @@ class CallHierarchyProvider(
         for ((target, callSites) in callsByTarget) {
             val (className, methodName, descriptor) = target
             val toItem = index.resolveMethod(className, methodName, descriptor)?.let { createItem(it.file, it.method) }
-                ?: createExternalItem(className, methodName, descriptor)
+                ?: externalItem(className, methodName, descriptor, file, callSites.first())
 
             val call = CallHierarchyOutgoingCall()
             call.to = toItem
@@ -98,16 +98,15 @@ class CallHierarchyProvider(
         return item
     }
 
-    private fun createExternalItem(className: String, methodName: String, descriptor: String): CallHierarchyItem {
+    /** A method outside the workspace has no declaration to open: the item points at the first call, which is what there is to see of it. */
+    private fun externalItem(className: String, methodName: String, descriptor: String, caller: SmaliFile, call: InvokeInstruction): CallHierarchyItem {
         val item = CallHierarchyItem()
         item.name = "$methodName$descriptor"
         item.kind = SymbolKind.Method
         item.detail = className
-        // External methods have no real URI — use the class name as identifier
-        val uri = index.getUri(className) ?: "external:$className"
-        item.uri = uri
-        item.range = Range(Position(0, 0), Position(0, 0))
-        item.selectionRange = Range(Position(0, 0), Position(0, 0))
+        item.uri = caller.uri
+        item.range = call.range
+        item.selectionRange = call.nameSpan?.toRange() ?: call.range
         return item
     }
 

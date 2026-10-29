@@ -15,12 +15,11 @@ open class TextToken(val line: String, val start: Int, val end: Int) {
 class RegisterToken(line: String, start: Int, end: Int, val isParameter: Boolean, val number: Int) : TextToken(line, start, end)
 
 /**
- * An instruction line decoded the way an assembler reads it: the opcode, every register operand
- * with its position, whether the registers form a `{vA .. vB}` range, and the literal operand if
- * the last operand is a number. The AST keeps only navigable instructions and no registers, so
- * register-level features read the text.
+ * An instruction line decoded the way an assembler reads it: the opcode and every register
+ * operand with its position, and whether the registers form a `{vA .. vB}` range. The AST keeps
+ * only navigable instructions and no registers, so register-level features read the text.
  */
-class DecodedInstruction(val line: String, val opcodeStart: Int, val opcodeEnd: Int, val registers: List<RegisterToken>, val isRange: Boolean, val literal: TextToken?) {
+class DecodedInstruction(val line: String, val opcodeStart: Int, val opcodeEnd: Int, val registers: List<RegisterToken>, val isRange: Boolean) {
     val opcode: String get() = line.substring(opcodeStart, opcodeEnd)
 
     /** The register token under [character], if any. */
@@ -67,7 +66,7 @@ class InstructionScanner {
 
     /** The scanned line as an instruction object. */
     fun toInstruction(): DecodedInstruction =
-        DecodedInstruction(line, opcodeStart, opcodeEnd, List(registerCount) { register(it) }, isRange, literal)
+        DecodedInstruction(line, opcodeStart, opcodeEnd, List(registerCount) { register(it) }, isRange)
 
     /**
      * Scans [line]; false for a blank line, a comment, a directive or a label, after which the
@@ -169,6 +168,22 @@ object InstructionText {
         }
         return if (negative) -value else value
     }
+
+    /** The `move-result` form a call returning [type] needs; null for `V`. */
+    fun moveResultFor(type: String): String? = when (type.firstOrNull()) {
+        null, 'V' -> null
+        'J', 'D' -> "move-result-wide"
+        'L', '[' -> "move-result-object"
+        else -> "move-result"
+    }
+
+    /** The `return` form of a method returning [type]. */
+    fun returnFor(type: String): String = when (type.firstOrNull()) {
+        null, 'V' -> "return-void"
+        'J', 'D' -> "return-wide"
+        'L', '[' -> "return-object"
+        else -> "return"
+    }
 }
 
 /**
@@ -194,23 +209,64 @@ class RegisterFrame(val total: Int, val parameters: Int, val directive: String) 
         fun parameterSlots(method: MethodDefinition): Int =
             (if ("static" in method.modifiers) 0 else 1) + method.parameters.sumOf { slots(it.type) }
 
+        /** The register slots the parameters of a descriptor take, read from its text: two for `J` and `D`, one for anything else, arrays included. */
+        fun parameterSlots(descriptor: String): Int {
+            var i = 1
+            var slots = 0
+            while (i < descriptor.length && descriptor[i] != ')') {
+                var c = descriptor[i]
+                var array = false
+                while (c == '[') {
+                    array = true
+                    if (++i >= descriptor.length) return slots
+                    c = descriptor[i]
+                }
+                if (c == 'L') {
+                    val semi = descriptor.indexOf(';', i)
+                    if (semi < 0) return slots
+                    i = semi + 1
+                } else i++
+                slots += if (!array && (c == 'J' || c == 'D')) 2 else 1
+            }
+            return slots
+        }
+
         /** The frame declared by the `.registers` or `.locals` directive in [method]'s lines, or null when there is none. */
         fun of(method: MethodDefinition, lines: List<String>): RegisterFrame? {
             val parameters = parameterSlots(method)
-            for (lineNumber in method.range.start.line..minOf(method.range.end.line, lines.size - 1)) {
-                val line = lines[lineNumber]
-                var i = 0
-                while (i < line.length && (line[i] == ' ' || line[i] == '\t')) i++
-                if (i >= line.length || line[i] != '.') continue
-                val directive = when {
-                    line.startsWith(".registers ", i) -> ".registers"
-                    line.startsWith(".locals ", i) -> ".locals"
-                    else -> continue
-                }
-                val count = line.substring(i + directive.length).trim().toIntOrNull() ?: continue
-                return RegisterFrame(if (directive == ".locals") count + parameters else count, parameters, directive)
+            for (lineNumber in method.startLine..minOf(method.endLine, lines.size - 1)) {
+                val directive = frameDirective(lines[lineNumber]) ?: continue
+                val count = directive.count ?: continue
+                return RegisterFrame(if (directive.name == ".locals") count + parameters else count, parameters, directive.name)
             }
             return null
         }
+
+        /**
+         * The `.registers` or `.locals` directive on [line], indented or not, a tab or spaces before
+         * the count, a comment after it; null for any other line. The one reader of the directive:
+         * the frame, the assembler checks, the frame quick fix and the frame hover all go through it.
+         */
+        fun frameDirective(line: String): FrameDirective? {
+            var i = 0
+            while (i < line.length && (line[i] == ' ' || line[i] == '\t')) i++
+            val name = when {
+                line.startsWith(".registers", i) -> ".registers"
+                line.startsWith(".locals", i) -> ".locals"
+                else -> return null
+            }
+            var start = i + name.length
+            if (start < line.length && line[start] != ' ' && line[start] != '\t' && line[start] != '\r') return null
+            while (start < line.length && (line[start] == ' ' || line[start] == '\t')) start++
+            var end = start
+            while (end < line.length && line[end] != ' ' && line[end] != '\t' && line[end] != '\r' && line[end] != '#') end++
+            return FrameDirective(name, i, start, end, line)
+        }
     }
+}
+
+/** A `.registers` or `.locals` line: the directive's column and the count's columns, empty when there is none. */
+class FrameDirective(val name: String, val start: Int, val countStart: Int, val countEnd: Int, private val line: String) {
+    /** The declared count, or null when what follows the directive is not a number. */
+    val count: Int? get() = if (countEnd > countStart) InstructionText.literalValue(line.substring(countStart, countEnd))?.toInt() else null
 }

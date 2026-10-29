@@ -46,6 +46,15 @@ class CodeActionProviderTest {
     private fun List<Pair<String, String>>.only(title: String): String = single { it.first == title }.second
 
     @Test
+    fun `a member nothing declares is replaced by the closest one`() {
+        index.openSource("file:///Worker.smali", ".class public Lcom/Worker;\n.super Ljava/lang/Object;\n\n.field public count:I\n\n.method public tick(I)V\n    .registers 2\n    return-void\n.end method\n")
+        val fixes = fixes(source("    .registers 6\n    invoke-virtual {p0, v0}, Lcom/Worker;->tick(J)V\n    iget v0, p0, Lcom/Worker;->cont:I\n    return-void"))
+        assertEquals(listOf("Use tick(I)V", "Use count:I"), fixes.map { it.first })
+        assertEquals(source("    .registers 6\n    invoke-virtual {p0, v0}, Lcom/Worker;->tick(I)V\n    iget v0, p0, Lcom/Worker;->cont:I\n    return-void"), fixes.only("Use tick(I)V"))
+        assertEquals(source("    .registers 6\n    invoke-virtual {p0, v0}, Lcom/Worker;->tick(J)V\n    iget v0, p0, Lcom/Worker;->count:I\n    return-void"), fixes.only("Use count:I"))
+    }
+
+    @Test
     fun `the wider const and the frame count`() {
         val fixes = fixes(source("    .registers 5\n    const/4 v5, 0x10\n    return-void"))
         assertEquals(listOf("Set .registers 6", "Use const/16"), fixes.map { it.first })

@@ -18,7 +18,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 - **Rename** — rename methods, fields, and labels across workspace
 - **Document Symbols** — class outline with methods and fields
 - **Workspace Symbols** — fuzzy search across the entire codebase
-- **Diagnostics** — syntax errors, labels, undefined classes in the app's own packages, and what the assembler or verifier would reject after a hand edit
+- **Diagnostics** — syntax errors, labels, undefined classes in the app's own packages, members no class on the owner's hierarchy declares, and what the assembler or verifier would reject after a hand edit
 - **Quick fixes** — one code action per diagnostic with a single right answer
 - **Formatting** — baksmali's layout for the document or a range; blank lines, strings and comments stay as written
 - **Implementations, document highlight, folding** — overrides and implementors, occurrences of a symbol or register in its file, foldable blocks
@@ -32,7 +32,7 @@ A Language Server Protocol (LSP) server with built-in MCP server for [Smali](htt
 | --- | --- |
 | `initialize` / `initialized` / `shutdown` / `exit` | workspace folders or `rootUri`; indexing after `initialized`, with progress |
 | `textDocument/didOpen` `didChange` `didClose` | full sync; the buffer while open, the disk version after close |
-| `textDocument/publishDiagnostics` | syntax errors at once, undefined classes once indexing has finished |
+| `textDocument/publishDiagnostics` | syntax errors at once, undefined classes and members once indexing has finished |
 | `textDocument/codeAction` | quick fixes for the diagnostics on the requested lines |
 | `textDocument/formatting` · `rangeFormatting` | baksmali's layout, one edit per changed line |
 | `textDocument/definition` `hover` `references` `implementation` `documentHighlight` | references follow overrides and calls through subclasses |
@@ -62,12 +62,12 @@ Built-in [MCP](https://modelcontextprotocol.io) server for full semantic underst
 | ------------------------ | -------------------------------------------------------------------------------- |
 | `smali_index`            | Index a directory of smali files                                                 |
 | `smali_find_definition`  | Go to definition, by position or by class and member name                        |
-| `smali_search_symbols`   | Fuzzy search across classes, methods, fields                                     |
+| `smali_search_symbols`   | Fuzzy search across classes, methods, fields, at most `max_results`              |
 | `smali_get_stats`        | Index statistics (class/method/field/string counts)                              |
 | `smali_find_references`  | Find all references to a symbol, by position or by name (bounded)               |
 | `smali_hover`            | Get hover info (signatures, types, class details)                                |
 | `smali_diagnostics`      | Compute diagnostics for a file                                                   |
-| `smali_document_symbols` | Get document outline (classes, methods, fields)                                  |
+| `smali_document_symbols` | Get document outline (classes, methods, fields), by `uri` or `class_name`        |
 | `smali_search_strings`   | Search const-string literals by substring                                        |
 | `smali_call_graph`       | Incoming/outgoing call graph for a method                                        |
 | `smali_xref_summary`     | Full cross-reference report (subclasses, implementors, callers, field accessors) |
@@ -89,6 +89,12 @@ java -jar build/libs/smali-lsp-<version>.jar lsp
 ```
 
 Configure your editor's LSP client to launch this command for `.smali` files. The server indexes the workspace on startup and watches it for changes. Warnings go to stderr; `--verbose` and `--log-file <path>` give more.
+
+One JVM flag halves the cold start (the C1-only JIT; Mastodon is indexed 0.4 s after launch instead of 1.0 s, measurements in DESIGN.md):
+
+```bash
+java -XX:TieredStopAtLevel=1 -jar smali-lsp-<version>.jar lsp
+```
 
 <details>
 <summary>VS Code (via APKLab)</summary>
@@ -212,15 +218,9 @@ See [DESIGN.md](DESIGN.md) for the measured costs and the reasoning.
 
 ## Running Tests
 
-Run the categories separately; each test fork holds a parsed app in memory:
+`./gradlew check` runs the three categories as three tasks, one after another: `test` (unit), `regressionTest` and `integrationTest`.
 
-```bash
-./gradlew test --tests "*.unit.*"
-./gradlew test --tests "*.regression.*"
-./gradlew test --tests "*.integration.*"
-```
-
-The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise.
+The integration category uses apktool projects under `test-data/` when present (public app releases work; the directory is gitignored) and skips those checks otherwise; `-PintegrationHeap=4g -Dsmali.invariants.maxFiles=100000` takes in a larger project.
 
 ## License
 

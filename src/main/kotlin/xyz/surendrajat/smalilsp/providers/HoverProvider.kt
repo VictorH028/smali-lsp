@@ -48,8 +48,8 @@ class HoverProvider(
 
     /** On a `.registers` or `.locals` line: the method's frame, with the registers the locals, `this` and each parameter occupy. */
     private fun hoverForFrame(uri: String, file: SmaliFile, position: Position): Hover? {
-        val line = workspaceIndex.getLineContent(uri, position.line)?.trimStart() ?: return null
-        if (!line.startsWith(".registers") && !line.startsWith(".locals")) return null
+        val line = workspaceIndex.getLineContent(uri, position.line) ?: return null
+        if (RegisterFrame.frameDirective(line) == null) return null
         val method = file.methodAt(position.line) ?: return null
         val lines = workspaceIndex.getLines(uri) ?: return null
         return Registers.frameHover(method, file.classDefinition.name, lines)
@@ -130,17 +130,12 @@ class HoverProvider(
         return markdown(code(declaration) + "\n`${short(field.type)} ${field.name}` in `${Types.readableName(className)}` · ${count(usages, "reference")}")
     }
 
-    /** Opcode documentation when the caret is on the first word of an instruction line. */
+    /** Opcode documentation when the caret is on, or right after, the opcode of an instruction line. */
     private fun hoverForOpcodeKeyword(uri: String, position: Position): Hover? {
-        val lineContent = workspaceIndex.getLineContent(uri, position.line) ?: return null
-        val trimmed = lineContent.trimStart()
-        if (trimmed.isEmpty() || trimmed.startsWith(".") || trimmed.startsWith("#") || trimmed.startsWith(":")) {
-            return null
-        }
-        val opcodeStart = lineContent.length - trimmed.length
-        val opcodeEnd = opcodeStart + trimmed.indexOf(' ').let { if (it == -1) trimmed.length else it }
-        if (position.character < opcodeStart || position.character >= opcodeEnd) return null
-        val info = DalvikOpcodeDatabase.lookup(lineContent.substring(opcodeStart, opcodeEnd)) ?: return null
+        val line = workspaceIndex.getLineContent(uri, position.line) ?: return null
+        val scanner = InstructionScanner()
+        if (!scanner.scan(line) || position.character !in scanner.opcodeStart..scanner.opcodeEnd) return null
+        val info = DalvikOpcodeDatabase.lookup(scanner.opcode) ?: return null
         return markdown(info.toMarkdown())
     }
 
@@ -180,6 +175,8 @@ class HoverProvider(
     /** `developer.android.com/reference/java/lang/String` for the platform and AndroidX classes it documents; null for arrays, primitives and everything else. */
     private fun referenceUrl(className: String): String? {
         if (!className.startsWith("L") || DOCUMENTED.none { className.startsWith(it) }) return null
+        // the runtime's own annotations (Signature, MemberClasses, ...) are hidden API without a page; the optimization ones are documented
+        if (className.startsWith("Ldalvik/annotation/") && !className.startsWith("Ldalvik/annotation/optimization/")) return null
         return "https://developer.android.com/reference/" + className.substring(1, className.length - 1).replace('$', '.')
     }
 
