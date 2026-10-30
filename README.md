@@ -1,6 +1,16 @@
-# smali-lsp
+<div align="center">
 
-A Language Server Protocol (LSP) server with built-in MCP server for [Smali](https://github.com/google/smali) — the bytecode language of Android apps.
+```text
+  ____                  _ _       _           
+ / ___| _ __ ___   __ _| (_)     | |___ _ __  
+ \___ \| '_ ` _ \ / _` | | |_____| / __| '_ \ 
+  ___) | | | | | | (_| | | |_____| \__ \ |_) |
+ |____/|_| |_| |_|\__,_|_|_|     |_|___/ .__/ 
+                                       |_|
+```
+</div>
+
+> A Language Server Protocol (LSP) server with built-in MCP server for [Smali](https://github.com/google/smali) — the bytecode language of Android apps.
 
 ## Features
 
@@ -203,10 +213,26 @@ Output: `build/libs/smali-lsp-<version>.jar`. `./gradlew installApklab` copies i
 
 ## Architecture
 
-```
-SmaliTextParser (hand-written) → SmaliParser → WorkspaceIndex → LSP/MCP Providers
-                                                ↑
-                                    WorkspaceScanner (parallel)
+```mermaid
+graph LR
+    %% Nodos principales
+    A[SmaliTextParser<br/>hand-written] --> B[SmaliParser]
+    B --> C[WorkspaceIndex]
+    C --> D[LSP/MCP Providers]
+    
+    %% Nodo paralelo
+    E[WorkspaceScanner<br/>parallel] -.->|Indexación| C
+
+    %% Estilos de los nodos (Colores estilo GitHub Dark)
+    classDef parser fill:#238636,stroke:#2ea043,color:#ffffff,stroke-width:2px;
+    classDef core fill:#1f6feb,stroke:#388bfd,color:#ffffff,stroke-width:2px;
+    classDef scanner fill:#d29922,stroke:#e3b341,color:#ffffff,stroke-width:2px;
+    classDef output fill:#da3633,stroke:#f85149,color:#ffffff,stroke-width:2px;
+
+    class A,B parser;
+    class C core;
+    class E scanner;
+    class D output;
 ```
 
 - **Parser**: hand-written lexer and statement parser, 0.04 ms per file, token spans in the AST
