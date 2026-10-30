@@ -1,14 +1,4 @@
-<div align="center">
-
-```text
-  ____                  _ _       _           
- / ___| _ __ ___   __ _| (_)     | |___ _ __  
- \___ \| '_ ` _ \ / _` | | |_____| / __| '_ \ 
-  ___) | | | | | | (_| | | |_____| \__ \ |_) |
- |____/|_| |_| |_|\__,_|_|_|     |_|___/ .__/ 
-                                       |_|
-```
-</div>
+#  𝖘𝖒𝖆𝖑𝖎-𝖑𝖘𝖕 
 
 > A Language Server Protocol (LSP) server with built-in MCP server for [Smali](https://github.com/google/smali) — the bytecode language of Android apps.
 
